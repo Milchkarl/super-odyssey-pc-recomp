@@ -64,7 +64,9 @@ cadence was exactly 60,120,60,120,60,120: one loading hold per scene, no in-play
 flutter. The shader-preload heuristic is deliberately separate from this cadence
 hold; a delayed control call must not switch play back to 60. A second strict
 Wooded reproduction with this refinement reached frame 3000 and exited zero.
-The fresh opening and live frame-rate switching still need checks.
+A fresh empty-save opening with 120 selected reached frame 6500 and exited zero;
+its capture shows Cappy after the Bowser encounter. The safeguard correctly held
+this scene at stock 60. Live frame-rate switching still needs a check.
 
 The published 0.2.9 Windows ZIP was downloaded for the renderer baseline and
 verified against its release digest:
@@ -127,7 +129,12 @@ at least 1680 evaluations each. Their histories settled and stayed continuous
 through the camera turn. The Quality capture was also viewed; reconstruction
 of moving objects and HUD quality are separate outstanding work.
 
-Other unsupported combinations (for example fixed input larger than output
-with an upscaling quality mode) still need eligibility/jitter consistency checks.
-This fix does not change their behavior or establish a general temporal-quality
-improvement for moving characters, which currently lack object motion vectors.
+Unsupported fixed-resolution upscaling combinations now use the same size
+eligibility rule for raster jitter and temporal evaluation. An old-build Quality
+test with 4K input / 1080p output had 15 nonzero jitter samples and zero resolves;
+the guarded run had 15 zero-jitter samples and zero resolves. Both exited zero.
+This is an ordinary-upscaler fallback, not FSR operating in a downscaling mode.
+A supported fixed 1080p input / 4K output Quality run reached frame 3000 with
+at least 1680 FSR evaluations. Jitter sequence length now uses the actual scale
+instead of the quality preset's nominal scale. A Native AA control also exited
+zero at frame 3000. Moving characters still lack object motion vectors.
