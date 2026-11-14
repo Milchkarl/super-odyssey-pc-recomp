@@ -88,8 +88,8 @@ This is a preview. Known problems and things not done yet:
   - Very low FPS on some AMD graphics cards on Linux (#28, #32), and slowdown on the ROG Ally (#13).
   - High memory use (#7).
   - Upscaler jitter and bloom quality (#24); Mario's shadow can look distorted (#26).
-  - With a Switch controller, the map pointer doesn't select icons (#22); *Skip controller tips* doesn't skip
-    them (#23).
+  - With a Switch controller, the map pointer doesn't select icons (#22). The game's own Joy-Con tips while
+    playing can't be turned off (#23): the setting only skips the controller screen at start.
 - **Version 1.4.1 at 90 or 120 FPS can crash while loading Wooded Kingdom.** Use 60 FPS there for now.
 - **Version 1.4.1** is newer in this port than 1.0.0 and less tested: native 90/120 FPS and the frame interpolation's
   pose smoothing are tuned on 1.0.0, so 1.4.1 can show more jitter or small glitches with them on.
@@ -135,7 +135,7 @@ the right explains the selected setting.
   overlay, compile shaders again at the next start
 - **Audio**: volume, reverb, movie audio, mute in background
 - **Controls**: language, motion controls, vibration, stick deadzone, mouse camera (sensitivity, invert), button
-  prompts (keyboard, Xbox, PlayStation, Switch), skip controller tips, key and button rebinding
+  prompts (keyboard, Xbox, PlayStation, Switch), skip the start-up controller screen, key and button rebinding
 - **Mods**: switch RomFS mods on and off
 - **Updates**: this version, check / install updates, the project page
 

@@ -1128,8 +1128,10 @@ static void tab_about(void) {
     hint("The game's button icons. Auto switches as you play: the keys you bound (and the mouse for the camera) after "
          "you use the keyboard or mouse, the controller's own buttons (Xbox, PlayStation or Switch) after you use a "
          "controller. Controller always shows the connected controller's; Switch, Xbox and PlayStation always those.");
-    toggle("Skip controller tips", &g_settings.skip_intro);
-    hint("Leaves out the Joy-Con instructions screen's wait before the title screen. Applies at the next start.");
+    toggle("Skip the start-up controller screen", &g_settings.skip_intro);
+    hint("Leaves out the wait on the Joy-Con instructions screen before the title screen. Applies at the next start. "
+         "The game's own tips while playing (\"You can also shake the controller\", the Joy-Con videos) stay, as on the "
+         "Switch.");
     ImGui::Spacing();
     header("Controls");
     controls_bindings_draw(ImGui::GetFontSize() / 34);
