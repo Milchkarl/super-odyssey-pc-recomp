@@ -220,6 +220,8 @@ Bug reports are read and worked on the same way: the maintainer tests, and Claud
   original repository is no longer online.
 - **[LAS Recomp](https://github.com/peiikai/LASRecomp)** by Peiikai and its contributors - the static recompiler,
   runtime and renderer Power Moon Recomp is built on, and the frame interpolation (MIT license).
+- **[PrimeRecomp](https://github.com/gminustwo/primerecomp)** by its contributors - the GPU ASTC texture decoder
+  (`runtime/nvn/vulkan/astc_gpu.c`) and its GPU scratch memory (MIT license).
 - **[MacNativeGames](https://github.com/ly05010419/MacNativeGames)** - the game package reading code `runtime/nxpkg.c`
   is ported from (MIT license, `tools/vendor/macnativegames`), and
   **[TotK PC Recomp](https://github.com/valentderah/totk-pc-recomp)**'s hactool build script (`tools/build_hactool.py`,
