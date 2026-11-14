@@ -470,8 +470,9 @@ static void style_init(void) {
     c[ImGuiCol_Tab] = c[ImGuiCol_TabSelected] = c[ImGuiCol_TabSelectedOverline] = none;
     c[ImGuiCol_TabDimmed] = c[ImGuiCol_TabDimmedSelected] = c[ImGuiCol_TabDimmedSelectedOverline] = none;
     c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.06f);
-    c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrabActive] = c[ImGuiCol_NavCursor] = c[ImGuiCol_ScrollbarGrabActive] = kAccentV;
-    c[ImGuiCol_SliderGrab] = ImVec4(kAccentV.x, kAccentV.y, kAccentV.z, 0.75f);
+    c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrabActive] = c[ImGuiCol_ScrollbarGrabActive] = kTextV;
+    c[ImGuiCol_NavCursor] = kAccentV;  // (the controller / keyboard cursor: a red outline)
+    c[ImGuiCol_SliderGrab] = ImVec4(1, 1, 1, 0.75f);
     c[ImGuiCol_Separator] = kLineV;
     c[ImGuiCol_TableRowBg] = none;
     c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.03f);
@@ -554,7 +555,7 @@ static void header(const char *t) {
     for (; t[i] && i < (int)sizeof up - 1; i++) up[i] = (char)toupper((unsigned char)t[i]);
     up[i] = 0;
     ImGui::Dummy(ImVec2(0, 4));
-    ImGui::TextColored(kAccentV, "%s", up);
+    ImGui::TextColored(kTextDimV, "%s", up);
     ImGui::Separator();
     ImGui::Spacing();
 }
@@ -867,12 +868,12 @@ static void tab_performance(void) {
                "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
                "Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on.");
     {
-        static const char *wn[] = {"Skip", "Wait"};
-        int wi = g_settings.shader_wait;
-        if (opt_choice("While a shader loads", &wi, wn, 2, 0,
-                       "What happens when something is drawn before its shader is ready. Skip: the game keeps running; "
-                       "the object appears a moment later (or the picture is held for a frame). Wait: nothing is ever "
-                       "missing, but the game pauses for the load (a short hitch).", false)) g_settings.shader_wait = wi != 0;
+        bool async = !g_settings.shader_wait;
+        if (opt_toggle("Asynchronous shader building", &async, true,
+                       "On: when something is drawn before its shader is ready, the game keeps running and the object "
+                       "appears a moment later (or the picture is held for a frame) - no stutter. Off: nothing is ever "
+                       "missing, but the game pauses while the shader builds (a short hitch)."))
+            g_settings.shader_wait = !async;  // (opt_toggle flipped it)
     }
     {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
@@ -1530,7 +1531,8 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     drain_events(io);
     // fonts are built at 34/56 px for a ~1080 px tall output; scale to the window. The menu and overlays at 68% of
     // that (a menu over about 40% of the game's picture); the installer page at full size.
-    float scale = (float)(th / 1080.0) * (setup ? 1.0f : 0.68f);
+    extern bool setup_config_shown(void);  // (the configuration page: the menu's tabs, a little larger than in play)
+    float scale = (float)(th / 1080.0) * (setup ? (setup_config_shown() ? 0.8f : 1.0f) : 0.68f);
     if (scale < 0.45f) scale = 0.45f;
     io.FontGlobalScale = scale;
 
@@ -1625,7 +1627,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             float lh = ImGui::GetFontSize(), sz = lh * 1.35f;
             ImVec2 lp = ImGui::GetCursorScreenPos();
             // (the icon's pipe, centred on the line)
-            theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.5f), sz, kAccent, theme_u32(kPanelV, 1));
+            theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.5f), sz, IM_COL32(59, 196, 90, 255), 0);  // (the icon's pipe green)
             ImGui::Dummy(ImVec2(sz, lh));
             ImGui::SameLine(0, lh * 0.4f);
             ImGui::TextUnformatted(RT_APP_NAME);
@@ -1639,10 +1641,10 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             bool close = ImGui::InvisibleButton("##close", ImVec2(bx, bx));
             ImGui::PopStyleColor();
             bool hot = ImGui::IsItemHovered() || ImGui::IsItemFocused();
-            ImU32 col = hot ? kAccent : theme_u32(kTextV, 0.85f);
+            ImU32 col = theme_u32(kTextV, hot ? 1.0f : 0.85f);
             float m = bx * 0.3f, t = (hot ? 3.0f : 2.4f) * scale * 1.5f;
             ImDrawList *dl = ImGui::GetWindowDrawList();
-            if (hot) dl->AddRectFilled(p, ImVec2(p.x + bx, p.y + bx), theme_u32(kSurfaceHoverV), 4 * scale);
+            if (hot) dl->AddRect(p, ImVec2(p.x + bx, p.y + bx), kAccent, 4 * scale, 0, 2 * scale);  // (red outline)
             dl->AddLine(ImVec2(p.x + m, p.y + m), ImVec2(p.x + bx - m, p.y + bx - m), col, t);
             dl->AddLine(ImVec2(p.x + bx - m, p.y + m), ImVec2(p.x + m, p.y + bx - m), col, t);
             if (close) set_open(false);

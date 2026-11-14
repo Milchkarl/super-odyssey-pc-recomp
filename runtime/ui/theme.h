@@ -1,20 +1,20 @@
 // Super Odyssey PC Recomp's look (runtime/ui): one palette for the installer, the menu, its option rows, the Controls
-// page, the on-screen keyboard - and the icon (tools/make_icon.py): deep sky-blue panels, white text, pipe-green
-// accents (buttons, the selection), gold for values that aren't the default.
+// page, the on-screen keyboard: see-through black panels, white text, and red only as an outline - the selection, the
+// focused button, the shown tab's line. (The icon keeps its pipe green: tools/make_icon.py.)
 #pragma once
 #include "imgui.h"
 
 #define THEME_RGB(r, g, b, a) ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a))
 // the palette
-static const ImVec4 kPanelV = THEME_RGB(30, 58, 110, 0.97f);        // the menu window, the installer's card
-static const ImVec4 kSurfaceV = THEME_RGB(42, 77, 140, 1);          // fields, buttons, rows
-static const ImVec4 kSurfaceHoverV = THEME_RGB(56, 96, 165, 1);     // ... under the mouse / the cursor
-static const ImVec4 kAccentV = THEME_RGB(59, 196, 90, 1);           // the pipe green (the icon's pipe)
-static const ImVec4 kAccentDeepV = THEME_RGB(28, 112, 52, 1);       // ... pressed / active fields
-static const ImVec4 kAccentSoftV = THEME_RGB(245, 197, 66, 1);      // gold, as text: a value that isn't the default
+static const ImVec4 kPanelV = THEME_RGB(0, 0, 0, 0.78f);            // the menu window, the installer's card
+static const ImVec4 kSurfaceV = THEME_RGB(255, 255, 255, 0.05f);    // fields, buttons, rows
+static const ImVec4 kSurfaceHoverV = THEME_RGB(255, 255, 255, 0.09f);  // ... under the mouse / the cursor
+static const ImVec4 kAccentV = THEME_RGB(230, 40, 40, 1);           // red: outlines only (the selection, the shown tab)
+static const ImVec4 kAccentDeepV = THEME_RGB(255, 255, 255, 0.16f); // pressed / active fields
+static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white too)
 static const ImVec4 kTextV = THEME_RGB(255, 255, 255, 1);
-static const ImVec4 kTextDimV = THEME_RGB(190, 206, 234, 1);        // secondary text, tabs not shown
-static const ImVec4 kTextOffV = THEME_RGB(120, 142, 182, 1);        // greyed out
+static const ImVec4 kTextDimV = THEME_RGB(200, 200, 200, 1);        // secondary text, tabs not shown
+static const ImVec4 kTextOffV = THEME_RGB(115, 115, 115, 1);        // greyed out
 static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.14f);       // separators
 static const ImVec4 kWarnV = THEME_RGB(224, 154, 43, 1);            // a conflict (one key bound twice)
 
