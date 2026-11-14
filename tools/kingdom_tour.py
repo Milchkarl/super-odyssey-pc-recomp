@@ -106,6 +106,8 @@ def main():
     ap.add_argument('--cpu-affinity', type=lambda s: int(s, 0),
                     help='Windows processor mask, e.g. 0xffff0000 for logical processors 16-31')
     ap.add_argument('--window', default='1280x720', help='capture dimensions, e.g. 2560x1080 or 3840x1080')
+    ap.add_argument('--aspect', choices=('16:9', 'fill'), default='16:9',
+                    help='letterbox the original aspect or exercise the game\'s wider camera/HUD path')
     ap.add_argument('--strict-extra-draws', action='store_true',
                     help='diagnostic cadence: force alternating gameplay/extra draws; not a performance test')
     ap.add_argument('--visible', action='store_true')
@@ -130,7 +132,8 @@ def main():
                         f'resolution = match\nvolume = 0\nframe_rate = {args.frame_rate}\nframe_interp = 0\n'
                         'temporal_backend = dlss\ndlss_mode = off\nantialias = off\n'
                         'upscaler = bilinear\naniso = 16\nmotion = 0\nvibration = 0\nmouse_camera = 0\n'
-                        'skip_intro = 1\ncheck_updates = 0\n', encoding='ascii')
+                        'skip_intro = 1\ncheck_updates = 0\n' +
+                        ('aspect = fill\n' if args.aspect == 'fill' else ''), encoding='ascii')
     report = {'exe_sha256': sha256(exe), 'game_main_sha256': sha256(data / 'extracted/exefs/main'),
               'settings': settings.read_text(), 'frames': args.frames,
               'warp_frame': args.warp_frame, 'settle_frames': args.settle, 'results': []}

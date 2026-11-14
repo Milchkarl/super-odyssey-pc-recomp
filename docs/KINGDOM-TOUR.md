@@ -41,8 +41,9 @@ overwriting the data folder's `build/window.png`.
 frame budgets if you want the same amount of settled gameplay time as at 60.
 `--frame-rate 90` is also available. On Windows, `--cpu-affinity 0xffff0000`
 confines the test to logical processors 16-31 (use a mask valid for that PC).
-`--window 2560x1080` or `3840x1080` changes the capture size; this does not by
-itself enable Fill window or establish correct ultrawide HUD/cutscene layout.
+`--window 2560x1080` or `3840x1080` changes the capture size; combine it with
+`--aspect fill` to exercise the wider camera/HUD path. Captures still require
+visual review and do not by themselves establish correct cutscene layout.
 `--strict-extra-draws` forces the diagnostic extra-draw cadence to expose
 scene-loading failures. It is not a frame-pacing or gameplay-speed benchmark.
 Window dimensions and strict cadence must also match the comparison baseline.
