@@ -12,6 +12,8 @@
 // face button that plays each Switch button (by the Controls tab's bindings: Switch A is the east button, Xbox B,
 // PlayStation circle), LB / RB / LT / RT or L1 / R1 / L2 / R2, Menu / View or Options / Create. The sticks, the d-pad
 // and the diamond pictures (a button by its place) are the same on every controller and stay.
+#include <pthread.h>
+#include <stdatomic.h>
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdatomic.h>
@@ -618,10 +620,23 @@ static void bc4_encode(const uint8_t v[16], uint8_t *b) {
 
 // ---------------------------------------------------------------- the patched sheet
 static uint8_t *g_orig;     // the sheet's texels as the game has them (stored orientation: bottom row first)
-static uint8_t *g_patched;  // BC4 blocks with the keyboard icons
-static uint32_t g_patched_gen;
+// Built sheets by generation (BC4 blocks): a switch between keyboard and controller, back and forth, takes a built one.
+// Drawing one is ~300 ms of CPU (every icon 4x4-supersampled, then encoded): it was done on the render thread at the
+// switch, a 342 ms frame. Now the likely ones (keyboard, the controller's style, the game's own) are built ahead on a
+// thread of their own once the game's sheet is known, and again after a rebind.
+#define SHEET_CACHE 8
+static struct { uint32_t gen; uint8_t *blocks; } g_sheets[SHEET_CACHE];
+static unsigned g_sheet_next;
+static pthread_mutex_t g_sheet_lock = PTHREAD_MUTEX_INITIALIZER;  // (the cache; building runs outside it)
+static pthread_mutex_t g_build_lock = PTHREAD_MUTEX_INITIALIZER;  // (one build at a time: the font rasterizer's state)
+static uint32_t g_wb, g_hb;
 
-static void build(uint32_t gen, uint32_t wb, uint32_t hb) {
+static uint8_t *sheet_find(uint32_t gen) {  // (g_sheet_lock held)
+    for (int i = 0; i < SHEET_CACHE; i++) if (g_sheets[i].blocks && g_sheets[i].gen == gen) return g_sheets[i].blocks;
+    return NULL;
+}
+
+static void build(uint32_t gen, uint32_t wb, uint32_t hb, uint8_t *out) {
     int style = (int)(gen & 3);
     uint32_t W = wb * 4, H = hb * 4;
     uint8_t *img = malloc((size_t)W * H);
@@ -680,17 +695,53 @@ static void build(uint32_t gen, uint32_t wb, uint32_t hb) {
         }
     }
     free(mine);
-    if (!g_patched) g_patched = malloc((size_t)wb * hb * 8);
     for (uint32_t by = 0; by < hb; by++)
         for (uint32_t bx = 0; bx < wb; bx++) {
             uint8_t v[16];
             for (int i = 0; i < 16; i++) v[i] = img[(by * 4 + i / 4) * W + bx * 4 + i % 4];
-            bc4_encode(v, g_patched + ((size_t)by * wb + bx) * 8);
+            bc4_encode(v, out + ((size_t)by * wb + bx) * 8);
         }
     free(img);
-    g_patched_gen = gen;
     LOG("[prompts] %s icons drawn (%d)\n", style == STYLE_KEYBOARD ? "keyboard" : style == STYLE_XBOX ? "Xbox" :
         style == STYLE_PLAYSTATION ? "PlayStation" : "Nintendo / per-player", drawn);
+}
+
+// Builds gen's sheet (unless built meanwhile), keeps it, and copies it to out when given
+static void sheet_build_store(uint32_t gen, uint8_t *out) {
+    size_t size = (size_t)g_wb * g_hb * 8;
+    pthread_mutex_lock(&g_build_lock);
+    pthread_mutex_lock(&g_sheet_lock);
+    uint8_t *have = sheet_find(gen);
+    if (have && out) memcpy(out, have, size);
+    pthread_mutex_unlock(&g_sheet_lock);
+    if (!have) {
+        uint8_t *b = malloc(size);
+        if (b) {
+            build(gen, g_wb, g_hb, b);
+            if (out) memcpy(out, b, size);
+            pthread_mutex_lock(&g_sheet_lock);
+            unsigned slot = g_sheet_next++ % SHEET_CACHE;
+            free(g_sheets[slot].blocks);
+            g_sheets[slot].gen = gen, g_sheets[slot].blocks = b;
+            pthread_mutex_unlock(&g_sheet_lock);
+        }
+    }
+    pthread_mutex_unlock(&g_build_lock);
+}
+
+static _Atomic uint32_t g_prebuilt_base = 0;  // (the bindings' and second player's part of the generation, built ahead)
+static void *prebuild_thread(void *arg) {
+    uint32_t base = (uint32_t)(uintptr_t)arg;
+    int pad = pad_style();
+    const int styles[3] = {STYLE_KEYBOARD, pad == STYLE_GAME ? STYLE_XBOX : pad, STYLE_GAME};
+    for (int i = 0; i < 3; i++) sheet_build_store(base | (uint32_t)styles[i], NULL);
+    return NULL;
+}
+static void prebuild_kick(uint32_t gen) {
+    uint32_t base = gen & ~3u;
+    if (atomic_exchange(&g_prebuilt_base, base) == base) return;
+    pthread_t t;
+    if (pthread_create(&t, NULL, prebuild_thread, (void *)(uintptr_t)base) == 0) pthread_detach(t);
 }
 
 void kbprompts_apply(uint32_t lv, uint8_t *blocks, uint32_t wb, uint32_t hb) {
@@ -705,6 +756,12 @@ void kbprompts_apply(uint32_t lv, uint8_t *blocks, uint32_t wb, uint32_t hb) {
             }
     }
     uint32_t gen = kbprompts_generation();
-    if (!g_patched || g_patched_gen != gen) build(gen, wb, hb);
-    memcpy(blocks, g_patched, (size_t)wb * hb * 8);
+    g_wb = wb, g_hb = hb;
+    if (!kbprompts_active()) { prebuild_kick(gen); return; }  // (the game's own icons for now; the others built ahead)
+    pthread_mutex_lock(&g_sheet_lock);
+    uint8_t *have = sheet_find(gen);
+    if (have) memcpy(blocks, have, (size_t)wb * hb * 8);
+    pthread_mutex_unlock(&g_sheet_lock);
+    if (!have) sheet_build_store(gen, blocks);  // (not built ahead: here, as before)
+    prebuild_kick(gen);
 }
