@@ -46,9 +46,11 @@ These checks include the event-loop starvation fix described in the main test
 record. A final guard also keeps Mario reserved during Cappy's disconnected
 interval; the SDL fixture verifies that reservation until explicit cancellation.
 
-Physical-controller testing is pending with Simon's PC. Virtual-device results
-do not establish physical rumble strength,
-platform-specific reconnect identity or a real two-person play session.
+The initial virtual-device results do not establish physical rumble strength
+or platform-specific reconnect identity.
+Simon subsequently tested a DualSense for Mario and a Switch Pro for Cappy:
+movement mostly worked, but Cappy's right-stick camera and mixed-family guide
+icons needed the follow-up below.
 The final controller selector was captured at 1280x720 and checked for readable
 labels and alignment with the surrounding settings rows; that run exited zero.
 
@@ -62,3 +64,44 @@ controllers inside the process, assigns the second, exercises it at frames
 4000-4300, disconnects/reconnects at 5500/5700 and exercises it again at 5800-6000.
 `ODYSSEY_CAPPY_TRACE=1` logs player-two HID transitions. Neither switch is needed
 for normal play. No virtual devices are registered outside the game process.
+
+## Mixed-controller guide and shared camera
+
+The co-op camera's original arbitration treated Mario's stick as active above
+0.001, then discarded the chosen camera vector below 0.03. Drift between those
+thresholds blocked Cappy without moving the camera. A single call-site patch
+uses the existing 0.03 threshold when a Cappy controller is assigned. The game's
+remaining arbitration still gives intentional Mario input priority and keeps
+its capture restrictions. Neither movement nor global vector math is changed.
+The equivalent call site was checked in both 1.0.0 and 1.4.1.
+
+Mario and Cappy now have separate icon cells within the existing controller-font
+sheet. Only Cappy's two tutorial panes select the additional cells; recognized
+FullKey icon tags resolve directly to those cells, while other formatting tags
+and Mario's guide retain normal processing. The device family is read separately
+for each assignment. No HUD layout or game assets are changed. The font reader
+also follows the selected asset root instead of assuming the current directory.
+
+`tools/test_original_wrapper.py` verifies that selective generated wrappers
+intercept direct and indirect calls and retain a callable original body.
+`tools/test_coop_prompts.c` checks mixed-family atlas cells, switching families,
+regular-font fallback, Cappy-only pane scope, embedded-zero formatting tags and
+controller-icon tags containing multiple layout alternatives. These and the
+secondary input fixture passed on Windows. Current follow-up changes have not
+yet been retested with physical controllers or on Linux.
+
+The camera's 1.0.0 positive/negative control runs (4900 frames, exit zero) logged
+50 horizontal and 25 vertical Cappy camera samples with the fix, versus zero
+with it disabled. Both retained deliberate Mario input (50/51 samples). A
+1.4.1 run with 120 selected also exercised both Cappy axes and Mario priority,
+and exited zero. Camera captures were viewed. The final 1.4.1 mixed-guide
+capture at frame 3500 shows PlayStation Cross for Mario's jump and Nintendo Y
+for Cappy's flight, with both stick icons intact; that run exited zero.
+The final 1.0.0 run also reached frame 3500, exited zero and produced the same
+correct mixed-family guide in the viewed capture.
+
+For the camera regression, `ODYSSEY_CAPPY_CAMERA_TEST=1` adds 0.01526 drift to
+Mario's right stick, then exercises Cappy's horizontal and vertical camera input
+and simultaneous deliberate input from Mario. `ODYSSEY_COOP_CAMERA_FIX_OFF=1`
+retains the stock comparison for a negative control. Both are private test
+switches, used with `ODYSSEY_CAPPY_TEST=1`, and are unnecessary for normal play.

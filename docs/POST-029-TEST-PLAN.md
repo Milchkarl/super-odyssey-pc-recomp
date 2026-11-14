@@ -170,3 +170,19 @@ inputs, disconnected/reattached the secondary device, consumed fresh secondary
 input after reconnect, captured frame 6100 and exited zero. Both captures were
 viewed. Physical input and rumble remain pending: Simon confirmed he can test
 on PC. See TWO-PLAYER-CAPPY.md for scope and the regression procedure.
+
+Simon tested DualSense/Mario and Switch Pro/Cappy. Movement mostly worked;
+he reported that Cappy's right stick could not move the camera and both guides
+used Mario's controller family. The follow-up aligns the co-op arbitration's
+drift threshold with its downstream camera cutoff and supplies separate font
+cells for Cappy's guide. Both game versions' call sites were checked.
+
+The 1.0.0 camera positive/negative control demonstrated Cappy's horizontal and
+vertical input only with the fix; intentional Mario input retained priority in
+both runs. A 1.4.1 run with 120 selected exercised the same camera branches.
+Final mixed-guide runs at 60 FPS on 1.0.0 and 1.4.1 exited zero at frame 3500;
+viewed captures show PlayStation Cross for Mario and Nintendo Y for Cappy.
+Focused Windows input, mixed-atlas/tag/font-fallback, and generated-wrapper
+tests passed. The follow-up still needs Simon's physical-controller retest;
+Linux was not rerun for these changes. No installation, production save,
+remote branch or release was changed.
