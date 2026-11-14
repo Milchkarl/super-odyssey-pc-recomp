@@ -138,3 +138,19 @@ A supported fixed 1080p input / 4K output Quality run reached frame 3000 with
 at least 1680 FSR evaluations. Jitter sequence length now uses the actual scale
 instead of the quality preset's nominal scale. A Native AA control also exited
 zero at frame 3000. Moving characters still lack object motion vectors.
+
+## Controller/UI event starvation
+
+The 1.0.0 two-player fixture exposed starvation in the host event loop: waiting
+up to 16 ms after every event never reaches periodic work while a controller
+delivers sensor samples more frequently. Window requests and controller setup
+can remain pending. The loop now waits once and drains at most 128 queued events
+before returning to maintenance, on Vulkan and Metal.
+
+The real SDL event-flood regression test passed on Windows and Linux. In the
+Windows check, the old loop allowed one maintenance opportunity with a 196.2 ms
+gap; the new loop allowed 82 with a longest 16.2 ms gap. Linux measured 194.6 ms
+versus 16.1 ms. The test also verifies the 128-event bound with a queued flood.
+After this fix, the formerly starved 1.0.0 gameplay fixture initializes both
+virtual pads and enters the actual Two Players menu. Mac compilation/hardware
+testing remains unavailable; only its identical loop replacement is reviewed.
