@@ -32,7 +32,18 @@ Do the install once in **Desktop Mode** (the file pickers need it), then play fr
 2. Start it. At **Install the game to**, choose a folder on the SD card: the game data, the compiled shaders and your
    saves go there, nothing big stays on the internal drive. The choice is remembered in
    `~/.config/super-odyssey-pc-recomp/data-folder.txt`.
-3. Add the AppImage to Steam (Steam > *Add a Non-Steam Game*), then play it from Gaming Mode.
+3. Close Steam, then press **Add to Steam** on the installer's completion screen
+   (also available in **F1 > Updates**). Start Steam again and play from Gaming
+   Mode. The shortcut remembers both the AppImage and the selected data folder.
+   With several Steam accounts, it uses the one marked most recently signed in.
+   If that account is ambiguous, sign into the intended account, quit Steam and retry.
+
+The action is optional. Other shortcuts, their tags, icons and controller
+settings are preserved. Adding the same install again updates its existing
+entry rather than making duplicates. **Undo Steam shortcut change** restores
+the previous file only while it still matches the change this app made; later
+Steam edits are never overwritten. No shortcut is created during updates or
+without pressing the button.
 
 On a Steam Deck the game starts with the **battery saver** settings: 75% internal resolution (960 x 600) upscaled with
 AMD FSR 1, no SMAA, 60 FPS without interpolation, 4x texture filtering. The menu's Performance tab has a *Battery

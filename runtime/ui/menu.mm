@@ -15,6 +15,7 @@
 #include "imgui.h"
 #include "option_rows.h"
 #include "performance.h"
+#include "steam_shortcut.h"
 #include "imgui_internal.h"  // (NavCursorVisible)
 #include "osk.h"
 #include "theme.h"
@@ -1003,6 +1004,7 @@ static void tab_updates(float scale) {
                        "and nothing about you or your game is sent)."))
             settings_save();
     }
+    steam_shortcut_draw(scale);
     opt_end();
 }
 

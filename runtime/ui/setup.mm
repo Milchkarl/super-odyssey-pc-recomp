@@ -36,6 +36,7 @@
 #endif
 #include "menu.h"
 #include "setup.h"
+#include "steam_shortcut.h"
 
 extern "C" {
 #include "../gamebuild.h"
@@ -614,6 +615,7 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         ImGui::Dummy(ImVec2(0, 24 * scale));
         if (accent_button("Play", scale)) g_want_play = true;
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+        steam_shortcut_draw(scale);
     } else {
         if (st == ST_FAILED) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.6f, 0.55f, 1));
