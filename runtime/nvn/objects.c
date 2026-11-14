@@ -167,7 +167,15 @@ NVN(nvnSyncWait) {  // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
     if (getenv("ODYSSEY_LOG_SYNC") && n++ % 60 == 0) LOG("[nvn] SyncWait #%llu (lr %llx)\n", (unsigned long long)n, c->x[30]);
     static int whole = -1;  // ODYSSEY_SYNC_ALL=1: old behaviour, wait for all submitted work
     if (whole < 0) whole = getenv("ODYSSEY_SYNC_ALL") ? 1 : 0;
-    rq_drain();  // (the render thread first: the fence's lists, or a command list's fence, may still be queued)
+    // The render thread first: the fence's lists may still be queued. Only up to the fence itself (its ticket): the
+    // game waits on the frame before's fence while it has queued the next frame's lists already, and waiting for all of
+    // those too (rq_drain) made the game thread and the render thread take turns instead of overlapping - on a Steam
+    // Deck ~7 ms of every frame in busy views. ODYSSEY_SYNC_DRAIN=1: everything queued, as before.
+    static int drain = -1;
+    if (drain < 0) drain = getenv("ODYSSEY_SYNC_DRAIN") ? atoi(getenv("ODYSSEY_SYNC_DRAIN")) != 0 : 0;
+    NvnSync *fs = sync_of(A(0));
+    if (!drain && !flush && !whole && rq_enabled() && fs->ticket) rq_wait(fs->ticket);
+    else rq_drain();
     if (flush) renderer_flush();
     else if (whole) renderer_sync();
     else renderer_wait_seq(sync_of(A(0))->seq);  // only the submission that holds this fence
