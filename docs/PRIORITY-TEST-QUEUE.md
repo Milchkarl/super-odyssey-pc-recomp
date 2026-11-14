@@ -1,5 +1,9 @@
 # Priority queue after upscaler testing
 
+Historical checkpoint: this document predates the 0.2.9 release. See
+[the post-0.2.9 plan](POST-029-TEST-PLAN.md) for current work and validation.
+In particular, clean packaging/CI and the 1.4.1 poison port have since shipped.
+
 Simon confirmed the current preview works and requested this list ahead of the
 remaining frame-generation and HUD-resolution work. Implement and test changes
 separately, with private settings/saves and local commits. Do not publish a
