@@ -1399,8 +1399,9 @@ static const char *perf_num(char *buf, size_t n, int v, const char *unit) {
 }
 
 static void draw_performance(void) {
-    const ImVec4 green(0.56f, 0.86f, 0.36f, 1), blue(0.36f, 0.66f, 0.92f, 1), pink(0.82f, 0.52f, 0.72f, 1), white(1, 1, 1, 1);
-    const ImVec4 dim(0.78f, 0.80f, 0.82f, 1);
+    // (the menu's look, theme.h: the labels dim white, the values white)
+    const ImVec4 green = kTextDimV, blue = kTextDimV, pink = kTextDimV, white = kTextDimV;
+    const ImVec4 dim = kTextDimV;
     char a[48], b[48], c[48];
     float em = ImGui::GetFontSize();
     // frame times of the last 180 presents
@@ -1454,7 +1455,8 @@ static void draw_performance(void) {
         ImGui::Dummy(ImVec2(0, em * 0.25f));
         ImVec2 p = ImGui::GetCursorScreenPos(), size(em * PERF_COLS, em * 2.2f);
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), IM_COL32(40, 44, 36, 190), em * 0.3f);
+        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), theme_u32(kSurfaceV), em * 0.3f);
+        dl->AddRect(p, ImVec2(p.x + size.x, p.y + size.y), theme_u32(kLineV), em * 0.3f);
         float top = filled ? sum / filled * 2.0f : 33.4f;
         if (top < worst * 1.1f) top = worst * 1.1f;
         if (top < 1) top = 1;
@@ -1579,16 +1581,19 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8 * scale, 3 * scale));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16 * scale, 12 * scale));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12 * scale);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.07f, 0.08f, 1));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1 * scale);
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 1));  // (black, as the menu: see-through by the opacity)
+            ImGui::PushStyleColor(ImGuiCol_Border, kLineV);
         }
         ImGui::Begin("##fps", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::PushFont(g_menu_font);  // (the menu's font: Roboto Medium)
         ImGui::SetWindowFontScale(advanced ? sizes[g_settings.overlay_size >= 0 && g_settings.overlay_size <= 2 ? g_settings.overlay_size : 1] : 1.0f);
         if (advanced) draw_performance();
         else ImGui::Text("%.0f fps", io.Framerate);
+        ImGui::PopFont();
         ImGui::End();
-        if (advanced) { ImGui::PopStyleColor(); ImGui::PopStyleVar(4); }
+        if (advanced) { ImGui::PopStyleColor(2); ImGui::PopStyleVar(4); }
     }
 
     if (!setup) {  // a new release found at start: a note in the corner for a few seconds (the menu's Updates page has it)
@@ -1602,10 +1607,12 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImGui::SetNextWindowBgAlpha(0.85f);
             ImGui::Begin("##update_note", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-            ImGui::PushStyleColor(ImGuiCol_Text, kAccentSoftV);
+            ImGui::PushFont(g_menu_font);
             ImGui::Text("Update %s available", us.latest);
-            ImGui::PopStyleColor();
+            ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
             ImGui::TextUnformatted("F1 > Updates to install it");
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             ImGui::End();
         }
     }
