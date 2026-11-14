@@ -38,7 +38,8 @@ void odyssey_coop_near_zero(Cpu *c) {
     // vectors below 0.03 afterwards. Drift in that gap prevented trying Cappy.
     // Change only that call: capture restrictions and Mario's priority remain
     // in the original game code. Movement and unrelated near-zero tests stay.
-    if (input_cappy_assigned() && !getenv("ODYSSEY_COOP_CAMERA_FIX_OFF")) {
+    if ((input_cappy_assigned() && !getenv("ODYSSEY_COOP_CAMERA_FIX_OFF")) || !near_zero_original) {
+        // (also when the game's own helper wasn't found at boot: the same test, rather than calling nothing)
         const float *v = (const float *)(uintptr_t)c->x[0];
         float length2 = v[0] * v[0] + v[1] * v[1];
         c->x[0] = isfinite(length2) && length2 < 0.03f * 0.03f;
