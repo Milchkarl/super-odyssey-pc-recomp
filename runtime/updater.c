@@ -54,22 +54,22 @@ static bool same_ascii(const char *a, const char *b) {
 }
 
 // "v1.2.3" / "1.2" -> comparable parts; true when a is newer than b
-__attribute__((noinline)) static void parse_version(const char *s, int v[3]) {
+__attribute__((noinline)) static void parse_version(const char *s, int v[4]) {
     // (by hand, indexed: sscanf and an inlined pointer walk both faulted here - clang -O2 folded the walk over the
     // constant into reads at address 0x10 - it was winuser.h's RT_VERSION, resource type 16: the macro is APP_VERSION now)
-    v[0] = v[1] = v[2] = 0;
+    v[0] = v[1] = v[2] = v[3] = 0;  // (four parts: 0.2.9.1 is newer than 0.2.9)
     size_t i = 0, n = strlen(s);
     while (i < n && (s[i] < '0' || s[i] > '9')) i++;
-    for (int part = 0; part < 3 && i < n; part++) {
+    for (int part = 0; part < 4 && i < n; part++) {
         while (i < n && s[i] >= '0' && s[i] <= '9') v[part] = v[part] * 10 + (s[i++] - '0');
         if (i >= n || s[i] != '.') break;
         i++;
     }
 }
 static bool newer(const char *a, const char *b) {
-    int x[3], y[3];
+    int x[4], y[4];
     parse_version(a, x), parse_version(b, y);
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 4; i++)
         if (x[i] != y[i]) return x[i] > y[i];
     return false;
 }
