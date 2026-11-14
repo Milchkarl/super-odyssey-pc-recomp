@@ -33,13 +33,13 @@ void input_native_tick_end(void);
 
 bool odyssey_native_120_enabled(void) {
     if (!hooks_ok || g_settings.frame_rate == FPS_60) return false;
-    extern bool odyssey_scene_warming(void);
+    extern bool odyssey_scene_cadence_warming(void);
     // 1.4.1's asynchronous scene setup expects one framework draw per gameplay
     // tick. Extra loading draws can leave the first stage draw without a valid
     // temporary texture block (TextureDataEx::reset). Keep setup at the stock
     // cadence, then restore the requested rate after the scene's warm-up. This
     // also covers stage changes which reuse the same StageScene address.
-    if (safe_scene_load && loader_main_is_v141() && odyssey_scene_warming()) return false;
+    if (safe_scene_load && loader_main_is_v141() && odyssey_scene_cadence_warming()) return false;
     return true;
 }
 int odyssey_native_hz(void) {
