@@ -154,3 +154,19 @@ versus 16.1 ms. The test also verifies the 128-event bound with a queued flood.
 After this fix, the formerly starved 1.0.0 gameplay fixture initializes both
 virtual pads and enters the actual Two Players menu. Mac compilation/hardware
 testing remains unavailable; only its identical loop replacement is reviewed.
+
+## Two-player Cappy preview
+
+A session-local controller selector is implemented in Controls, in the bindings
+section. Separate FullKey player-two input, deadzone/remapping, native short-press
+latching, menu blocking, controller-change events and rumble routing are present.
+The primary controller remains reserved while Cappy disconnects/reconnects.
+Secondary motion reports a stationary sample; it is not implemented.
+
+The actual input module passed process-local SDL virtual-controller checks on
+Windows and Linux. Private gameplay runs on 1.0.0 (60 FPS) and 1.4.1 (120 selected)
+both entered the real Two Players menu, exercised simultaneous independent
+inputs, disconnected/reattached the secondary device, consumed fresh secondary
+input after reconnect, captured frame 6100 and exited zero. Both captures were
+viewed. Physical input and rumble remain pending: Simon confirmed he can test
+on PC. See TWO-PLAYER-CAPPY.md for scope and the regression procedure.
