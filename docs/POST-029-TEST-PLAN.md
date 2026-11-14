@@ -58,7 +58,13 @@ behavior checks, not CPU performance measurements (private compilation also
 ran on the test processors). A matching current 1.0.0 library was rebuilt from
 the owner's files without bypassing the library ID; its 120 FPS Cap test reached
 frame 3300 and exited zero. Artifacts have descriptive run names in
-`build/029-tests/`. Opening, repeated-transition and full-tour checks continue.
+`build/029-tests/`. The final repeated-transition run reached 10000 frames,
+Cap -> Wooded -> Cap, including reuse of the StageScene address. Effective
+cadence was exactly 60,120,60,120,60,120: one loading hold per scene, no in-play
+flutter. The shader-preload heuristic is deliberately separate from this cadence
+hold; a delayed control call must not switch play back to 60. A second strict
+Wooded reproduction with this refinement reached frame 3000 and exited zero.
+The fresh opening and live frame-rate switching still need checks.
 
 The published 0.2.9 Windows ZIP was downloaded for the renderer baseline and
 verified against its release digest:
@@ -73,3 +79,55 @@ The four comparator/cleanup checks passed in 0.432 s with process permissions.
 
 Only observed or tester-confirmed checks may be marked passed. Unavailable
 hardware, missing reproductions and pending tests remain explicit open items.
+
+## Additional validation
+
+- Both published 0.2.9 and candidate tours captured all 17 actual destinations,
+  each from a fresh save copy, and exited zero. Nine comparisons met thresholds;
+  eight required review. All comparison sheets were viewed: differences were
+  concentrated in animated fog, water, effects and characters, without obvious
+  missing geometry or HUD. This does not cover every interaction or effect.
+- Independent stick/mouse X/Y settings passed four parser/persistence tests and
+  three bounded real-game input runs, including legacy mouse settings. A menu
+  capture was checked for readability. Separate gyro axes remain unimplemented.
+- Cap gameplay at 2560x1080 and gameplay/settings at 3840x1080 exited zero; the
+  captures show correct proportions, a centered HUD safe area and readable menu.
+  Maps, cutscene bars and restoring 16:9 remain open.
+- Simon manually confirmed the private Deck AppImage's Add to Steam, launch from
+  the new Steam entry, controls, audio and mid-game sleep/resume all passed.
+  That preview uses default 60 FPS and predates the final cadence refinement.
+  This does not establish handheld performance, a custom Steam Input layout,
+  gyro-axis settings, reconnect behavior or an FSR ML provider on the Deck.
+  The shortcut helper's eight fixture tests also pass on Windows and native
+  Deck Python, including quoted paths, preserving existing entries, duplicate
+  detection, backup/undo checks and multi-account selection.
+- A private Linux gameplay run exited zero and its capture was viewed. Busy Cap
+  performance was about 34 FPS; a separate menu scene was about 20 FPS. These
+  are observations, not an optimization or a matched release comparison.
+
+## FSR Native AA reproduction
+
+Issue #24's clip uses FSR 3.1 Native AA, fixed 4K internal resolution, and a
+1080p output. A matching private run exited zero but logged viewport jitter
+without a single FSR evaluation: the temporal eligibility check rejected the
+unequal sizes. Native AA must resolve at the internal size, then let present
+scale the result to the window. The same correction applies to DLAA and XeSS
+Native AA. Their post-sharpening passes use the resolved image's dimensions;
+the ordinary fallback retains the display dimensions.
+
+The first corrected FSR run reached frame 3900 and logged at least 2640 resolved
+frames at 3840x2160. DLAA and XeSS runs both reached frame 3300 with at least
+1920 resolved frames each, at the same internal size. All three exited zero;
+history traces show no depth-image churn or frame gaps, and no repeated history
+resets after settling. All three final captures were viewed. The camera turn
+was exercised, but still captures alone cannot prove that all distant-bloom
+flicker is resolved. Final-build FSR Native AA (3840x2160 resolve) and Quality
+(1280x720 -> 1920x1080) controls both reached frame 3000, exited zero and logged
+at least 1680 evaluations each. Their histories settled and stayed continuous
+through the camera turn. The Quality capture was also viewed; reconstruction
+of moving objects and HUD quality are separate outstanding work.
+
+Other unsupported combinations (for example fixed input larger than output
+with an upscaling quality mode) still need eligibility/jitter consistency checks.
+This fix does not change their behavior or establish a general temporal-quality
+improvement for moving characters, which currently lack object motion vectors.
