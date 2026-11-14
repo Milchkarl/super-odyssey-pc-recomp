@@ -7094,8 +7094,16 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
     if (ow > 16384) ow = 16384;
     if (oh > 16384) oh = 16384;
 #ifdef _WIN32
-    VkImageView dlss = vk_dlss_upscale(cb, b, v, ow, oh, renderer_present_count());
+    // Native AA resolves at the chosen internal resolution. Present can then
+    // sample that image at the window size, just as it does without temporal AA.
+    // Passing the window extent here rejected fixed-resolution Native AA while
+    // leaving its viewport jitter active (e.g. 4K internal on a 1080p display).
+    bool native_aa = vk_temporal_enabled() && *settings_temporal_mode() == DLSS_DLAA;
+    uint32_t temporal_w = native_aa ? b->width : ow, temporal_h = native_aa ? b->height : oh;
+    VkImageView dlss = vk_dlss_upscale(cb, b, v, temporal_w, temporal_h, renderer_present_count());
     if (dlss) {
+        ow = temporal_w;
+        oh = temporal_h;
         bool fsr3 = g_settings.temporal_backend == TEMPORAL_FSR3 || g_settings.temporal_backend == TEMPORAL_FSR4;
         int cas_strength = *settings_temporal_cas_sharpness();
         bool cas = *settings_temporal_cas() && cas_strength > 0;
