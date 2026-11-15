@@ -101,3 +101,14 @@ Closed (fixed in 0.2.11, commented): #13, #27, #39, #44, #46; #50 (thanks, not a
 | Frame generation | **Done, Windows** (1a6da80): AMD FSR frame generation (SDK 2.4.0 Vulkan swapchain), with DLSS / FSR / XeSS upscaling. RTX 4090: 60 -> 114-120 presented; AMD iGPU 40 -> 80; swapchain remakes and off / on during play fine. Not yet: a HUD-less image (the HUD may shimmer on generated frames). DLSS-FG (Streamline, RTX 40+) and XeSS-FG (DX12 only) not done. |
 | #52 mouse camera | **Done** (f4ec2cb): the follow camera turns exactly as far as the mouse moves (no stick easing), vertical within -35..85. Other camera kinds still take the mouse as a stick. Only tested on 1.4.1 (1.0.0 offsets from its disassembly). |
 | FSR 2 for Deck / Linux | Scoped, not started: dlss_probe.c (scene detection, jitter, depth, motion vectors) is Windows-only and needs to be made portable first, then FSR 2.2's passes ported (GLSL shaders + ~1,200 lines of host code). |
+
+## 2026-11-15 night 2: the owner's list
+
+| Item | Status |
+|---|--------|
+| FSR 2 on Linux / Deck | **Done** (213a714): FSR 2.2.1 passes on our own host code; Deck docked 16:9 at Match display works (853x480 -> 1280x720, 60 FPS). Not yet with the Deck's defaults (Handheld + 16:10 fill: the input isn't scaled down). |
+| PR #49 (PT-BR) | Reviewed (no network / process / file-deletion code; hashes the 4 mod files), merged onto the current code in a worktree, tested Windows + Deck (English and PT-BR-without-package: no faults). Commented; merge is the owner's call. |
+| DLSS frame generation + Reflex | **Wired, beta** (08168d7): Streamline 2.14.16 manual hooking; Reflex on; DLSS-G status OK and stable, but in scripted (unfocused) runs DLSS-G reports 1 frame presented per rendered frame - needs a check on a real display with FrameView / the overlay. PresentMon (ETW) was blocked in this session. XeSS FG / XeLL: DirectX 12 only - not possible on Vulkan. |
+| Shadows depending on the camera | Not reproduced yet: Cascade (12 camera angles around Mario, tilt up / down) and Sand (8 angles) look consistent; NVIDIA and AMD identical; the recent texture changes (mip-chain views, depth read in place) make no difference. Frame dump: sun shadow map 1024x1024 (pass 1) fitted to the view, a 2x1 depth-range reduction (pass 2), character shadow maps 256/128 (Mario, objects), shadow mask in pass 36. Need the owner's location / screenshot. |
+| HUD sharper / ultrawide HUD at the edges | Next. |
+| Native frame rate up to 240 | Next. |
