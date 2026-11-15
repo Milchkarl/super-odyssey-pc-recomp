@@ -330,6 +330,8 @@ static struct {
     uint64_t last_read_ns;
     MotionGate gate;
     MotionBias bias;
+    uint64_t calibrate_until_ns;  // (Calibrate gyro: learning the offset at rest until then)
+    bool calibrated;
 } mot = {.dir = {1, 0, 0, 0, 1, 0, 0, 0, 1},
          .gate.last = {[2] = -1, [9] = 1, [13] = 1, [17] = 1}};
 
@@ -338,6 +340,26 @@ void input_motion_settle(void) {
     motion_gate_settle(&mot.gate, plat_now_ns());
     mot.gyro_ns = 0;
     pthread_mutex_unlock(&motion_lock);
+}
+
+// Calibrate gyro (Controls tab, #53): the controller lies still for 2 s; the offset its gyro reports at rest is learned
+// (as at every settle, motion_bias_sample) from scratch, then kept in powermoon.ini (motion_gyro_bias).
+// input_motion_calibration: 0 none, 1 running, 2 done, -1 this controller has no gyro.
+void input_motion_calibrate(void) {
+    pthread_mutex_lock(&motion_lock);
+    uint64_t now = plat_now_ns();
+    memset(&mot.bias, 0, sizeof mot.bias);
+    motion_gate_settle(&mot.gate, now);
+    mot.gate.settle_until_ns = now + 2000000000ull;
+    mot.calibrate_until_ns = now + 2000000000ull;
+    mot.calibrated = false;
+    pthread_mutex_unlock(&motion_lock);
+}
+int input_motion_calibration(void) {
+    pthread_mutex_lock(&motion_lock);
+    int r = !mot.on ? -1 : mot.calibrate_until_ns ? 1 : mot.calibrated ? 2 : 0;
+    pthread_mutex_unlock(&motion_lock);
+    return r;
 }
 
 static void motion_open(void) {
@@ -357,6 +379,7 @@ static void motion_open(void) {
     mot.gyro_ns = 0;
     motion_gate_init(&mot.gate);
     memset(&mot.bias, 0, sizeof mot.bias);
+    memcpy(mot.bias.bias, g_settings.motion_gyro_bias, sizeof mot.bias.bias);  // (a saved calibration, else 0)
     motion_gate_settle(&mot.gate, plat_now_ns());
     pthread_mutex_unlock(&motion_lock);
     if (pad) LOG("[input] motion: %s%s%s\n", a ? "accelerometer" : "", a && g ? " and " : "", g ? "gyro" : a ? "" : "none on this controller");
@@ -399,6 +422,16 @@ static void motion_event(const SDL_GamepadSensorEvent *e) {
         for (int i = 0; i < 3; i++) mot.gyro[i] = g[i] / TURN;
         uint64_t host_now = plat_now_ns();
         motion_bias_sample(&mot.bias, mot.accel, mot.gyro, host_now < mot.gate.settle_until_ns, host_now);
+        if (mot.calibrate_until_ns && host_now >= mot.calibrate_until_ns) {  // (Calibrate gyro: the learned offset kept)
+            mot.calibrate_until_ns = 0;
+            memcpy(g_settings.motion_gyro_bias, mot.bias.bias, sizeof mot.bias.bias);
+            mot.calibrated = true;
+            LOG("[input] motion: gyro calibrated, offset %.4f %.4f %.4f turns/s\n", mot.bias.bias[0], mot.bias.bias[1],
+                mot.bias.bias[2]);
+        }
+        // (#53) Invert gyro X / Y: pitch (tilting forward / back: the Switch's x) and yaw (turning: its z) the other way
+        if (g_settings.motion_invert_x) mot.gyro[0] = -mot.gyro[0];
+        if (g_settings.motion_invert_y) mot.gyro[2] = -mot.gyro[2];
         uint64_t t = e->sensor_timestamp;
         bool integrate = g_settings.motion && !menu_input_captured() && !mot.gate.blocked &&
                          (!mot.gate.resume_ns || plat_now_ns() - mot.gate.resume_ns >= 250000000ull);

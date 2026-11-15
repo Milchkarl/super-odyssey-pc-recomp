@@ -225,3 +225,12 @@ Upscaling ||| 업스케일링
 Upscale method ||| 업스케일 방식
 How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 화면을 재구성하고 확대하는 방식입니다. 끄기: 게임이 내부 해상도로 그대로 렌더링합니다 (위의 공간 업스케일러가 창 크기로 확대). NVIDIA DLSS, AMD FSR, Intel XeSS: 시간적 업스케일링과 안티앨리어싱 - 낮은 내부 해상도에서 더 선명하며, 이를 지원하는 GPU와 드라이버가 필요합니다. 각각 자체 모드와 선명도 설정을 유지합니다. 플레이 중에 바뀝니다.
 Auto ||| 자동
+Invert gyro X ||| 자이로 X축 반전
+Invert gyro Y ||| 자이로 Y축 반전
+If a motion move goes the wrong way on your controller: X turns tilting forward / back the other way round, Y turning left / right. ||| 컨트롤러에서 모션 동작이 반대로 움직이면: X는 앞뒤 기울기, Y는 좌우 회전을 반대로 바꿉니다.
+Gyro calibration ||| 자이로 보정
+Calibrate gyro ||| 자이로 보정하기
+No controller with a gyro is connected. ||| 자이로가 있는 컨트롤러가 연결되어 있지 않습니다.
+Calibrating: keep the controller still... ||| 보정 중: 컨트롤러를 움직이지 마세요...
+Done: the offset is saved and used from now on. ||| 완료: 보정값이 저장되어 앞으로 사용됩니다.
+Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) and saved. Use it if the game sees motion while the controller lies still. ||| 컨트롤러를 평평한 곳에 가만히 놓고 누르세요: 정지 상태의 자이로 오차를 측정(2초)하여 저장합니다. 컨트롤러를 가만히 두어도 게임이 움직임을 감지할 때 사용하세요.
