@@ -180,7 +180,9 @@ The separately obtained **JumpManClub Brasil v1.1** RomFS mod can be selected
 with **Controls > System language > Português (Brasil)**. It uses the game's
 US English slot, and the menu reports whether the complete known package is
 enabled without conflicting files. See [installation, limitations and credits](docs/PT-BR.md).
-No translation files are bundled or downloaded automatically.
+If the translation is missing, selecting the language offers to download and install
+the official package. Confirm the installation, then restart when prompted.
+No translation files are bundled; no download starts without confirmation.
 
 ## Building from source
 

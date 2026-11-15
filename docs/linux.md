@@ -74,6 +74,13 @@ wherever the game is installed); started from a terminal, it prints there instea
 The menu's Updates tab (F1 > Updates) downloads the new AppImage from this project's releases and replaces the one you
 started, then restarts. It uses the system's `curl`, and the AppImage's folder must be writable (an SD card is fine).
 
+## Brazilian Portuguese fan translation
+
+The [Brazilian Portuguese installer](PT-BR.md) also uses the system's `curl`.
+AppImages include `bsdtar` for the authors' RAR package. For a source build,
+install your distribution's `libarchive-tools` package instead. GNU tar cannot
+extract this package. No translation assets ship in the AppImage.
+
 ## Reporting a problem
 
 Open an issue with your distribution or SteamOS version, GPU and driver version, what happened, and the log file.

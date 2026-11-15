@@ -32,6 +32,7 @@ extern "C" {
 #include "../hle.h"
 #include "../mods.h"
 #include "../localization.h"
+#include "../ptbr_install.h"
 #include "../diagnostics.h"
 #include "../settings.h"
 #include "../updater.h"
@@ -1284,6 +1285,149 @@ static void camera_speed(const char *label, int *value) {
     if (choice(label, &selected, names, 8)) *value = pct[selected];
 }
 
+enum { PTBR_DIALOG_NONE, PTBR_DIALOG_CONFIRM, PTBR_DIALOG_RUN, PTBR_DIALOG_READY, PTBR_DIALOG_ERROR };
+static int g_ptbr_dialog;
+static int g_ptbr_focus;
+static bool g_ptbr_asked, g_ptbr_saved, g_ptbr_cancel;
+static char g_ptbr_error[256];
+
+static bool ptbr_save_preference(bool installed) {
+    g_settings.language = LANG_PT_BR;
+    if (installed) settings_set_mod_off("JumpManClub Brasil/romfs", false);
+    settings_save();
+    FILE *f = fopen(settings_current_file(), "rb");
+    bool found = false, disabled = false;
+    char line[700], key[64], value[600];
+    while (f && fgets(line, sizeof line, f)) {
+        if (sscanf(line, " %63[^= ] = %599[^\r\n]", key, value) != 2) continue;
+        if (!strcmp(key, "language") && !strcmp(value, "pt-BR")) found = true;
+        if (!strcmp(key, "mod_off") && !strcmp(value, "JumpManClub Brasil/romfs")) disabled = true;
+    }
+    if (f) { found = found && !ferror(f); fclose(f); }
+    return found && (!installed || !disabled);
+}
+
+static void ptbr_request(void) {
+    g_ptbr_focus = PTBR_DIALOG_NONE;
+    g_ptbr_asked = true;
+    g_ptbr_saved = g_ptbr_cancel = false;
+    int available = localization_ptbr_status();
+    if (available == PTBR_DISABLED) {
+        for (int i = 0; i < mods_count(); i++) {
+            const ModInfo *m = mods_get(i);
+            if (m->ptbr_matches == PTBR_ALL && !m->code) {
+                bool was_on = m->on;
+                mods_set_on(i, true);
+                if (localization_ptbr_status() == PTBR_READY) {
+                    bool saved = ptbr_save_preference(false);
+                    g_ptbr_dialog = saved ? PTBR_DIALOG_READY : PTBR_DIALOG_ERROR;
+                    snprintf(g_ptbr_error, sizeof g_ptbr_error, "Couldn't save the language preference. Check the settings file permissions.");
+                    return;
+                }
+                mods_set_on(i, was_on);
+            }
+        }
+    }
+    if (available == PTBR_CONFLICT || available == PTBR_CODE || available == PTBR_DISABLED) {
+        snprintf(g_ptbr_error, sizeof g_ptbr_error, "%s", localization_ptbr_message());
+        g_ptbr_dialog = PTBR_DIALOG_ERROR;
+    } else {
+        for (int i = 0; i < mods_count(); i++) {
+            const ModInfo *m = mods_get(i);
+            if (m->on && m->ptbr_paths) {
+                snprintf(g_ptbr_error, sizeof g_ptbr_error, "An enabled mod already replaces US English text or fonts. Check Mods before installing; other mods were left enabled.");
+                g_ptbr_dialog = PTBR_DIALOG_ERROR;
+                return;
+            }
+        }
+        g_ptbr_dialog = PTBR_DIALOG_CONFIRM;
+    }
+}
+
+static void ptbr_focus_first(void) {
+    if (g_ptbr_focus == g_ptbr_dialog) return;
+    ImGui::SetKeyboardFocusHere();
+    ImGui::SetNavCursorVisible(true);
+    g_ptbr_focus = g_ptbr_dialog;
+}
+
+static void ptbr_dialog(float scale) {
+    if (!g_ptbr_dialog) return;
+    const char *title = "Instalar tradu\xc3\xa7\xc3\xa3o brasileira?###ptbr-install";
+    if (!ImGui::IsPopupOpen(title)) ImGui::OpenPopup(title);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(fminf(ImGui::GetIO().DisplaySize.x * 0.9f, 1000 * scale), 0), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal(title, NULL, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    if (g_ptbr_dialog == PTBR_DIALOG_RUN) {
+        PtbrInstallStatus st;
+        ptbr_install_status(&st);
+        if (!ptbr_install_busy() && st.state == PTBR_INSTALL_READY) {
+            g_ptbr_saved = ptbr_save_preference(true);
+            g_ptbr_dialog = g_ptbr_saved ? PTBR_DIALOG_READY : PTBR_DIALOG_ERROR;
+            if (!g_ptbr_saved) snprintf(g_ptbr_error, sizeof g_ptbr_error, "The mod was installed, but the language couldn't be saved. Check settings file permissions.");
+        } else if (!ptbr_install_busy() && st.state == PTBR_INSTALL_FAILED) {
+            snprintf(g_ptbr_error, sizeof g_ptbr_error, "%s", st.error);
+            g_ptbr_dialog = PTBR_DIALOG_ERROR;
+        } else if (!ptbr_install_busy() && st.state == PTBR_INSTALL_CANCELLED) {
+            g_ptbr_dialog = PTBR_DIALOG_NONE;
+            ImGui::CloseCurrentPopup();
+        } else {
+            const char *phase = st.state == PTBR_INSTALL_VERIFY ? "Verificando o pacote..." :
+                                st.state == PTBR_INSTALL_EXTRACT ? "Extraindo a tradu\xc3\xa7\xc3\xa3o..." :
+                                st.state == PTBR_INSTALL_PUBLISH ? "Instalando..." : "Baixando do link oficial...";
+            ImGui::TextWrapped("%s", g_ptbr_cancel ? "Cancelando..." : phase);
+            ImGui::ProgressBar(st.progress, ImVec2(-1, 0));
+            ImGui::BeginDisabled(g_ptbr_cancel);
+            ptbr_focus_first();
+            if (ImGui::Button("Cancelar")) { ptbr_install_cancel(); g_ptbr_cancel = true; }
+            ImGui::EndDisabled();
+        }
+    }
+    if (g_ptbr_dialog == PTBR_DIALOG_CONFIRM) {
+        ImGui::TextWrapped("Baixar e instalar a tradu\xc3\xa7\xc3\xa3o v1.1 da JumpManClub Brasil pelo link oficial do Google Drive? Requer internet.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("O pacote ser\xc3\xa1 verificado antes da instala\xc3\xa7\xc3\xa3o. Saves e outros mods ser\xc3\xa3o preservados. Depois, reinicie o jogo para usar Portugu\xc3\xaas (Brasil).");
+        ImGui::Spacing();
+        ptbr_focus_first();
+        if (ImGui::Button("Agora n\xc3\xa3o") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
+            g_ptbr_dialog = PTBR_DIALOG_NONE;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+        ImGui::SameLine();
+        if (ImGui::Button("Instalar tradu\xc3\xa7\xc3\xa3o")) {
+            g_ptbr_cancel = false;
+            ptbr_install_start(rt_data_root());
+            g_ptbr_dialog = PTBR_DIALOG_RUN;
+        }
+    } else if (g_ptbr_dialog == PTBR_DIALOG_READY) {
+        ImGui::TextWrapped("Tradu\xc3\xa7\xc3\xa3o instalada e Portugu\xc3\xaas (Brasil) selecionado.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Reinicie para carregar os textos em portugu\xc3\xaas. Salve seu progresso antes de reiniciar; o progresso n\xc3\xa3o salvo ser\xc3\xa1 perdido.");
+        ptbr_focus_first();
+        if (ImGui::Button("Mais tarde") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
+            g_ptbr_dialog = PTBR_DIALOG_NONE; ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+        ImGui::SameLine();
+        if (ImGui::Button("Reiniciar agora")) {
+            updater_restart();
+            snprintf(g_ptbr_error, sizeof g_ptbr_error, "The translation is installed and selected, but restarting failed. Close and open the game manually.");
+            g_ptbr_dialog = PTBR_DIALOG_ERROR;
+        }
+    } else if (g_ptbr_dialog == PTBR_DIALOG_ERROR) {
+        ImGui::TextWrapped("N\xc3\xa3o foi poss\xc3\xadvel concluir a instala\xc3\xa7\xc3\xa3o.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", g_ptbr_error);
+        ptbr_focus_first();
+        if (ImGui::Button("Fechar")) { g_ptbr_dialog = PTBR_DIALOG_NONE; ImGui::CloseCurrentPopup(); }
+        ImGui::SetItemDefaultFocus();
+        ImGui::SameLine();
+        if (ImGui::Button("P\xc3\xa1gina da tradu\xc3\xa7\xc3\xa3o")) SDL_OpenURL("https://www.jumpmanclubbrasil.com.br/post/mario-odyssey");
+    }
+    ImGui::EndPopup();
+}
+
 static void tab_about(void) {
     header("System language");
     {
@@ -1293,11 +1437,22 @@ static void tab_about(void) {
         const char *names[N_LANGUAGES];
         names[0] = autol;
         for (int i = 1; i < N_LANGUAGES; i++) names[i] = g_language_names[i];
-        if (choice("Language", &g_settings.language, names, N_LANGUAGES)) settings_save();
+        int previous = g_settings.language;
+        if (choice("Language", &g_settings.language, names, N_LANGUAGES)) {
+            if (g_settings.language == LANG_PT_BR && localization_ptbr_status() != PTBR_READY && !g_ptbr_saved) {
+                g_settings.language = previous;
+                ptbr_request();
+            } else settings_save();
+        }
     }
     hint("The game's text language. Auto keeps the one your save has (the game's own Options > Language changes it); "
          "any other choice replaces it. Applies the next time the game starts.");
-    if (g_settings.language == LANG_PT_BR) hint(localization_ptbr_message());
+    if (g_settings.language == LANG_PT_BR) {
+        hint(g_ptbr_saved ? "Translation installed. Restart to load Portuguese text." : localization_ptbr_message());
+        if (localization_ptbr_status() != PTBR_READY && !g_ptbr_saved) {
+            if (!g_ptbr_asked || ImGui::Button("Instalar tradu\xc3\xa7\xc3\xa3o brasileira...")) ptbr_request();
+        }
+    }
     {
         static const char *const ml[] = {"Auto", "English", "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"};  // (Korean, in Korean)
         if (choice("Menu language", &g_settings.menu_language, ml, MENU_LANG_COUNT)) settings_save();
@@ -1559,7 +1714,7 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             bool focus_here = g_focus_tab == t.id || (g_focus_tab == -100 && t.id == g_tab);
             bool open = ImGui::BeginTabItem(lbl, NULL, f);
             ImGui::PopStyleColor(pushed);
-            if (focus_here) {  // the controller's cursor starts on this tab (SetKeyboardFocusHere skips tabs: no tab stop)
+            if (focus_here && !any_popup) {  // the controller's cursor starts on this tab (SetKeyboardFocusHere skips tabs: no tab stop)
                 ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
                 ImGui::SetNavCursorVisible(true);
                 // a few frames: the page's child window appearing makes ImGui pick its first widget once it's laid out
@@ -1616,6 +1771,7 @@ void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*pr
     style_init();
     ImGui::GetStyle().ScaleAllSizes(scale);
     tabs_body(scale, prelaunch);
+    ptbr_dialog(scale);
     ImGui::GetStyle() = saved;
     g_font = f0, g_font_big = f1;
 }
@@ -1908,6 +2064,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
         bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
         tabs_body(scale, NULL);
+        ptbr_dialog(scale);
         quit_dialog(scale);
         // B with nothing focused-deeper closes the menu (not the Esc / B that ends typing: typing is from the frame
         // before, so it's still true the frame a field lets go)

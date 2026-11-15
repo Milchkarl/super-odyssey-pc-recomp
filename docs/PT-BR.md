@@ -8,6 +8,35 @@ it does not translate the PC port's own F1 menu.
 
 ## Obtain and install
 
+In **Controls > System language**, select **Português (Brasil)**. If the
+translation is absent, confirm **Instalar tradução brasileira?**, wait for the
+download and verification, then choose **Reiniciar agora** (save your progress
+first) or restart later. On the next start the game uses Portuguese, including
+with an existing save. An already recognized disabled RomFS package is enabled
+without downloading it again. Conflicting mods are left unchanged and reported.
+
+The installer downloads directly from the authors' official Google Drive link
+after confirmation. It accepts only the pinned Atmosphere v1.1 archive
+(773,795 bytes, SHA-256
+`c282c43894796cb629f8668b2aec3fee50ddad88fcb7a92a5fc63f570c4409d3`).
+It checks the archive before extraction and all four extracted files before
+publishing the mod. HTML sign-in pages, modified downloads and revised packages
+are rejected. Downloads are not mirrored or bundled with releases.
+
+Installation uses a private temporary directory inside `mods/` and an atomic
+rename to `mods/JumpManClub Brasil`. Existing destination folders, including
+empty ones, are never replaced. Cancellation or a failed attempt removes that
+attempt's temporary files; forced termination may leave a hidden
+`.ptbr-install-*` directory, which the mod loader ignores. After closing the
+application, that leftover directory can be removed manually.
+
+Windows uses its system `tar.exe`. Linux AppImages bundle `bsdtar` from
+libarchive; source installations need `libarchive-tools` (and `curl` for the
+existing download transport). Neither the download nor extraction blocks the
+menu thread. Internet access and a writable game-data folder are required.
+
+### Manual installation
+
 Obtain the **Atmosphere** package from the
 [JumpManClub Brasil translation page](https://www.jumpmanclubbrasil.com.br/post/mario-odyssey).
 Do not download or install a copy of the game from a translation mirror.
@@ -67,6 +96,29 @@ from successful file detection. The current validation record accompanies the
 contribution; unexecuted checks must remain explicitly unverified.
 
 ## Current validation
+
+The follow-up installer was built against the merged PT-BR support at
+`7cf0405a590f76c7d1fcb6bef5ed1b62a2202c9d` on Windows 11 x64 with game 1.4.1.
+All 13 installer tests passed with the private official archive and the opt-in
+real network check. Without private assets or network access, eight passed and
+five were skipped. Tests cover exact-package installation, spaces and Unicode
+paths, malformed/modified/oversized packages, cancellation, existing destination
+preservation, symlink refusal, and preservation of synthetic saves/settings/mods.
+
+Bounded native game runs verified the missing-package prompt, keyboard
+confirmation, official download, completion prompt, saved `pt-BR` preference,
+and the actual Restart now action. The restarted process produced a Portuguese
+title-screen capture. Another run selected PT-BR from Auto and verified the
+existing-destination error while retaining Auto and the existing directory.
+The original production save hashes remained unchanged. The 13 localization,
+four camera-settings, eight Steam-shortcut and one generated-wrapper tests,
+the gameplay-clock fixture and the crypto known-answer checks also passed.
+
+Linux packaging scripts passed shell syntax checks. The new AppImage build,
+Linux installer execution, game 1.0.0, gamepad/mouse interaction, network failure
+UI, long sessions and a controlled performance comparison were not executed.
+The records below describe earlier localization validation, separately from
+the installer checks.
 
 Initial 0.2.10 validation on Windows 11 x64, NVIDIA RTX 5060 Ti, game 1.4.1:
 the original and changed source builds completed. Bounded runs exited successfully with inspected screenshots:
@@ -129,7 +181,10 @@ Traduções). Obtain their files separately. No redistribution licence was found
 in the package, translation page or copyright page. Neither the translation's
 assets nor Nintendo assets are included here. Do not commit these archives,
 fonts, extracted MSBT files, generated game code or game libraries. The runtime
-does not download the translation or alter the original game files.
+downloads the package only after the user confirms, directly from the authors'
+distribution. It does not alter the original game files. No specific permission
+for third-party hosting or automated downloading was found on the inspected
+pages; public availability should not be described as a redistribution licence.
 
 ## Automated checks
 
@@ -147,3 +202,14 @@ Optional private package checks use `PTBR_TEST_ROMFS=/path/to/translation/romfs`
 Without it, asset-dependent checks are skipped; no proprietary test fixtures
 are supplied. All checks use temporary settings/mod directories and new
 processes to verify persistence across restarts.
+
+The installer fixture links the production runtime (without starting the game)
+and needs no proprietary game files:
+
+```sh
+make -j16 test-ptbr-installer
+```
+
+Set `PTBR_TEST_ARCHIVE=/path/to/official-atmosphere.rar` for the private package
+cases. `PTBR_TEST_NETWORK=1` separately opts into a real official download.
+Neither is enabled by default. Keep the package outside Git.
