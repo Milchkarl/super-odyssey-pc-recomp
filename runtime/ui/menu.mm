@@ -1399,6 +1399,7 @@ void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*pr
 extern "C" bool vk_temporal_enabled(void);
 extern "C" bool vk_fsr4_available(void);
 #endif
+extern "C" float vk_display_frame_ms(void);
 #define PERF_COLS 18.6f  // the overlay's width in font heights
 
 static void perf_row(const char *label, ImVec4 color, const char *a, const char *b, const char *c) {
@@ -1426,6 +1427,8 @@ static void draw_performance(void) {
     static float times[180];
     static int at, filled;
     float dt = ImGui::GetIO().DeltaTime * 1000.0f;
+    float shown = vk_display_frame_ms();  // (the display's own spacing where the driver reports it: pacing.c)
+    if (shown > 0) dt = shown;
     times[at] = dt, at = (at + 1) % 180;
     if (filled < 180) filled++;
     float worst = 0, sum = 0, recent = 0;

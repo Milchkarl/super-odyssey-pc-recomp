@@ -236,6 +236,10 @@ tools/deck_dev.sh full                 # full AppImage (needed once, and after a
 - `[vk] t=... frame N  X fps max Y ms ...` every 2 s: FPS, worst frame, draws, GPU ms, heap binds,
   `splits N (skipped M, a submission X ms)`.
 - `[hitch]` lines (`ODYSSEY_HITCH_MS=<ms>`): a slow frame broken into wait / acquire / present.
+- `[display] 10s: N shown, D dropped, H held ...` (Linux, present wait): what the screen actually showed. Held = an
+  image shown for a second refresh (a visible stutter); dropped = replaced before shown. "Flat graph" means held 0
+  outside real game hitches. `timer phase` stays put when the vsync timer is locked to the display (vi.c).
+  `ODYSSEY_LOG_PRESENT_GPU=1` adds when the GPU finished each present's work.
 - Thread names (Linux): `g<id> c<core> p<prio>` for game threads, `render`, `shader worker`, `translator`.
 
 ### A Linux PC

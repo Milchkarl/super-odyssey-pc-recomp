@@ -27,6 +27,11 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
    short spin, the presenter thread), FIFO / mailbox / immediate choices, and frame-time stats (p99, max, a
    histogram) in the log and overlay, so "flat 100% of the time" is measured, not eyeballed. Then the remaining
    single hitches: first-use shader compiles that still block, texture uploads at stage changes, game-thread stalls.
+   - **Done 2026-11-15 (Linux):** present timing (runtime/nvn/vulkan/pacing.c, VK_KHR_present_wait) logs what the
+     display really showed every 10 s (`[display]`: shown / dropped / held, spacing p50 / p99 / max), and the overlay's
+     graph plots it. The 60 Hz timer is locked to the display (vi.c, ODYSSEY_VSYNC_LOCK, offset 9 ms): images held a
+     second refresh in a 50 s Deck walk went from 5-9 to 0-2, each left one a game hitch. Present to screen is ~47 ms,
+     all of it after our GPU work (gamescope). Next: the game hitches themselves; measure the lock on Windows.
 4. **Gyro on the Deck, automatic.** The Switch's motion controls (shaking to throw Cappy, motion aiming) from the
    Deck's gyro through SDL3 sensors - working when the game is added to Steam without a Steam Input setup (to be
    tested in Gaming Mode: Steam Input owns the controller there) - and a settings page for gyro (sensitivity,
