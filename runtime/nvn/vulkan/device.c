@@ -27,6 +27,7 @@
 #include "../renderer.h"
 
 VkG g_vk;
+static _Atomic bool g_no_present;  // (quitting: no present to a window going away - ui_run)
 bool vk_image_share_small(VkImageCreateInfo *ci) {
     static uint32_t fams[2];
     if (g_vk.cqfam == UINT32_MAX || g_vk.cqfam == g_vk.qfam || ci->samples != VK_SAMPLE_COUNT_1_BIT) return false;
@@ -790,7 +791,7 @@ void vk_frame_end(const char *shot_path) {
                            .swapchainCount = 1, .pSwapchains = &g_vk.swapchain, .pImageIndices = &img};
     uint64_t pp0 = plat_now_ns();
     vk_queue_lock();
-    VkResult r = vkQueuePresentKHR(g_vk.queue, &pi);
+    VkResult r = atomic_load(&g_no_present) ? VK_SUCCESS : vkQueuePresentKHR(g_vk.queue, &pi);
     vk_queue_unlock();
     g_pw_present_ns = plat_now_ns() - pp0;
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) recreate_swapchain();
@@ -1061,7 +1062,7 @@ static bool present_fast(TexBackend *w) {
                            .swapchainCount = 1, .pSwapchains = &g_vk.swapchain, .pImageIndices = &img};
     vk_queue_lock();
     VkResult sr = vkQueueSubmit2(g_vk.queue, 1, &si, fast_fence[k]);
-    VkResult pr = sr == VK_SUCCESS ? vkQueuePresentKHR(g_vk.queue, &pi) : sr;
+    VkResult pr = sr != VK_SUCCESS ? sr : atomic_load(&g_no_present) ? VK_SUCCESS : vkQueuePresentKHR(g_vk.queue, &pi);
     vk_queue_unlock();
     VK_CHECK(sr);
     if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) g_need_recreate = true;
@@ -1937,6 +1938,13 @@ int ui_run(void) {
             if (e.type == SDL_EVENT_QUIT ||
                 (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID == SDL_GetWindowID(window))) {
                 LOG("window closed\n");
+                // No present after this (the queue lock: one under way finishes first): hiding the window ends its
+                // surface under Steam's gamescope, and the presenter and render threads went on presenting while the
+                // exit waited for the GPU and saved the caches - gamescope's layer aborted ("surface already
+                // destroyed"), a crash report at every quit on a Steam Deck.
+                atomic_store(&g_no_present, true);
+                vk_queue_lock();
+                vk_queue_unlock();
                 SDL_HideWindow(window);  // Return the desktop immediately, including in exclusive fullscreen.
                 exit(0);
             }
