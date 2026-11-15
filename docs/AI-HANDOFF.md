@@ -96,6 +96,18 @@ standing rule for every change.
 - **Power target: 60 FPS at 5-7 W, 16:10** (the owner, 2026-11-15). The TDP limit is set by the owner (Steam's
   per-game performance profile on the dev shortcut), not by agents: no system settings changes on the Deck.
   deck-gpu.sh logs the power draw, so check it in each run's gpu.log.
+- **16:10 and the Deck's defaults (2026-11-15):** `resolution = 100%` (RES_DISPLAY: the window's own pixels, no floor
+  at the Switch's 900 lines) and `aspect = fill` now also handle screens narrower than 16:9. On the Deck: the 3D view
+  is 16:10 (the camera's aspect x 0.9, Hor-) at 1280x800 internal = display, and the HUD keeps its 16:9 shape fitted
+  to the width (its projection made 0.9 as tall; full-screen panes stretched back vertically). runtime/hle/odyssey_wide.c,
+  output_scale.c, exec.c (ui2d viewport). These are the Steam Deck's first-start defaults (settings_steam_deck); the
+  menu's Battery saver is unchanged (75% + FSR 1).
+- **Direct depth reads (2026-11-15):** a draw sampling the bound depth buffer without writing depth/stencil reads it
+  in place instead of a copy (exec.c resolve_feedback; `ODYSSEY_DEPTH_FEEDBACK_COPY=1` restores copies). Deck at 7 W:
+  ~1.2 ms less GPU time in the profiled frame, +1 FPS steady state.
+- **At 7 W (2026-11-15):** GPU ~300-440 MHz, ~90% busy: first Cap Kingdom visit 42-58 FPS walking, 60 standing. GPU
+  time per frame ~17 ms (gpuprof): main scene pass ~4.6-7 ms, 72 one-draw passes ~4.3 ms, 23 passes without draws
+  ~1.5 ms (fold clears into the next pass: next), dispatches ~1.5 ms.
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 
