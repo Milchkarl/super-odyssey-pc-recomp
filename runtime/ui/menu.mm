@@ -818,7 +818,8 @@ static void tab_performance(void) {
 #ifdef _WIN32
     if (vk_temporal_enabled()) opt_disable_next();
 #endif
-    opt_toggle("120 FPS interpolation", &g_settings.frame_interp, false,
+    opt_toggle("120 FPS interpolation (experimental)", &g_settings.frame_interp, false,
+               "Experimental: some players' games crashed with it on (NVIDIA and AMD) - turn it off if the game crashes. "
                "Available with Frame rate set to 60 FPS and DLSS off. Adds an image between game frames, targeting 120 FPS "
                "on a 120 Hz or faster display. Busy scenes can temporarily fall back to 60 FPS.");
 #endif
