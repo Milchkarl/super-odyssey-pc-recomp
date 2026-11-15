@@ -76,10 +76,17 @@ standing rule for every change.
   **not safe to ship as is**: the copy-back (gfast_finish) writes the whole bound ranges back into the heap when the
   GPU gets to it, which could overwrite what the game has written for the next frame, and the CPU might read the
   results.
-  **The lead to follow first:** make these dispatches finish early instead of not waiting. Options: run gmem-only
-  compute dispatches (no images) on a separate Vulkan compute queue, submitted right away, with graphics waiting on
-  a timeline semaphore; or copy-back only the bytes the shader wrote; or prove with page protection (diagnostic only)
-  that the CPU never touches those ranges before the GPU is done.
+  **Fixed 2026-11-15 - guarded compute writes** (Linux default with the placed heap; `ODYSSEY_GPU_WRITE_GUARD=0`
+  off; runtime/nvn/vulkan/exec.c "Guarded compute writes"): a dispatch storing through the fast-copy table records
+  its ranges instead of making the fence wait; the fence ends the submission holding them, and `nvnSyncWait`
+  protects their pages (PROT_NONE). A thread touching one faults; the Linux fault handler waits for the GPU's write,
+  opens the page and retries (renderer_guard_fault). Pages open by themselves at a present once the GPU is done.
+  Measured on the Deck with the owner's save, settings and the same inputs: guard off 39-57 FPS, guard on ~60 (~40
+  pages protected and ~1 fault a frame); the town walk stays a locked 60. The stats line shows `guarded N (fence
+  splits, fence waits, protected, faults, render-thread)`.
+  Known limits: stores outside the fast-copy table (uses_gmem without the map) and vertex/fragment stores still wait;
+  a kernel call (e.g. a file read) into a protected page would get EFAULT instead of faulting (not seen); the
+  render thread reads such pages without waiting (as it did before).
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 
@@ -96,8 +103,8 @@ standing rule for every change.
 
 ## 4. Priorities (do them roughly in this order)
 
-1. **Deck: compute writes to game memory** (section 3): make the first Cap Kingdom visit 60 FPS without the unsafe
-   no-wait shortcut. Then reproduce with the bench (section 6) in the other places the owner plays,
+1. **Deck: the places the owner plays.** The first Cap Kingdom visit is fixed (guarded compute writes, section 3).
+   Reproduce with the bench (section 6), with the owner's save (`SAVE=`), in the other places the owner plays,
    compare the stats lines (splits, skipped splits, submit ms, GPU ms, thread CPU). Decide CPU-bound vs GPU-bound per
    place before changing code.
 2. **Deck CPU cost.** Biggest lever on a shared-power device:
@@ -159,6 +166,8 @@ tools/deck_dev.sh full                 # full AppImage (needed once, and after a
   (`ODYSSEY_WARP=` with nothing after it turns the bench's warp off).
 - Diagnostics: `ODYSSEY_SYNC_TRACE=1` (the game thread's frame: submits, fence waits, present throttle),
   `ODYSSEY_LOG_GPU_WRITES=<frame>` (each compute dispatch storing to game memory in that frame).
+- On the Deck, `/run/media/deck/SN01T/sopr-0.2.9.1/Play dev.sh` plays the newest quick build (the AppDir) on the test
+  copy with stats logging (logs/dev-session-*.log): the owner can test a change minutes after it's made, no AppImage.
 - A failed quick build stops deck_dev.sh, so a bench never runs an old program; the build log is
   `~/sopr/build/dev_quick.log` on the Deck.
 - tools/linux/deck/deck-threads.sh and deck-gpu.sh sample per-thread CPU and GPU busy/clock while it runs.

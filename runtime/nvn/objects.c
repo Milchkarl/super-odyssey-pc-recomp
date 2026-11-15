@@ -239,7 +239,11 @@ NVN(nvnSyncWait) {  // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
 #endif
     }
     if (early && rq_enabled() && !flush && !whole && !drain && fs->ticket) {
-        renderer_wait_seq(fs->write_seq);  // (0: nothing written - no wait)
+        // (guarded compute writes before the fence: their pages are protected instead - a thread touching one waits for
+        // the GPU there, vulkan/exec.c renderer_guard_fault; not handed to the GPU by the fence: waited for as before)
+        extern uint64_t renderer_guard_fence(uint64_t mark, bool protect);
+        uint64_t w = fs->write_seq, g = renderer_guard_fence(fs->gw_mark, fs->gw_ok);
+        renderer_wait_seq(g > w ? g : w);  // (0: nothing written - no wait)
         if (st_t0) st_sync(st_t0, plat_now_ns() - st_t0, st_lag_, c->x[30]);
         RET(0);
         return;
@@ -1326,6 +1330,7 @@ NVN(nvnQueuePresentTexture) {
     if (tex && rq) rq_push(RQ_PRESENT, tex, 0);
     else if (tex) backend_present(tex);
     tex_process_releases();
+    { extern void renderer_guard_sweep(void); renderer_guard_sweep(); }  // (guarded pages the GPU is done with: opened)
     if (gt_log) gt_out = plat_now_ns();
     if (st_in) { st_present(st_in, st_thr); st_f0 = plat_now_ns(); }
 }

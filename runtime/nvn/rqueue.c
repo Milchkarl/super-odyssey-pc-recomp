@@ -74,6 +74,8 @@ static void *render_thread(void *arg) {
             extern uint64_t renderer_guest_write_seq(void);
             NvnSync *s = it.p;
             s->seq = renderer_fence_seq();
+            extern bool renderer_fence_point(uint64_t *mark);
+            s->gw_ok = renderer_fence_point(&s->gw_mark);  // (guarded compute writes: may end the submission)
             s->write_seq = renderer_guest_write_seq();
             __atomic_store_n(&s->signaled, 1, __ATOMIC_RELEASE);
             break;
