@@ -3,7 +3,7 @@
 # (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV, LAUNCH=steam, GS_SHOT, SHOTS.
 # Data on the Deck: the 1.4.1 test copy /run/media/deck/SN01T/sopr-fonttest, ~/sopr/bench/savecomplete.tar (sopr-wintest save-complete).
 # Deck bench: Cap Kingdom walk from the test copy, the game thread sampled (Linux sampler, SIGPROF) for 600 frames.
-F=/run/media/deck/SN01T/sopr-fonttest
+F=${DATA:-/run/media/deck/SN01T/sopr-fonttest}  # DATA=<folder>: another data folder (its own caches)
 APP=${APP:-/home/deck/sopr/build/dist/Super Odyssey PC Recomp-0.2.10-linux-x86_64.AppImage}
 OUT=${OUT:-$HOME/sopr/bench/run}
 mkdir -p "$OUT"

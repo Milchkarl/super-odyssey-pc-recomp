@@ -45,6 +45,19 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
      built in the background - no frame waited, none was skipped. The held ones: the stage-entry autosave moment
      (~frame 1435, 45 ms, game thread waiting on a guest worker) and respawns after a fall (~50 ms, the stage-entry
      first-use pattern). Not found: which guest worker the game thread waits for at ~1435.
+   - **Owner's hard hitches (2026-11-15, Deck): breaking boxes and captures, ~180 ms.** Their session log: runs of
+     frames "not shown (a full-screen pass is building)" - 17, 10, 5, 2 frames - each as long as one vertex library's
+     first build (100-313 ms). Only 23 of 2,041 libraries in that session weren't saved binaries: effects new to the
+     install, which the 20-minute preparation doesn't cover (it builds the known list). Changed: a full-screen-sized
+     draw that is blended over the scene or scissored (a sprite close to the camera) no longer holds the picture at
+     any frame rate (was 120 FPS only; ODYSSEY_HOLD_OVERLAYS=1 restores); held draws now log their target and blend.
+     Not verified on captures / boxes yet (the scripted routes don't reach them).
+   - **Vertex libraries are slow to build** (cold run, 605 of them: 175 ms CPU each on average, fragment 60 ms): our
+     vertex SPIR-V is ~6x the fragment's (median 183 KB vs 31 KB; 1,245 as_f / as_u helper calls in a median one,
+     570 NoContraction decorations from `precise gl_Position`). Shrinking it (macros instead of helper functions)
+     would change every module's key - every player's saved shaders rebuilt - so measure the gain first.
+     Tools: DATA=/run/media/deck/SN01T/sopr-cold (game files linked, its own caches) for cold runs; library lines in
+     the shader-time log now show their CPU time.
 4. **Gyro on the Deck, automatic.** The Switch's motion controls (shaking to throw Cappy, motion aiming) from the
    Deck's gyro through SDL3 sensors - working when the game is added to Steam without a Steam Input setup (to be
    tested in Gaming Mode: Steam Input owns the controller there) - and a settings page for gyro (sensitivity,
