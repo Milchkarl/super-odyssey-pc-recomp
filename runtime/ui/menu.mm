@@ -939,21 +939,33 @@ static void tab_graphics(void) {
                        "driver for it. Each keeps its own mode and sharpening settings. Changes during play.")) {
             g_settings.temporal_off = m == 0;
             if (m > 0) g_settings.temporal_backend = m - 1;
-            if (g_settings.frame_generation) vk_request_swapchain_remake();  // (frame generation needs an upscaler)
+            if (g_settings.frame_gen == FG_FSR) vk_request_swapchain_remake();  // (frame generation needs an upscaler)
         }
     }
-    if (!g_settings.temporal_off) {  // FSR frame generation (runtime/nvn/vulkan/fsr3_sdk.c), with any of the upscalers
-        if (opt_toggle("Frame generation (AMD FSR)", &g_settings.frame_generation, false,
+    if (!g_settings.temporal_off) {  // frame generation (fsr3_sdk.c: AMD FSR; sl_glue.cpp: NVIDIA DLSS), with any upscaler
+        static const char *fgn[FG_COUNT] = {"Off", "AMD FSR", "NVIDIA DLSS (Beta)"};
+        int was = g_settings.frame_gen;
+        if (opt_choice("Frame generation", &g_settings.frame_gen, fgn, FG_COUNT, FG_OFF,
                        "A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother "
-                       "motion on a 120 Hz or faster display, a little more input delay. Works on any GPU, with any Upscale "
-                       "method above. Needs Frame rate 60 FPS and 120 FPS interpolation off (they make extra frames "
-                       "themselves). The HUD can shimmer slightly on the generated frames."))
-            vk_request_swapchain_remake();
-        if (g_settings.frame_generation && (g_settings.frame_rate != FPS_60 || g_settings.frame_interp)) {
+                       "motion on a 120 Hz or faster display, a little more input delay (Low latency below takes most of it "
+                       "back). AMD FSR: any GPU; changes during play. NVIDIA DLSS: GeForce RTX 40 series or newer, with "
+                       "Reflex; applies the next time the game starts. Intel XeSS frame generation exists only for "
+                       "DirectX 12, not for this Vulkan renderer. Needs Frame rate 60 FPS and 120 FPS interpolation off. "
+                       "The HUD can shimmer slightly on generated frames.")) {
+            if (was == FG_FSR || g_settings.frame_gen == FG_FSR) vk_request_swapchain_remake();
+        }
+        if (g_settings.frame_gen && (g_settings.frame_rate != FPS_60 || g_settings.frame_interp)) {
             opt_disable_next();
             opt_action("Frame generation status", "Off: set Frame rate 60 FPS, 120 FPS interpolation off",
                        "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance tab).");
         }
+    }
+    {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
+        static const char *lln[] = {"Off", "On", "On + Boost"};
+        opt_choice("Low latency (NVIDIA Reflex)", &g_settings.low_latency, lln, 3, 0,
+                   "Less delay between your input and the picture: the game starts each frame as late as it can instead of "
+                   "queuing frames ahead. Boost also keeps the GPU clocks up. NVIDIA GPUs; always on with DLSS frame "
+                   "generation. Applies the next time the game starts.");
     }
     int backend = g_settings.temporal_backend;
     bool fsr = backend == TEMPORAL_FSR3 || backend == TEMPORAL_FSR4 || backend == TEMPORAL_FSR2;

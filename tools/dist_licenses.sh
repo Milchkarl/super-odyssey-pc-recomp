@@ -70,6 +70,8 @@ Upscaler runtimes (unmodified, as the vendors ship them and signed by them; each
 - amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll, amd_fidelityfx_framegeneration_vk.dll - AMD
   FidelityFX SDK 2.4.0 (FSR 3.1 / FSR 4, FSR frame generation), from
   https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK - AMD-FSR-SDK-LICENSE.md
+- sl.*.dll, nvngx_dlssg.dll, NvLowLatencyVk.dll - NVIDIA Streamline 2.14.16 (DLSS frame generation, Reflex), from
+  https://github.com/NVIDIAGameWorks/Streamline - NVIDIA-RTX-SDK-LICENSE.txt (headers: MIT)
 - fsr2/ - AMD FidelityFX Super Resolution 2.2.1 shaders (GLSL), from
   https://github.com/GPUOpen-Effects/FidelityFX-FSR2 - MIT, fsr2/LICENSE.txt (run by the recomp's own code)
 - libxess.dll - Intel XeSS 2.0.2, from https://github.com/intel/xess - Intel-XeSS-LICENSE.txt,
