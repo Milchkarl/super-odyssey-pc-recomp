@@ -411,8 +411,17 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
     if (sig != SIGSEGV || (fa & ~0xFFFull) != (sp & ~0xFFFull)) lr = *(uint64_t *)(uintptr_t)sp;
 #endif
     // (a page guarded until the GPU's write to it is done: nvn/vulkan/exec.c - waits there, then the access is retried)
-    extern bool renderer_guard_fault(uint64_t addr);
-    if (sig == SIGSEGV && renderer_guard_fault(fa)) {
+    extern int renderer_guard_fault(uint64_t addr, bool can_step, bool is_write);
+#if defined(__x86_64__)
+    int g = sig == SIGSEGV ? renderer_guard_fault(fa, true, (uc->uc_mcontext.gregs[REG_ERR] & 2) != 0) : 0;
+    if (g == 2) {  // (next to the GPU's results: that page is open for one instruction - trap flag, step_handler)
+        uc->uc_mcontext.gregs[REG_EFL] |= 0x100;
+        return;
+    }
+#else
+    int g = sig == SIGSEGV ? renderer_guard_fault(fa, false, false) : 0;
+#endif
+    if (g) {
         static int log = -1, n;  // ODYSSEY_LOG_GUARD=1: where the first 40 came from
         if (log < 0) log = getenv("ODYSSEY_LOG_GUARD") != NULL;
         if (log && n++ < 40) {
@@ -430,6 +439,22 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
     rt_fault_report(what, fa, pc, lr);
 }
 
+// (x86-64) after the one instruction a guarded page was opened for (crash_handler): closed again, the trap flag off
+static void step_handler(int sig, siginfo_t *si, void *ctx) {
+    extern bool renderer_guard_stepping(void);
+    extern void renderer_guard_step_end(void);
+    if (renderer_guard_stepping()) {
+        renderer_guard_step_end();
+#if defined(__x86_64__)
+        ((ucontext_t *)ctx)->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+#endif
+        return;
+    }
+    (void)si;
+    signal(sig, SIG_DFL);  // (not ours: as without this handler)
+    raise(sig);
+}
+
 void plat_crash_handler_install(void) {
     stack_t ss = {.ss_sp = malloc(1 << 20), .ss_size = 1 << 20};
     sigaltstack(&ss, NULL);
@@ -441,6 +466,10 @@ void plat_crash_handler_install(void) {
     sigaction(SIGILL, &sa, NULL);
     sigaction(SIGFPE, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
+    struct sigaction st = {0};
+    st.sa_sigaction = step_handler;
+    st.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGTRAP, &st, NULL);
 }
 
 // ---- child processes

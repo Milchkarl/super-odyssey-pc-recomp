@@ -117,8 +117,13 @@ standing rule for every change.
 - **Guarded writes cost at 7 W:** one game function (f_7000931b84) touches the compute buffers' pages every frame
   (mostly next to the GPU's results: page-level false sharing) and waits for the GPU: 400-500 ms per 2 s, single
   waits up to 18 ms (stats: `faults N waiting X ms, longest Y`; `ODYSSEY_LOG_GUARD=1` logs where). Guard off is far
-  worse (27-32 FPS). Next: exact copy-back ranges (not merged across gaps) and waiting only when the touched address
-  is inside a written range (single-step the false-sharing accesses).
+  worse (27-32 FPS). **Done 2026-11-15:** the copy back writes the bound buffers' exact bytes (not the merged ranges'
+  gaps), and a fault outside every written range is single-stepped (x86-64 trap flag, linux.c step_handler) instead
+  of waiting: 2,000-21,000 such touches per 2 s cost microseconds. What still waits: the game's writes ON the result
+  buffers (~50-70 per 2 s at 7 W, up to ~17 ms each, because the GPU runs ~a frame behind). A word-exact merge copy
+  back (ODYSSEY_GFAST_MERGE=1, off) lets writes through, but then the game's reads around them wait instead - no gain.
+  **Next:** make these ~20 small dispatches finish right away - a separate Vulkan compute queue, submitted at once,
+  graphics waiting on a timeline semaphore - so a wait is ~1 ms instead of a GPU frame.
 - Counter pairs: Odyssey writes start, a counter at a fixed address, then the end (start + 16 bytes): pairs are
   matched by address among the last few counters (exec.c cq_start_of).
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
