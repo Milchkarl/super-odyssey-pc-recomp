@@ -81,6 +81,9 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
   GLSL (a few thousand lines; the jitter and motion vectors the Windows path feeds DLSS are reused). The port is the
   realistic route; it needs the FSR 2 source downloaded (MIT). Frame generation: FSR 3 frame generation is
   Windows/DX12-centric; on Linux the practical options are the existing 120 FPS interpolation or a driver-level one.
+- **Done 2026-11-15:** FSR frame generation on Windows (AMD's SDK 2.4.0 made it Vulkan): runtime/nvn/vulkan/fsr3_sdk.c,
+  with any of the upscalers. Next for it: a HUD-less back buffer (the scene before the HUD, scaled as the present pass
+  does) so the HUD stays still on generated frames.
 
 - A better upscaler for low internal resolutions. HelixSR / "FSR4-lite" is D3D12; options on Vulkan: AMD FSR 3.1
   (third_party/fsr3_sdk, Vulkan), Intel XeSS (Vulkan), or porting a shader-based one - license checked first.

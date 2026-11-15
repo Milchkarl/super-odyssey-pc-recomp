@@ -92,3 +92,12 @@ Closed (fixed in 0.2.11, commented): #13, #27, #39, #44, #46; #50 (thanks, not a
 | #41 tearing with every VSync option, #43 no sound on the Deck, #54 video only, #42 / #38 slow spots | Asked for logs / details. |
 | #52 mouse camera feels like a stick | The game's camera eases mouse input like a stick; a direct-angle camera means hooking the camera poser. Asked what feels off. Open. |
 | #35 5.1, #48 amiibo, #29 PT-BR | Feature requests, acknowledged; open. |
+
+## 2026-11-15 night: features (local commits)
+
+| Feature | Status |
+|---|--------|
+| #35 5.1 surround | **Done** (a1f3c6e): Audio output Auto / Stereo / 5.1. The game mixes its own 5.1 when told the TV has 6 channels; centre, LFE and rears carry sound (PC, levels logged). Deck: Auto = stereo. |
+| Frame generation | **Done, Windows** (1a6da80): AMD FSR frame generation (SDK 2.4.0 Vulkan swapchain), with DLSS / FSR / XeSS upscaling. RTX 4090: 60 -> 114-120 presented; AMD iGPU 40 -> 80; swapchain remakes and off / on during play fine. Not yet: a HUD-less image (the HUD may shimmer on generated frames). DLSS-FG (Streamline, RTX 40+) and XeSS-FG (DX12 only) not done. |
+| #52 mouse camera | **Done** (f4ec2cb): the follow camera turns exactly as far as the mouse moves (no stick easing), vertical within -35..85. Other camera kinds still take the mouse as a stick. Only tested on 1.4.1 (1.0.0 offsets from its disassembly). |
+| FSR 2 for Deck / Linux | Scoped, not started: dlss_probe.c (scene detection, jitter, depth, motion vectors) is Windows-only and needs to be made portable first, then FSR 2.2's passes ported (GLSL shaders + ~1,200 lines of host code). |
