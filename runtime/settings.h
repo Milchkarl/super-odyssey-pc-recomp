@@ -95,6 +95,7 @@ typedef struct {
     int motion_shake_pad;  // a controller button (PADB_*) that shakes the controller for the game while held (-1: none)
     int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
+    int rumble_strength;  // 25..100 (%): how strong the vibration is
     int stick_deadzone;  // percent of a controller stick's travel that counts as rest (runtime/hle/input.c), 0: none
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
     int mouse_sensitivity;  // percent, 25..400 (runtime/hle/input.c mouse_stick)

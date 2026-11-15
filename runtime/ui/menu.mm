@@ -1295,6 +1295,13 @@ static void tab_about(void) {
          "the motion cap throw (homing at a target), spins and shake moves. Works with Motion controls off and on "
          "controllers or keyboards without motion sensors. If a key is also bound to a game button, it does both.");
     toggle("Vibration", &g_settings.rumble);
+    {
+        static const int pct[] = {25, 50, 75, 100};
+        static const char *const names[] = {"25%", "50%", "75%", "100%"};
+        int i = 3;
+        for (int k = 0; k < 4; k++) if (pct[k] == g_settings.rumble_strength) i = k;
+        if (choice("Vibration strength", &i, names, 4)) g_settings.rumble_strength = pct[i];
+    }
     hint("The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Turn it off "
          "for no rumble at all; DualSense and Switch Pro controllers use their own motors through it.");
     {

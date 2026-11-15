@@ -43,6 +43,7 @@ Settings g_settings = {
     .fsr1_sharpness = 90,
     .deband = true,
     .rumble = true,
+    .rumble_strength = 100,
     .motion = true,
     .motion_shake_pad = -1,
     .motion_shake_key = 514,  // (BIND_MOUSE_MIDDLE: the middle mouse button - nothing else uses it by default)
@@ -259,6 +260,7 @@ void settings_load(void) {
         else if (!strcmp(key, "overlay_render")) g_settings.overlay_render = atoi(val) != 0;
         else if (!strcmp(key, "overlay_position")) g_settings.overlay_position = atoi(val) != 0;
         else if (!strcmp(key, "vibration")) g_settings.rumble = atoi(val) != 0;
+        else if (!strcmp(key, "vibration_strength")) { int v = atoi(val); g_settings.rumble_strength = v >= 25 && v <= 100 ? v : 100; }
         else if (!strcmp(key, "motion")) g_settings.motion = atoi(val) != 0;
         else if (!strcmp(key, "motion_shake_pad")) { int v = atoi(val); g_settings.motion_shake_pad = v >= -1 && v < 64 ? v : -1; }
         else if (!strcmp(key, "motion_shake_key")) { int v = atoi(val); g_settings.motion_shake_key = v >= 0 && v < 1024 ? v : 0; }
@@ -391,6 +393,7 @@ void settings_save(void) {
     fprintf(f, "overlay_hardware = %d\noverlay_render = %d\noverlay_position = %d\n", g_settings.overlay_hardware,
             g_settings.overlay_render, g_settings.overlay_position);
     fprintf(f, "vibration = %d\n", g_settings.rumble);
+    fprintf(f, "vibration_strength = %d\n", g_settings.rumble_strength);
     fprintf(f, "motion = %d\n", g_settings.motion);
     fprintf(f, "motion_shake_pad = %d\n", g_settings.motion_shake_pad);
     fprintf(f, "motion_shake_key = %d\n", g_settings.motion_shake_key);
