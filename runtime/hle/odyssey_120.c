@@ -149,6 +149,45 @@ void odyssey_camera_draw(Cpu *c) {
 static void quality_reduce_off(Cpu *c) { (void)c; }  // (dynamic resolution off: the Reduce nerve does nothing)
 // ODYSSEY_LOG_QUALITY=1 (dynamic resolution on): each second with Reduce steps, how many - when the game lowers it
 static GuestFn original_quality_reduce;
+
+// Mouse camera, direct (#52): CameraPoserFollowLimit::update (the game's usual follow camera; vtable slot 5) adds its
+// turn speed for this frame to its horizontal angle. The stick's speed comes eased (an accumulator that hands out half
+// of itself each frame: the camera keeps turning after the stick is let go); the mouse's movement is added to that
+// frame's speed as it is - the camera turns exactly as far as the mouse moved, at once. Vertically the stick moves a
+// target the angle eases to (the holder at +0x150 / 1.4.1 +0x158: angle +0xc0, target +0xc4); the mouse moves both,
+// within the stick's own limits (-35..85 degrees, measured: the game clamps only what the stick does).
+// (input.c input_mouse_direct; ODYSSEY_MOUSE_DIRECT=0: through the stick as before; ODYSSEY_LOG_FOLLOW=1: the angles)
+static GuestFn original_follow_update;
+static uint32_t follow_speed_off, follow_angle_off, follow_vholder_off;  // (1.0.0: 0x1e4 / 0x1b8 / 0x150; 1.4.1: +8)
+extern bool input_mouse_direct(float *dh, float *dv);
+static void follow_update(Cpu *c) {
+    uint64_t self = c->x[0];
+    float dh = 0, dv = 0;
+    if (input_mouse_direct(&dh, &dv)) {
+        *(float *)(uintptr_t)(self + follow_speed_off) += dh;
+        uint64_t holder = *(uint64_t *)(uintptr_t)(self + follow_vholder_off);
+        if (dv != 0 && holder > 0x7000000000ull) {
+            float *angle = (float *)(uintptr_t)(holder + 0xc0), *target = (float *)(uintptr_t)(holder + 0xc4);
+            const float lo = -35, hi = 85;
+            float t = *target + dv;
+            if (dv < 0 && t < lo) t = *target < lo ? *target : lo;  // (never further out than it already is)
+            if (dv > 0 && t > hi) t = *target > hi ? *target : hi;
+            *angle += t - *target;
+            *target = t;
+        }
+    }
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_FOLLOW") != NULL;
+    if (lg) {
+        static unsigned n;
+        uint64_t holder = *(uint64_t *)(uintptr_t)(self + follow_vholder_off);
+        if (n++ % 10 == 0 && holder > 0x7000000000ull)
+            LOG("[follow] angle H %.2f (speed %.3f), V %.2f (target %.2f), mouse %.3f %.3f\n",
+                *(float *)(uintptr_t)(self + follow_angle_off), *(float *)(uintptr_t)(self + follow_speed_off),
+                *(float *)(uintptr_t)(holder + 0xc0), *(float *)(uintptr_t)(holder + 0xc4), dh, dv);
+    }
+    original_follow_update(c);
+}
 static void quality_reduce_log(Cpu *c) {
     static uint64_t window, n;
     uint64_t now = plat_now_ns();
@@ -506,6 +545,13 @@ void odyssey_native_120_boot(void) {
         uint64_t dec = main->base + 0x97dae0;
         if (v141 && (!e || atoi(e) != 0) && (original_szs_decoder = dispatch_lookup(dec)))
             hle_override(dec, szs_decoder, "SZS decoder off the core gate");
+    }
+    {   // the mouse camera, direct (follow_update)
+        uint64_t upd = main->base + (v141 ? 0xbd2b0 : 0xca8b0);
+        follow_speed_off = v141 ? 0x1ec : 0x1e4, follow_angle_off = v141 ? 0x1c0 : 0x1b8, follow_vholder_off = v141 ? 0x158 : 0x150;
+        const char *e = getenv("ODYSSEY_MOUSE_DIRECT");
+        if ((!e || atoi(e) != 0) && (original_follow_update = dispatch_lookup(upd)))
+            hle_override(upd, follow_update, "Odyssey follow camera: mouse turns it directly");
     }
     {   // Dynamic resolution off (setting game_dynres; ODYSSEY_GAME_DYNRES=0/1): al::GraphicsQualityController - the game's
         // own load-driven quality, a nerve machine Wait -> Reduce -> Recover - lowers the resolution when frames run

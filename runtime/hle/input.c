@@ -165,6 +165,8 @@ static void mouse_tilt(float *ox, float *oy) {
 // The mouse's share of the right stick (nn::hid units), when the game's camera isn't taking it itself
 static void mouse_stick(int32_t *rx, int32_t *ry) {
     if (plat_now_ns() - atomic_load(&g_camera_asked_ns) < 100000000ull) return;  // (the camera has it: below)
+    extern _Atomic uint64_t g_mouse_direct_ns;
+    if (plat_now_ns() - atomic_load(&g_mouse_direct_ns) < 100000000ull) return;  // (the follow camera takes it directly)
     float x, y;
     mouse_tilt(&x, &y);
     float r = sqrtf(x * x + y * y);
@@ -179,6 +181,27 @@ static void mouse_stick(int32_t *rx, int32_t *ry) {
 // CameraPoserFollowLimitFunction::getRotateStickThreshold): a smaller movement is kept and given with the next ones
 // once they add up past it (and forgotten after a pause), so slow movements turn the camera too.
 #define CAMERA_THRESHOLD 0.32f
+// The follow camera turned by the mouse directly (odyssey_120.c follow_update, #52): each camera update takes the
+// horizontal movement since the last as degrees (MOUSE_DEG_PER_COUNT at 100% speed), added to that update's turn as it
+// is - no easing, no threshold. While it does, the stick path below leaves the horizontal movement alone.
+#define MOUSE_DEG_PER_COUNT 0.2f
+_Atomic uint64_t g_mouse_direct_ns;  // the follow camera last took the mouse
+bool input_mouse_direct(float *dh, float *dv) {
+    *dh = *dv = 0;
+    extern bool menu_input_captured(void);
+    if (!(atomic_load(&mouse_held) || (host_test && g_settings.mouse_camera)) || menu_input_captured()) return false;
+    uint64_t now = plat_now_ns();
+    static uint64_t last;
+    bool stale = now - last > 250000000ull;  // (after a pause: what piled up meanwhile is old)
+    last = now;
+    float cx = atomic_exchange(&mouse_acc_x, 0) / 16.0f, cy = atomic_exchange(&mouse_acc_y, 0) / 16.0f;
+    atomic_store(&g_mouse_direct_ns, now);
+    if (stale) return true;
+    float k = MOUSE_DEG_PER_COUNT * g_settings.mouse_sensitivity / 100.0f;
+    *dh = -cx * k * (g_settings.mouse_invert_x ? -1 : 1);  // (the game's angle grows to the left)
+    *dv = cy * MOUSE_DEG_PER_COUNT * g_settings.mouse_sensitivity_y / 100.0f * (g_settings.mouse_invert_y ? -1 : 1);
+    return true;
+}
 static void mouse_camera_frame(float *ox, float *oy) {
     static uint64_t last;
     static float fx, fy, cx, cy;  // this update's tilt; the counts not given yet
@@ -186,7 +209,9 @@ static void mouse_camera_frame(float *ox, float *oy) {
     if (now - last > 6000000ull) {  // (a new update: more than 6 ms since the last read)
         if (now - last > 250000000ull) cx = cy = 0;  // (after a pause: what was left over is old)
         last = now;
-        cx += atomic_exchange(&mouse_acc_x, 0) / 16.0f, cy += atomic_exchange(&mouse_acc_y, 0) / 16.0f;
+        bool direct = now - atomic_load(&g_mouse_direct_ns) < 100000000ull;  // (horizontal: the follow camera's own)
+        if (direct) cx = cy = 0;
+        else cx += atomic_exchange(&mouse_acc_x, 0) / 16.0f, cy += atomic_exchange(&mouse_acc_y, 0) / 16.0f;
         static float full = 0;
         if (!full) { const char *f = getenv("ODYSSEY_MOUSE_FULL"); full = f && atof(f) > 0 ? (float)atof(f) : MOUSE_FULL; }
         float k = 60.0f / 100.0f / full;  // counts in a 60th of a second -> tilt

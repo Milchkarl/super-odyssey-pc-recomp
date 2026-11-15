@@ -1400,7 +1400,8 @@ static void tab_about(void) {
          "menu (Esc) or when you switch to another window.");
     camera_speed("Mouse horizontal speed", &g_settings.mouse_sensitivity);
     camera_speed("Mouse vertical speed", &g_settings.mouse_sensitivity_y);
-    hint("Separate speed for each mouse axis. A quick flick turns the camera faster still.");
+    hint("Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a "
+         "stick (the usual follow camera; the other camera kinds take the mouse as a stick).");
     toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
     toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
     hint("Moving the mouse up turns the camera down instead.");
