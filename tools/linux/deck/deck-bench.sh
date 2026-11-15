@@ -24,7 +24,7 @@ SAVE=${SAVE:-/home/deck/sopr/bench/savecomplete.tar}
 if [ -d "$SAVE" ]; then cp -a "$SAVE/." "$OUT/save/"; else tar -xf "$SAVE" -C "$OUT/save/"; fi
 [ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
 %b" "${EXTRA_INI:-}" > "$OUT/set.ini"
-rm -f "$F/build/samples.txt"
+rm -f "$F/build/samples.txt" "$F/build/stacks.txt"
 D=$(dirname "$(readlink -f "$0")")
 if [ "${LAUNCH:-}" = steam ]; then
     # Through Steam (Gaming Mode as the owner plays it): the Steam shortcut to play-dev.sh runs this with the settings
@@ -55,5 +55,5 @@ else
     ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout 900 "$APP" > "$OUT/run.log" 2>&1
     echo "EXIT=$?" >> "$OUT/run.log"
 fi
-cp "$F/build/samples.txt" "$OUT/" 2>/dev/null
+cp "$F/build/samples.txt" "$F/build/stacks.txt" "$OUT/" 2>/dev/null
 echo DONE >> "$OUT/run.log"

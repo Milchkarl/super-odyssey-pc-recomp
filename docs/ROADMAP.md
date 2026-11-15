@@ -32,6 +32,11 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
      graph plots it. The 60 Hz timer is locked to the display (vi.c, ODYSSEY_VSYNC_LOCK, offset 9 ms): images held a
      second refresh in a 50 s Deck walk went from 5-9 to 0-2, each left one a game hitch. Present to screen is ~47 ms,
      all of it after our GPU work (gamescope). Next: the game hitches themselves; measure the lock on Windows.
+   - **Done 2026-11-15:** the fog map's first CPU read no longer waits for the GPU (exec.c renderer_cpu_texel,
+     objects.c): a ~60 ms hitch two frames into Cap Kingdom gone. Left on the bench route: the stage's first frame
+     (~95 ms of first uses spread over views, texture hashing, uploads, allocations - no single cause), which the
+     display shows as one or two images held. Render-thread profiles: SAMPLE_AT + GAME_ENV=ODYSSEY_SAMPLE_THREAD_NAME=
+     render,ODYSSEY_SAMPLE_STACK=1, then tools/linux/deck/stacks.py on the Deck.
 4. **Gyro on the Deck, automatic.** The Switch's motion controls (shaking to throw Cappy, motion aiming) from the
    Deck's gyro through SDL3 sensors - working when the game is added to Steam without a Steam Input setup (to be
    tested in Gaming Mode: Steam Input owns the controller there) - and a settings page for gyro (sensitivity,
