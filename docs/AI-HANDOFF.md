@@ -45,6 +45,13 @@ standing rule for every change.
   The release notes say the Deck isn't playable yet and recommend 60 FPS.
 
 ### Local only (not pushed), on `linux-deck`
+- **2026-11-15 night session** (details and numbers: [OPTIMIZATIONS.md](OPTIMIZATIONS.md)): present timing +
+  vsync timer locked to the display (Linux); fog readback no longer waits on a map's first read; blended full-screen-
+  sized draws no longer hold the picture (the owner's ~180 ms capture / box hitches); SPIR-V call inlining + slimming
+  (vertex libraries 175 -> 102 ms CPU on a Deck); the shader preparation asked for and run on the launcher page (no
+  own window); aspect ratios 16:10 / 21:9 / 32:9 / 4:3 with bars on any screen; VSync, refresh rate, the monitor's real
+  resolutions, exact render sizes in the menu; Shake button / key (#39, #27); catch-up clock on Windows too (#13, #42).
+  Issue comments posted (no closing): #41 #39 #27 #13 #42 #46 #44.
 - **Early fences** (Linux default): the game's `nvnSyncWait` waits only for the GPU work that wrote game memory, not
   for the whole frame. Submissions split after such writes, at most 8 a frame, and none when a submit costs > 1 ms.
 - **Placed GPU-owned guest heap** (Linux default, `ODYSSEY_VK_PLACED_HEAP=0` turns it off): the game's heap is
