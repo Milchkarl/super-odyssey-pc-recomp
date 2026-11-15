@@ -87,6 +87,15 @@ standing rule for every change.
   Known limits: stores outside the fast-copy table (uses_gmem without the map) and vertex/fragment stores still wait;
   a kernel call (e.g. a file read) into a protected page would get EFAULT instead of faulting (not seen); the
   render thread reads such pages without waiting (as it did before).
+- **Dynamic resolution fixed (2026-11-15):** with early fences the game read its GPU timing counters before the GPU
+  ran the frame and got host-clock translation time, so its dynamic resolution sat at its minimum (960x540 of
+  1600x900) on the Deck even with the GPU ~30% busy: "extreme quality loss when moving the camera". The end
+  counter's provisional value is now start + the previous frame's real GPU time (exec.c cq_pair_ticks). At
+  `resolution = match` the game returns to 1600x900; at the owner's `1440p` it stays at 960x540 because the GPU
+  really can't do 2560x1440 at 60.
+- **Power target: 60 FPS at 5-7 W, 16:10** (the owner, 2026-11-15). The TDP limit is set by the owner (Steam's
+  per-game performance profile on the dev shortcut), not by agents: no system settings changes on the Deck.
+  deck-gpu.sh logs the power draw, so check it in each run's gpu.log.
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 

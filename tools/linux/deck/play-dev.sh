@@ -29,5 +29,7 @@ mkdir -p "$L"
 export ODYSSEY_DATA_ROOT=$F ODYSSEY_SAVE_DIR=$F/save ODYSSEY_SETTINGS=$F/powermoon-0291.ini ODYSSEY_NO_UPDATE_CHECK=1
 export ODYSSEY_VK_PROF=1 ODYSSEY_LOG_SLOW_FRAMES=25 ODYSSEY_LOG_STAGES=1
 ("$D/deck-threads.sh" "$L/threads-$TS.log" &)
+# (the log is kept by a detached helper once the game has exited: quitting from Steam ends this script with the game)
+setsid bash -c 'sleep 20; while pgrep -f "AppDir/usr/bin/SuperOdysseyRecomp" > /dev/null; do sleep 2; done
+    cp "$0" "$1"' "$F/SuperOdysseyRecomp.log" "$L/dev-session-$TS.log" < /dev/null > /dev/null 2>&1 &
 "$APP" "$@"
-cp "$F/SuperOdysseyRecomp.log" "$L/dev-session-$TS.log" 2>/dev/null
