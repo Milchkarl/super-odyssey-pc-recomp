@@ -647,6 +647,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal, VkCommandBuffer extra
 // whose game heap isn't in huge pages each submission takes the kernel ~3 ms (it re-checks the imported heap page by
 // page), and a screen with ~23 compute writes a frame (the map) fell to 10 FPS split after each one.
 _Atomic uint64_t g_submit_ns;
+uint64_t prof_splits, prof_splits_skipped;  // (stats)
 static void split_if_pending(void) {
     if (!g_split_pending || in_pass) return;
     g_split_pending = false;
@@ -654,7 +655,9 @@ static void split_if_pending(void) {
     static uint64_t frame;
     static int n;
     if (vk_frame_counter() != frame) frame = vk_frame_counter(), n = 0;
-    if (n >= 8 || atomic_load(&g_submit_ns) > 1000000) return;
+    extern uint64_t prof_splits, prof_splits_skipped;
+    if (n >= 8 || atomic_load(&g_submit_ns) > 1000000) { prof_splits_skipped++; return; }
+    prof_splits++;
     n++;
     vk_submit_extra(VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
 }
@@ -1237,9 +1240,12 @@ const char *renderer_stats(void) {
             extern uint64_t prof_tex_watch_skips;
             n = strlen(stats_text);
             extern uint64_t prof_gmem_binds;
-            snprintf(stats_text + n, sizeof stats_text - n, " | tex unwritten %llu | heap binds %llu", (unsigned long long)prof_tex_watch_skips,
-                     (unsigned long long)prof_gmem_binds);
-            prof_tex_watch_skips = prof_gmem_binds = 0;
+            extern uint64_t prof_splits, prof_splits_skipped;
+            extern _Atomic uint64_t g_submit_ns;
+            snprintf(stats_text + n, sizeof stats_text - n, " | tex unwritten %llu | heap binds %llu | splits %llu (skipped %llu, a submission %.2f ms)",
+                     (unsigned long long)prof_tex_watch_skips, (unsigned long long)prof_gmem_binds, (unsigned long long)prof_splits,
+                     (unsigned long long)prof_splits_skipped, atomic_load(&g_submit_ns) / 1e6);
+            prof_tex_watch_skips = prof_gmem_binds = prof_splits = prof_splits_skipped = 0;
         }
         pthread_mutex_lock(&wait_tab_lock);
         for (int i = 0; i < 12 && wait_tab[i].why; i++) {
