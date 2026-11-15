@@ -90,6 +90,8 @@ typedef struct {
     int overlay_opacity;  // percent of the background, 0..100
     bool overlay_gpu, overlay_cpu, overlay_ram, overlay_graph, overlay_hardware, overlay_render, overlay_position;
     bool motion;         // the controller's gyro / accelerometer as the Switch's motion sensor (runtime/hle/input.c)
+    int motion_shake_pad;  // a controller button (PADB_*) that shakes the controller for the game while held (-1: none)
+    int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int stick_deadzone;  // percent of a controller stick's travel that counts as rest (runtime/hle/input.c), 0: none
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
