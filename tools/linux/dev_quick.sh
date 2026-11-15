@@ -18,6 +18,7 @@ podman run --rm --arch amd64 -v "$PWD:/src" -w /src "$IMG" \
     /src/build/linux/x86_64/game/SuperOdysseyRecomp
 cp "$L/game/SuperOdysseyRecomp" "$A/usr/bin/SuperOdysseyRecomp"
 mkdir -p "$A/usr/bin/lang" && cp runtime/ui/lang/*.txt "$A/usr/bin/lang/"  # (the menu's translations)
+mkdir -p "$A/usr/bin/fsr2" && cp third_party/fsr2/shaders/* third_party/fsr2/LICENSE.txt "$A/usr/bin/fsr2/"  # (FSR 2)
 # (as tools/linux/package.sh does: the AppDir's own libraries, through $ORIGIN/../lib)
 podman run --rm --arch amd64 -v "$PWD:/src" -w /src "$IMG" \
     patchelf --set-rpath '$ORIGIN/../lib' /src/build/linux/x86_64/AppDir/usr/bin/SuperOdysseyRecomp

@@ -17,7 +17,7 @@
 #include "../platform.h"
 #include "nvn.h"
 #include "rqueue.h"
-#ifdef _WIN32
+#ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
 #include "vulkan/dlss_probe.h"
 #endif
 
@@ -90,7 +90,7 @@ static void *render_thread(void *arg) {
             RqPaintWrite *w = it.p; renderer_paint_cpu_written(w->addr, w->size); break;
         }
 #endif
-#ifdef _WIN32
+#ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
         case RQ_DLSS_CAMERA: vk_dlss_set_camera(it.p); free(it.p); break;
 #endif
         }

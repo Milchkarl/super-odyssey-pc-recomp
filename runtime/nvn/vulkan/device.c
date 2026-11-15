@@ -1456,7 +1456,7 @@ static bool frame_placement(float v[4], float pv[8]) {
     }
     OutScale os;
     output_scale(dw, dh, odyssey_wide_shape(), SDL_GetTicksNS() / 1e9, -1, &os);
-#ifdef _WIN32
+#ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
     // Only the automatic choice lets a DLSS preset pick the input resolution.
     double dlss_scale = vk_temporal_scale();
     if (g_settings.res_mode == RES_MATCH && dlss_scale && os.shape == 1.0 && os.vh >= 720) {
@@ -1486,7 +1486,7 @@ static void frame_decide(NvnTexture *t, uint64_t present_at) {
     vk_end_pass();
     g_interp_present_frame = total_frames;
     int interp_want = odyssey_native_120_enabled() ? INTERP_OFF : interp_wanted();
-#ifdef _WIN32
+#ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
     if (vk_temporal_enabled()) interp_want = INTERP_OFF;
 #endif
     if (interp_want == INTERP_ON && total_frames < brake_until) interp_want = INTERP_OFF;

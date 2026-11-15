@@ -294,6 +294,7 @@ dist:
 	    "$(DIST)/gamelib-src/"
 	cp runtime/nvn/vulkan/known_programs.txt third_party/imgui/misc/fonts/Roboto-Medium.ttf data/pipeline-seed.bin 	    README.md LICENSE "$(DIST)/"
 	mkdir -p "$(DIST)/lang" && cp runtime/ui/lang/*.txt "$(DIST)/lang/"  # (the menu's translations: runtime/ui/i18n.mm)
+	mkdir -p "$(DIST)/fsr2" && cp third_party/fsr2/shaders/* third_party/fsr2/LICENSE.txt "$(DIST)/fsr2/"  # (FSR 2: runtime/nvn/vulkan/fsr2.c)
 	cp build/upscalers/*.dll "$(DIST)/"  # (loaded only when chosen in the menu)
 	tools/dist_licenses.sh "$(DIST)"  # (every shipped component's licence and source: licenses/README.txt)
 	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/SuperOdysseyRecomp.exe | awk '(/ucrt64/ || /deps-win/) && !/vulkan-1/ {print $$3}' | \
