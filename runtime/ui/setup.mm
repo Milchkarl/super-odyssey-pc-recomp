@@ -547,6 +547,96 @@ static std::atomic<int> g_config_result{0};  // 1: Play, 2: Exit
 bool setup_config_shown(void) { return g_config.load(); }
 void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*prelaunch)(float));
 
+// ---- the shader preparation on this page (no window of its own): asked for when Play is pressed and a full
+// preparation is due (a fresh install, Compile shaders in the menu, a new translation), then run here with a progress
+// bar. Later: the game starts, and the next start asks again.
+#ifndef __APPLE__
+extern "C" bool vk_prepare_due(void);
+extern "C" void vk_prepare_skip_this_start(void);
+enum { PREP_NONE, PREP_ASK, PREP_RUN, PREP_DONE };
+static std::atomic<int> g_prep{PREP_NONE}, g_prep_phase{0}, g_prep_done{0}, g_prep_total{0}, g_prep_code{0};
+static volatile int g_prep_cancel;
+static uint64_t g_prep_t0, g_prep_phase_t0;
+static int g_prep_last_phase = -1;
+static void prep_page_progress(int phase, int done, int total) {
+    g_prep_phase = phase, g_prep_done = done, g_prep_total = total;
+}
+static void *prep_page_work(void *) {
+    int code = vk_prepare_install(prep_page_progress, &g_prep_cancel);
+    g_prep_code = code;
+    if (code != 0) vk_prepare_skip_this_start();  // (cancelled or failed: what is done stays; the game starts)
+    g_prep = PREP_DONE;
+    return NULL;
+}
+static void prep_start(void) {
+    g_prep_cancel = 0;
+    g_prep_t0 = g_prep_phase_t0 = SDL_GetTicksNS();
+    g_prep_last_phase = -1;
+    g_prep_phase = 0, g_prep_done = 0, g_prep_total = 0;
+    g_prep = PREP_RUN;
+    pthread_t t;
+    if (pthread_create(&t, NULL, prep_page_work, NULL) == 0) pthread_detach(t);
+    else { vk_prepare_skip_this_start(); g_prep = PREP_DONE; }
+}
+static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float cardh, float pad) {
+    float w = fminf(cardw - 2 * pad, 760 * scale);
+    ImVec2 p0(c0.x + (cardw - w) * 0.5f, c0.y + cardh * 0.24f);
+    ImGui::SetCursorScreenPos(p0);
+    ImGui::BeginGroup();
+    ImGui::PushTextWrapPos(p0.x + w);
+    ImGui::PushFont(big);
+    ImGui::TextUnformatted(g_prep.load() == PREP_ASK ? "Compile the shaders now?" : "Compiling the shaders");
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, 8 * scale));
+    if (g_prep.load() == PREP_ASK) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+        ImGui::TextWrapped("The game's shaders are turned into ones your GPU runs, once, before playing. Without it they "
+                           "are made the first time each one is needed, which shows as short stutters for a while. "
+                           "It takes a few minutes (longer on a Steam Deck) and is only needed again after an update "
+                           "that changes them, or when you ask for it in the menu.");
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 18 * scale));
+        if (accent_button("Compile now", scale)) prep_start();
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+        ImGui::SameLine(0, 16 * scale);
+        if (accent_button("Later", scale)) { vk_prepare_skip_this_start(); g_prep = PREP_DONE; }
+    } else {
+        int ph = g_prep_phase.load(), d = g_prep_done.load(), n = g_prep_total.load();
+        uint64_t now = SDL_GetTicksNS();
+        if (ph != g_prep_last_phase) g_prep_last_phase = ph, g_prep_phase_t0 = now;
+        static const char *const steps[] = {"Step 1 of 3: translating the game's shaders", "Step 2 of 3: compiling them for your GPU",
+                                            "Step 3 of 3: compiling the recorded pipelines"};
+        ImGui::TextUnformatted(steps[ph >= 0 && ph <= 2 ? ph : 1]);
+        float f = n > 0 ? (float)d / (float)n : 0;
+        ImGui::Dummy(ImVec2(0, 6 * scale));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccentV);
+        char ov[64];
+        snprintf(ov, sizeof ov, n > 0 ? "%d / %d" : "starting...", d, n);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10 * scale, 8 * scale));
+        ImGui::ProgressBar(f, ImVec2(w, 0), ov);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        double el = (now - g_prep_t0) / 1e9, pel = (now - g_prep_phase_t0) / 1e9;
+        char t[128];
+        if (f > 0.02f && pel > 3) {
+            double left = pel / f - pel;
+            snprintf(t, sizeof t, "%d:%02d so far, about %d:%02d left in this step", (int)el / 60, (int)el % 60, (int)left / 60, (int)left % 60);
+        } else snprintf(t, sizeof t, "%d:%02d so far", (int)el / 60, (int)el % 60);
+        ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+        ImGui::TextUnformatted(t);
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 18 * scale));
+        if (accent_button("Stop and play", scale)) g_prep_cancel = 1;
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+        ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+        ImGui::TextWrapped("What is compiled so far is kept; the rest is made while you play.");
+        ImGui::PopStyleColor();
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+}
+#endif
+
 static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -584,6 +674,14 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     }
+#ifndef __APPLE__
+    if (g_prep.load() == PREP_ASK || g_prep.load() == PREP_RUN) {  // (the shader preparation: this card only)
+        prep_card(scale, big, c0, cardw, cardh, pad);
+        ImGui::PopFont();
+        ImGui::End();
+        return;
+    }
+#endif
     float footer = 84 * scale;
     float top = ImGui::GetCursorPosY();
     ImGui::SetCursorPos(ImVec2(c0.x + pad * 0.4f, top));
@@ -665,8 +763,16 @@ bool config_run(void) {
     for (const char *v : skip_vars)
         if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0"))) return true;
     const char *force = getenv("ODYSSEY_CONFIG");  // (1: shown even when turned off; 0: never)
-    if (force ? atoi(force) == 0 : !g_settings.config_at_start) return true;
+#ifndef __APPLE__
+    bool prep_due = vk_prepare_due();  // (shown for that even when the page is turned off: no window of its own)
+#else
+    bool prep_due = false;
+#endif
+    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due) return true;
     ui_window_init();
+#ifndef __APPLE__
+    if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)
+#endif
     SDL_Window *w = ui_window();
     LOG("[config] the configuration page before the game\n");
     g_config_result = 0;
@@ -682,12 +788,42 @@ bool config_run(void) {
             else menu_handle_event(&e);
         }
         menu_apply_window_requests(w);
+        {   // (60 frames a second: the page is static, and a mailbox swapchain would otherwise draw it flat out)
+            static uint64_t next;
+            uint64_t now = SDL_GetTicksNS();
+            if (next > now && next - now < 100000000ull) SDL_DelayPrecise(next - now);
+            next = (next > now && next - now < 100000000ull ? next : now) + 16666667ull;
+        }
         frame++;
         bool s = shot && frame == atol(shot);
+#ifndef __APPLE__
+        // ODYSSEY_PREP_PAGE_TEST=1 (tests): the question at frame 60 (build/prep_ask.png), Compile now at 90, the progress
+        // at 900 (build/prep_run.png), then stopped
+        static const char *pt = getenv("ODYSSEY_PREP_PAGE_TEST");
+        const char *pshot = NULL;
+        if (pt) {
+            if (frame == 30 && g_prep.load() == PREP_NONE) g_prep = PREP_ASK;
+            if (frame == 60) pshot = "build/prep_ask.png";
+            if (frame == 90 && g_prep.load() == PREP_ASK) prep_start();
+            if (frame == 900) pshot = "build/prep_run.png";
+            if (frame == 901) g_prep_cancel = 1;
+        }
+        if (pshot) { page_frame(w, pshot); continue; }
+#endif
         page_frame(w, s ? "build/config.png" : NULL);
         if (s) result = 1;
         if (!result) result = g_config_result.exchange(0);
+#ifndef __APPLE__
+        // Play with a preparation due: the question first (the shot test: straight on)
+        if (result == 1 && !s && g_prep.load() == PREP_NONE && vk_prepare_due()) { g_prep = PREP_ASK; result = 0; }
+        static bool quit_after;  // (closed while compiling: it stops first, then the program exits)
+        if (g_prep.load() == PREP_RUN && result == 2) { g_prep_cancel = 1; quit_after = true; result = 0; }
+        if (g_prep.load() == PREP_DONE && !result) result = quit_after ? 2 : 1;
+#endif
     }
+#ifndef __APPLE__
+    while (g_prep.load() == PREP_RUN) SDL_Delay(20);  // (stopped: its process ends)
+#endif
     g_config = false;
     menu_setup_mode(false);
     settings_save();

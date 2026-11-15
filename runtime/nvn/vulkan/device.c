@@ -1815,34 +1815,47 @@ void vk_prepare_request(bool on) {
 // Do a full pass on a fresh profile. On later starts the existing cache is reused, even after an interrupted
 // preparation or a new executable. ODYSSEY_PRECOMPILE=1 opts into a full pass once per executable; the menu's
 // Compile shaders (cache/prepare.request) into one at the next start, whatever was done before.
-void vk_prepare_before_start(void) {
+// Whether this start has a full preparation due (vk_prepare_before_start's checks, without doing it): the configuration
+// page (runtime/ui/setup.mm) asks the player then and runs it on its own page, with a progress bar.
+static bool g_prepare_skipped;  // (the player said Later: not this start)
+static bool prepare_due(bool log, char key[64]) {
+    key[0] = 0;
+    if (g_prepare_skipped) return false;
     const char *e = getenv("ODYSSEY_PREPARE");
-    if (e && !atoi(e)) return;
+    if (e && !atoi(e)) return false;
     const char *pe = getenv("ODYSSEY_PRECOMPILE");
-    if (pe && !atoi(pe)) return;
+    if (pe && !atoi(pe)) return false;
     struct stat st;
     // A recovery boot runs with fresh driver caches. The cache guard clears the completion marker so the
     // next normal boot prepares the shaders again.
-    if (cache_start_interrupted()) return;
+    if (cache_start_interrupted()) return false;
     bool requested = vk_prepare_requested();
     bool cached = vk_spirv_cache_available();
     // (PREPARED_MARK: a full pass finished, or was closed by the player - written below. A cache without it was
     // only filled while playing, e.g. a test run with ODYSSEY_PREPARE=0: the full pass still runs once.)
     bool prepared = stat(PREPARED_MARK, &st) == 0;
     if (cached && prepared && !pe && !requested) {
-        LOG("[prep] shader cache found; using quick startup\n");
-        return;
+        if (log) LOG("[prep] shader cache found; using quick startup\n");
+        return false;
     }
-    if (cached && !prepared) LOG("[prep] shader cache never fully prepared: full pass\n");
-    if (requested) LOG("[prep] full shader preparation (asked for in the menu)\n");
-    char exe[1024], key[64] = "", have[64] = "";
-    if (plat_exe_path(exe, sizeof exe) && stat(exe, &st) == 0) snprintf(key, sizeof key, "%lld %lld", (long long)st.st_size, (long long)st.st_mtime);
+    if (log && cached && !prepared) LOG("[prep] shader cache never fully prepared: full pass\n");
+    if (log && requested) LOG("[prep] full shader preparation (asked for in the menu)\n");
+    char exe[1024], have[64] = "";
+    if (plat_exe_path(exe, sizeof exe) && stat(exe, &st) == 0) snprintf(key, 64, "%lld %lld", (long long)st.st_size, (long long)st.st_mtime);
     if (cached && key[0] && !requested) {
         FILE *f = fopen(PREPARED_MARK, "r");
         if (f) { if (!fgets(have, sizeof have, f)) have[0] = 0; fclose(f); }
         have[strcspn(have, "\r\n")] = 0;
-        if (!strcmp(have, key)) return;
+        if (!strcmp(have, key)) return false;
     }
+    return true;
+}
+bool vk_prepare_due(void) { char key[64]; return prepare_due(false, key); }
+void vk_prepare_skip_this_start(void) { g_prepare_skipped = true; LOG("[prep] shader preparation put off (Later)\n"); }
+
+void vk_prepare_before_start(void) {
+    char key[64];
+    if (!prepare_due(true, key)) return;
     mkdir("cache", 0755);
     remove("cache/prepare.progress");
     uint64_t t0 = plat_now_ns();
