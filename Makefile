@@ -293,6 +293,7 @@ dist:
 	cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
 	    "$(DIST)/gamelib-src/"
 	cp runtime/nvn/vulkan/known_programs.txt third_party/imgui/misc/fonts/Roboto-Medium.ttf data/pipeline-seed.bin 	    README.md LICENSE "$(DIST)/"
+	mkdir -p "$(DIST)/lang" && cp runtime/ui/lang/*.txt "$(DIST)/lang/"  # (the menu's translations: runtime/ui/i18n.mm)
 	cp build/upscalers/*.dll "$(DIST)/"  # (loaded only when chosen in the menu)
 	tools/dist_licenses.sh "$(DIST)"  # (every shipped component's licence and source: licenses/README.txt)
 	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/SuperOdysseyRecomp.exe | awk '(/ucrt64/ || /deps-win/) && !/vulkan-1/ {print $$3}' | \

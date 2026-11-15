@@ -1,0 +1,121 @@
+# Performance techniques in Super Odyssey PC Recomp
+
+What made this static recompilation (Switch ARM64 -> C, NVN emulated on Vulkan) run smoothly, why each one works,
+how it was measured, and the switches that turn it off. Most of it applies to any recompiled or emulated console
+game - Switch or not: the problems are the same wherever a game written for unified memory and a fixed-function
+display meets a PC driver.
+
+Everything here was measured, not assumed: numbers come from scripted runs on a Steam Deck (Gaming Mode, 10 W) and a
+Windows PC (RTX 4090, 144 Hz monitor) unless stated. The tools are at the end.
+
+## 1. Frame pacing: measure what the screen shows, not what the game submits
+
+**Problem.** A game's own frame times can be perfectly flat while the screen still stutters: a timer a hair off the
+display's refresh, or a present that lands right at the compositor's latch point, shows one image twice and drops
+another now and then.
+
+**Technique.** `VK_KHR_present_id` + `VK_KHR_present_wait`: tag every present with an id and have a thread wait for
+each in turn (`runtime/nvn/vulkan/pacing.c`). Two completions within a few ms: the first image was replaced before it
+was shown (dropped). A gap of 1.5 refreshes or more: the previous image was shown again (held). Log shown / dropped /
+held and the spacing's p50 / p99 / max every 10 s; draw the performance overlay's frame-time graph from these, so a
+held frame is the spike the eye sees.
+
+**Lock the game's vsync timer to the display.** The emulated 60 Hz timer (`runtime/hle/vi.c`) takes its period from the
+measured display spacing (filtered) and is nudged (at most 0.25 ms a tick) until its ticks fall a fixed offset after
+the reported screen updates. Unlocked, its phase is wherever it started and creeps (~0.03 ms/s on a Deck), so every
+few minutes it sits at the latch point. Deck, 50 s walk: images held 5-9 unlocked, 0-2 locked at a 9 ms offset (each
+remaining one a real game hitch); offsets 1 / 5 / 13 ms gave 2 / 7 / 6. Linux default (`ODYSSEY_VSYNC_LOCK`,
+`ODYSSEY_VSYNC_LOCK_MS`). On Windows (DWM, windowed) it made no measurable difference, so it stays off there.
+
+**A refresh rate that isn't a multiple of the frame rate can't be smooth.** 60 FPS on a 144 Hz monitor alternates
+13.9 / 20.8 ms on screen (p99 ~20.5 ms in the logs). Use 60/120/240 Hz or VRR.
+
+## 2. Don't make the game wait for the GPU when it doesn't need to
+
+**Early fences** (`nvnSyncWait`, `runtime/nvn/objects.c`): once the render thread has translated the fenced work, the
+game's memory it read has already been copied (uniforms, vertices, textures), so the game may continue before the
+GPU has run it - except where the GPU writes game memory. The game was waiting for its whole GPU frame every frame
+(Deck: game 8 + translation 7 + GPU 7 ms = 22 ms, 45 FPS in busy views; with early fences 58-60).
+
+**Guarded GPU writes**: compute results copied back into game memory would still force the wait. Instead their pages
+are protected (`PROT_NONE`) at the fence; a thread that touches one waits for the GPU there (fault handler), a touch
+outside the written byte ranges is single-stepped (x86-64 trap flag) instead of waiting. First Cap Kingdom visit on a
+Deck: 46-49 FPS -> ~60.
+
+**A compute-only queue** for small dispatches that store to game memory: submitted at once, on their own timeline, so
+they never wait behind a frame's graphics work. Guard waits 300-450 ms per 2 s -> 0.
+
+**Stop the game's first reads from waiting.** Any "read back one texel" path should keep a copy a frame or two old and
+never flush on the first read: Cap Kingdom's fog-height query waited ~25 ms of render thread and ~50 ms of game thread
+on its first frame (no copy yet). Returning "not yet" for that frame removed the hitch.
+
+## 3. Shader compilation: stutters, preparation time, coverage
+
+**Never hold the picture for an effect.** If a draw's pipeline isn't built yet, skip the draw (it appears a frame or
+two late) - except for real full-screen passes (lighting, composite), where a skipped draw shows a black or broken
+frame. Classifying "full screen" by size alone catches sprites close to the camera (dust from a broken box, a
+capture's effect): those are blended over the scene and are safe to skip. Holding for them froze the picture 100-300 ms
+(the "very hard" effect hitches); now blended or scissored full-screen-sized draws don't hold
+(`ODYSSEY_HOLD_OVERLAYS=1` restores).
+
+**Make the driver's job smaller.** glslang at -O0 turns every tiny helper (`as_f(x)` = `uintBitsToFloat`) into a real
+call: a temporary variable, a store, the call, a load - ~1,250 per median vertex shader, half its instructions. A
+post-pass over the SPIR-V (`runtime/nvn/vulkan/shaders.c inline_trivial`, `spv_slim`) replaces each call of a
+one-instruction function by that instruction and drops debug names and the then-dead temporaries. Library build CPU
+on a Deck: vertex 175 -> 102 ms, fragment 60 -> 13 ms; RTX 4090 full preparation 125 -> 97 s. Validated with
+`spvValidate` (Vulkan 1.3) on 15,097 modules. spirv-opt at full optimisation gets similar driver savings but costs
+~620 ms per program on a Deck itself - too slow. The pass keeps the SPIR-V cache keys (they hash the GLSL source), so
+nobody has to rebuild their cache.
+
+**Preparation (precompile)**: every shader of the game's archives (32,773 programs) translated, then its pipeline
+libraries built and saved as `VK_KHR_pipeline_binary` data, before the first start. Things that matter:
+- *Coverage is only as good as the keys.* A library is found by its content (SPIR-V key, layout, state) plus the
+  driver's key for its create info. If the preparation process and the game build anything differently, every lookup
+  misses and the whole preparation is wasted. Check it: the log's `binaries N loaded ... absent` - after a full
+  preparation the game should load almost everything (RTX 4090: 1,231 loaded, 2 absent).
+- *Ask, in the launcher, before doing it* - with a progress bar, a time estimate and a way to stop (it keeps what's
+  done).
+- Know where the time goes: on a Deck, scan 43-66 s, translation 159-241 s, library builds 215-539 s.
+
+## 4. Game-side hitches from emulated threading
+
+Recompiled games often emulate the console's cores with "core gates" (one guest thread per emulated core at a
+time). A loading thread decompressing (SZS) holds the core; any of its system calls give the core away and take it
+back mid-decode, stalling the main thread on that core for 12-26 ms. Running pure computation (decompression) off
+the gate for its whole duration (`kernel_ungated_begin/_end`) took gate waits in play from 11-15 to 0.
+
+## 5. Keep game speed real time when frames drop
+
+The game advances one tick per frame. Below 60 FPS it runs in slow motion unless the host runs extra ticks per frame
+(`runtime/gameplay_clock.h`, `ODYSSEY_GAMEPLAY_CATCHUP`): at a forced ~32 FPS, 120 ticks per 2 s with it, 60 without.
+On by default on every platform.
+
+## 6. Resolution, shape and the game's own dynamic resolution
+
+- The game's dynamic resolution (`al::GraphicsQualityController`, a Wait -> Reduce -> Recover state machine) drops the
+  internal resolution to its floor on weak GPUs and never raises it; turning its Reduce step into a no-op (found from
+  the RTTI name in both game versions) keeps the full resolution. A setting, off by default on a Steam Deck.
+- Any picture shape on any screen: the game's camera and HUD layout take a shape factor (ratio / 16:9); the image is
+  fitted into the window with bars where the shapes differ (21:9 on 16:9: bars above and below). Handheld 16:10 needs
+  the HUD's rows scaled and full-screen panes stretched back.
+
+## 7. Steam Deck specifics
+
+- Power is shared (15 W total, or less with a TDP limit): CPU time saved is GPU clock gained. A manual GPU clock of
+  1000 MHz at 10 W holds 60 FPS where automatic clocks don't.
+- The placed guest heap (`VK_EXT_map_memory_placed`): the game's memory as Vulkan memory at its guest address removed
+  ~3 ms per submission that amdgpu spent re-checking a user-pointer import.
+
+## Tools
+
+- `tools/deck_dev.sh bench <name>`: sync, incremental build and a scripted run on the Deck (Gaming Mode with
+  `LAUNCH=steam`); options for saves, input scripts, screenshots along a route (`SHOTS=`), another data folder for cold
+  caches (`DATA=`), extra environment (`GAME_ENV=`).
+- `tools/linux/deck/effects-route.txt`: a scripted route through Cap Kingdom full of effects.
+- Logs: `[display]` (what the screen showed), `[hitch]` (a slow frame broken down), `[shtime]` (shader builds over
+  `ODYSSEY_LOG_SHADER_TIME` ms, with CPU time; held frames with the draw's target and blend), `[gate]` (core gate
+  waits), `ODYSSEY_GPUPROF_AT=<frame>` (GPU time per pass).
+- Sampling profiler (Linux): `ODYSSEY_SAMPLE_AT`, `ODYSSEY_SAMPLE_THREAD_NAME=render|present|<name>`,
+  `ODYSSEY_SAMPLE_STACK=1`, then `tools/linux/deck/stacks.py` (names frames in the binary and the game library).
+- `ODYSSEY_DUMP_GLSL=<folder>`: every GLSL source compiled (not from the cache) - to diff the preparation against the
+  game.

@@ -59,6 +59,17 @@ class LocalizationTests(unittest.TestCase):
                 expected = 'auto' if code == 'invalid' else code
                 self.assertIn(f'language = {expected}\n', self.ini.read_text())
 
+    def test_game_and_menu_language_preferences_are_independent(self):
+        for menu in ('auto', 'en', 'ko'):
+            for game in ('pt-BR', 'ja', 'en-US'):
+                with self.subTest(menu=menu, game=game):
+                    self.ini.write_text(f'language = {game}\nmenu_language = {menu}\n')
+                    first = self.run_settings()
+                    self.assertEqual(first, self.run_settings())
+                    self.assertIn(f'language = {game}\n', self.ini.read_text())
+                    self.assertIn(f'menu_language = {menu}\n', self.ini.read_text())
+                    self.assertEqual(first['code'], 'en-US' if game == 'pt-BR' else game)
+
     def test_unrelated_mod_and_fake_english_files_are_not_translation(self):
         root = self.root / 'mods/JumpManClub Brasil/romfs/LocalizedData/USen'
         for file in FILES:

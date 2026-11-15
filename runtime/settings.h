@@ -2,7 +2,8 @@
 #pragma once
 #include <stdbool.h>
 
-enum { RES_MATCH = 0, /* 1..8 = 1x..8x */ RES_DYNAMIC = 9, RES_Q75 = 10, RES_Q25 = 11, RES_Q50 = 12, RES_1440 = 13 };
+enum { RES_MATCH = 0, /* 1..8 = 1x..8x */ RES_DYNAMIC = 9, RES_Q75 = 10, RES_Q25 = 11, RES_Q50 = 12, RES_1440 = 13,
+       RES_DISPLAY = 14 /* 100%: the window's own pixels (Steam Deck: 1280 x 800), no floor at the Switch's 900 lines */ };
 enum { UPSCALE_BILINEAR = 0, UPSCALE_METALFX = 1 /* macOS */, UPSCALE_FSR1 = 2 /* Windows: AMD FSR 1 */ };
 #ifdef __APPLE__
 #define UPSCALE_SHARP UPSCALE_METALFX  // each OS's non-bilinear upscaler (the default)
@@ -16,6 +17,10 @@ enum { DLSS_PRESET_DEFAULT, DLSS_PRESET_K, DLSS_PRESET_L, DLSS_PRESET_M, DLSS_PR
 enum { TEMPORAL_DLSS, TEMPORAL_FSR3, TEMPORAL_FSR4, TEMPORAL_XESS, TEMPORAL_BACKEND_COUNT };
 enum { WINDOWED, BORDERLESS, EXCLUSIVE_FULLSCREEN, WINDOW_MODE_COUNT };
 enum { DISPLAY_AUTO, DISPLAY_1080, DISPLAY_1440, DISPLAY_2160, DISPLAY_MODE_COUNT };
+// VSync (Vulkan present modes): ON = mailbox (no tearing, the game paces itself - the default), OFF = immediate
+// (tearing, the lowest latency), STRICT = FIFO (each frame waits for its refresh), ADAPTIVE = FIFO relaxed (a late
+// frame goes out at once, tearing then)
+enum { VSYNC_ON, VSYNC_OFF, VSYNC_STRICT, VSYNC_ADAPTIVE, VSYNC_COUNT };
 static inline int settings_display_height(int mode) {
     const int heights[DISPLAY_MODE_COUNT] = {0, 1080, 1440, 2160};
     return heights[mode];
@@ -27,7 +32,14 @@ enum { ANISO_GAME = 0 };
 enum { FPS_60 = 0, FPS_90 = 1, FPS_120 = 2, FPS_COUNT };
 // The image in a window of another shape: 16:9 with bars, or (Vulkan) filling a wider window with more of the scene
 // at the sides (runtime/hle/odyssey_wide.c)
-enum { ASPECT_16_9 = 0, ASPECT_FILL = 1 };
+// or a fixed shape on any screen (bars where the screen's differs, as in PC games' aspect ratio options)
+enum { ASPECT_16_9 = 0, ASPECT_FILL = 1, ASPECT_16_10 = 2, ASPECT_21_9 = 3, ASPECT_32_9 = 4, ASPECT_4_3 = 5, ASPECT_COUNT };
+static const char *const ASPECT_NAMES[ASPECT_COUNT] = {"16:9", "fill", "16:10", "21:9", "32:9", "4:3"};
+// the shape of each fixed one / 16:9 (0: the window's - fill); 21:9 is 64:27 (2560x1080, 5120x2160)
+static const double ASPECT_K[ASPECT_COUNT] = {1.0, 0.0, (16.0 / 10.0) / (16.0 / 9.0), (64.0 / 27.0) / (16.0 / 9.0), 2.0, (4.0 / 3.0) / (16.0 / 9.0)};
+// Console mode: what the game is told it runs as - docked (TV: its 1600x900 rendering, docked effects) or handheld (its
+// own handheld rendering, 1280x720 and lighter effects, as on a Switch Lite). Applies at the next start.
+enum { CONSOLE_DOCKED = 0, CONSOLE_HANDHELD = 1 };
 // Button prompts: Auto follows the device used last (keyboard / mouse or controller)
 // Memory use: Normal builds the shaders of what a stage sets up ahead (fewer stutters, ~3 GB more with NVIDIA's driver),
 // Low builds each at its first draw; Auto is Low on a PC with less than 12 GB of RAM
@@ -40,16 +52,22 @@ enum { PROMPTS_AUTO = 0, PROMPTS_CONTROLLER = 1, PROMPTS_KEYBOARD = 2, PROMPTS_S
 // the game picks its text language from it, as it would from the Switch's own system setting. LANG_AUTO follows the
 // host locale ($LC_ALL / $LC_MESSAGES / $LANG); the rest are the codes of the languages the game has text for.
 enum { LANG_AUTO = 0, LANG_PT_BR = 12, N_LANGUAGES = 13 };
+// The menu's own language: Auto follows the game's (when this menu has a translation for it), or a fixed one
+enum { MENU_LANG_AUTO, MENU_LANG_EN, MENU_LANG_KO, MENU_LANG_COUNT };
 extern const char *const g_language_codes[N_LANGUAGES];  // Persistencia; pt-BR usa en-US no jogo.
 extern const char *const g_language_names[N_LANGUAGES];  // for the menu ("Auto", "Japanese", ..., "Spanish")
 
 typedef struct {
     int window_mode, display_resolution;
+    int display_w, display_h;  // the window / exclusive mode's exact size (0: auto - display_resolution's old choices map here)
+    int refresh_rate;    // exclusive fullscreen's refresh rate in Hz (0: the desktop's)
+    int vsync;           // VSYNC_*: how frames reach the screen
     int monitor;         // 0: current display; 1..N: SDL's current display enumeration
     int res_mode;        // RES_MATCH, 1..4 (N x the Switch's 1080p), RES_DYNAMIC, RES_Q75/50/25 (share of the display)
     int upscaler;        // UPSCALE_*: how a lower internal resolution reaches the window (MetalFX: macOS, FSR 1: Windows)
     int antialias;       // AA_*: anti-aliasing of the game image before it is scaled to the window
     int dlss_mode, dlss_preset;  // Windows NVIDIA modes and model hints, applied during play
+    bool temporal_off;   // the menu's Upscale method: Off (the default) - no temporal upscaler, whatever the modes below
     int temporal_backend, fsr3_mode, fsr3_sharpness, fsr3_cas_sharpness;
     bool fsr3_cas;
     int fsr4_mode, fsr4_sharpness, fsr4_cas_sharpness;
@@ -60,6 +78,8 @@ typedef struct {
     int dlss_rcas_sharpness; // reconstruction sharpening, independent of optional CAS
     int fsr1_sharpness;   // FSR 1's RCAS percent, 0..100; stored independently
     int aspect;          // ASPECT_*: the image in a window wider than 16:9
+    int console_mode;    // CONSOLE_*: docked or handheld (the game's own rendering for each; next start)
+    bool game_dynres;    // the game's own dynamic resolution (on: as on the Switch; off: always its full resolution)
     bool frame_interp;   // images between the game's frames (Vulkan: runtime/nvn/interp.c)
     bool deband;         // smooth gradients: the game's final picture in half floats, dithered into the window (Vulkan:
                          // nvn/vulkan/textures.c vk_deband)
@@ -73,7 +93,10 @@ typedef struct {
     int overlay_opacity;  // percent of the background, 0..100
     bool overlay_gpu, overlay_cpu, overlay_ram, overlay_graph, overlay_hardware, overlay_render, overlay_position;
     bool motion;         // the controller's gyro / accelerometer as the Switch's motion sensor (runtime/hle/input.c)
+    int motion_shake_pad;  // a controller button (PADB_*) that shakes the controller for the game while held (-1: none)
+    int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
+    int rumble_strength;  // 25..100 (%): how strong the vibration is
     int stick_deadzone;  // percent of a controller stick's travel that counts as rest (runtime/hle/input.c), 0: none
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
     int mouse_sensitivity;  // percent, 25..400 (runtime/hle/input.c mouse_stick)
@@ -84,6 +107,7 @@ typedef struct {
     bool stick_camera_invert_x, stick_camera_invert_y;
     int prompts;         // PROMPTS_*: the game's button icons as key caps / a mouse, or the controller's (nvn/kbprompts.c)
     int language;        // LANG_AUTO or an index into g_language_codes: the game's text language
+    int menu_language;   // MENU_LANG_*: this menu's own text (runtime/ui/i18n.mm); applies at the next start
     int aniso;           // ANISO_GAME or 2, 4, 8, 16: the most anisotropic filtering of filtered, mipmapped textures that
                          // tile (nvn/vulkan/textures.c vk_sampler; read at start)
     int frame_rate;      // FPS_*: the game's draws per second (gameplay stays at 60)
@@ -146,6 +170,10 @@ void settings_save(void);
 // The battery saver's settings (lower internal resolution with FSR 1, no extra frames or SMAA): the Steam Deck's
 // defaults and a one-press preset in the menu (runtime/settings.c says what and why)
 void settings_battery_saver(void);
+// The console mode in effect this run (read once: a change applies at the next start; ODYSSEY_HANDHELD=1 / =0 overrides)
+bool settings_handheld(void);
+// The game's dynamic resolution this run (read once; ODYSSEY_GAME_DYNRES=0 / =1 overrides)
+bool settings_game_dynres(void);
 // The language code to serve the game ("es", "en-US", ...): the setting, or the host locale for LANG_AUTO
 const char *settings_language(void);
 // That code's name for the menu ("Spanish")

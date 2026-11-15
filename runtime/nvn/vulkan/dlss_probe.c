@@ -46,6 +46,7 @@ static int temporal_mode(void) {
 }
 
 bool vk_temporal_enabled(void) {
+    if (g_settings.temporal_off) return false;  // (the menu's Upscale method: Off - the default)
     if (g_settings.temporal_backend == TEMPORAL_FSR3)
         return g_settings.fsr3_mode != DLSS_OFF && vk_fsr3_available();
     if (g_settings.temporal_backend == TEMPORAL_FSR4)

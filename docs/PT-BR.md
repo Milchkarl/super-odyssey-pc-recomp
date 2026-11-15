@@ -68,21 +68,32 @@ contribution; unexecuted checks must remain explicitly unverified.
 
 ## Current validation
 
-Windows 11 x64, NVIDIA RTX 5060 Ti, game 1.4.1: the original and changed source
-builds completed. Bounded runs exited successfully with inspected screenshots:
+Initial 0.2.10 validation on Windows 11 x64, NVIDIA RTX 5060 Ti, game 1.4.1:
+the original and changed source builds completed. Bounded runs exited successfully with inspected screenshots:
 original English, missing translation, installed PT-BR, the actual Controls
 menu/detection message, the opening, an existing save copied into a private
 folder, original English restored with the mod disabled, Japanese with the mod
 still installed, and PT-BR restored on restart. Cap Kingdom's tutorial text
 rendered in Portuguese. Original save hashes remained unchanged.
 
-All 12 localization tests passed with the separately obtained package. Without
-private assets, five tests passed and seven asset-dependent tests were skipped.
+All 13 localization tests passed with the separately obtained package. Without
+private assets, six tests passed and seven asset-dependent tests were skipped.
 The existing camera-settings (4), Steam shortcut (8), generated-wrapper (1) and
-AES/SHA-256 known-answer checks passed. The existing standalone Vulkan pipeline
+AES/SHA-256 known-answer checks passed. During that initial validation, the existing standalone Vulkan pipeline
 test failed to link due to missing `vk_device_fault_report` and `smaa_hlsl_src`
 references in its harness; it was not changed as part of this issue. Actual
 Vulkan game execution succeeded.
+
+The contribution was also integrated with upstream **0.2.11**
+(`6548def577d04f5ebea7964ceca894b8bb970a42`). The two integration conflicts
+in settings.h and menu.mm were resolved while preserving the new menu-language
+setting and the PT-BR game preference. The 0.2.11 original runtime and the
+integrated runtime/executable built successfully; both reached inspected menu
+captures. The localization tests now also verify independent persistence of
+PT-BR/Japanese/English game preferences with Auto/English/Korean menu preferences.
+Camera settings, Steam shortcuts, generated wrappers and the new upstream
+gameplay-clock fixture passed on this base. The generator and game-library ID
+were unchanged, so the existing locally generated game library was reused.
 
 This is bounded 1.4.1 validation, not a complete playthrough. Individual visual
 checks for every accented character, all dialogues, long sessions and a

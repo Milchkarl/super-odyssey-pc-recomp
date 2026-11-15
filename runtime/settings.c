@@ -35,6 +35,7 @@ Settings g_settings = {
 #endif
     .dlss_sharpness = 20,
     .dlss_rcas_sharpness = 20,
+    .temporal_off = true,
     .fsr3_mode = DLSS_QUALITY,
     .fsr3_sharpness = 20,
     .fsr3_cas_sharpness = 20,
@@ -43,8 +44,12 @@ Settings g_settings = {
     .fsr1_sharpness = 90,
     .deband = true,
     .rumble = true,
+    .rumble_strength = 100,
     .motion = true,
+    .motion_shake_pad = -1,
+    .motion_shake_key = 514,  // (BIND_MOUSE_MIDDLE: the middle mouse button - nothing else uses it by default)
     .mouse_camera = true,
+    .game_dynres = true,
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -64,6 +69,32 @@ volatile bool g_app_unfocused;
 // gameplay steps once per drawn frame, so a lower frame rate cap would slow the game down, not save power - the savings
 // come from the picture instead: 75% of the display (960 x 600 on a Deck) upscaled with FSR 1, no SMAA, no extra
 // frames (120 FPS, interpolation), 4x anisotropic filtering, the shorter warm-up at start.
+// The Steam Deck's defaults (no settings file yet): the battery saver's, at its own screen's 1280 x 800 rendered and
+// shown 1:1 and filled - the game's view made 16:10 (runtime/hle/odyssey_wide.c) instead of 16:9 with bars (75% + FSR 1
+// before, 2026-11-15).
+static void settings_steam_deck(void) {
+    settings_battery_saver();
+    g_settings.res_mode = RES_DISPLAY;
+    g_settings.aspect = ASPECT_FILL;
+    g_settings.console_mode = CONSOLE_HANDHELD;  // (the game's handheld rendering: what a Switch shows on its own screen)
+    g_settings.game_dynres = false;  // (always the full 1280x800: at 7-10 W the game's own drops went to 768x480)
+}
+bool settings_game_dynres(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("ODYSSEY_GAME_DYNRES");
+        v = e && *e ? atoi(e) != 0 : g_settings.game_dynres;
+    }
+    return v;
+}
+bool settings_handheld(void) {
+    static int h = -1;
+    if (h < 0) {
+        const char *e = getenv("ODYSSEY_HANDHELD");
+        h = e && *e ? atoi(e) != 0 : g_settings.console_mode == CONSOLE_HANDHELD;
+    }
+    return h;
+}
 void settings_battery_saver(void) {
     g_settings.res_mode = RES_Q75;
     g_settings.upscaler = UPSCALE_SHARP;
@@ -183,7 +214,7 @@ void settings_load(void) {
     if (loaded) return;
     loaded = true;
     // Steam Deck: the battery saver's settings unless chosen otherwise (the settings file, read below, wins)
-    if (plat_is_steam_deck()) settings_battery_saver();
+    if (plat_is_steam_deck()) settings_steam_deck();
     FILE *f = fopen(SETTINGS_FILE, "r");
     if (!f && !getenv("ODYSSEY_SETTINGS")) f = fopen("odyssey.ini", "r");  // (the settings of the earlier builds)
     if (!f && !getenv("ODYSSEY_SETTINGS")) f = fopen("larecomp.ini", "r");
@@ -197,7 +228,24 @@ void settings_load(void) {
         for (size_t n = strlen(val); n && (val[n - 1] == ' ' || val[n - 1] == '\r'); n--) val[n - 1] = 0;
         if (!strcmp(key, "fullscreen")) g_settings.window_mode = atoi(val) ? BORDERLESS : WINDOWED;
         else if (!strcmp(key, "window_mode")) g_settings.window_mode = named_option(val, window_modes, WINDOW_MODE_COUNT);
-        else if (!strcmp(key, "display_resolution")) g_settings.display_resolution = named_option(val, display_modes, DISPLAY_MODE_COUNT);
+        else if (!strcmp(key, "display_resolution")) {
+            g_settings.display_resolution = named_option(val, display_modes, DISPLAY_MODE_COUNT);
+            if (!g_settings.display_w && settings_display_height(g_settings.display_resolution))  // (the old choices)
+                g_settings.display_h = settings_display_height(g_settings.display_resolution),
+                g_settings.display_w = g_settings.display_h * 16 / 9;
+        }
+        else if (!strcmp(key, "display_size")) {
+            int w = 0, h = 0;
+            if (sscanf(val, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200 && w <= 16384 && h <= 16384)
+                g_settings.display_w = w, g_settings.display_h = h;
+            else g_settings.display_w = g_settings.display_h = 0;
+        }
+        else if (!strcmp(key, "refresh_rate")) { int r = atoi(val); g_settings.refresh_rate = r >= 0 && r <= 1000 ? r : 0; }
+        else if (!strcmp(key, "vsync")) {
+            static const char *const v[VSYNC_COUNT] = {"on", "off", "strict", "adaptive"};
+            g_settings.vsync = VSYNC_ON;
+            for (int i = 0; i < VSYNC_COUNT; i++) if (!strcmp(val, v[i])) g_settings.vsync = i;
+        }
         else if (!strcmp(key, "monitor")) { int m = atoi(val); g_settings.monitor = m >= 0 && m <= 64 ? m : 0; }
         else if (!strcmp(key, "mod_off")) settings_set_mod_off(val, true);
         else if (!strcmp(key, "volume")) g_settings.volume = (float)atof(val);
@@ -216,12 +264,15 @@ void settings_load(void) {
         else if (!strcmp(key, "overlay_render")) g_settings.overlay_render = atoi(val) != 0;
         else if (!strcmp(key, "overlay_position")) g_settings.overlay_position = atoi(val) != 0;
         else if (!strcmp(key, "vibration")) g_settings.rumble = atoi(val) != 0;
+        else if (!strcmp(key, "vibration_strength")) { int v = atoi(val); g_settings.rumble_strength = v >= 25 && v <= 100 ? v : 100; }
         else if (!strcmp(key, "motion")) g_settings.motion = atoi(val) != 0;
+        else if (!strcmp(key, "motion_shake_pad")) { int v = atoi(val); g_settings.motion_shake_pad = v >= -1 && v < 64 ? v : -1; }
+        else if (!strcmp(key, "motion_shake_key")) { int v = atoi(val); g_settings.motion_shake_key = v >= 0 && v < 1024 ? v : 0; }
         else if (!strcmp(key, "stick_deadzone")) g_settings.stick_deadzone = atoi(val) < 0 ? 0 : atoi(val) > 40 ? 40 : atoi(val);
         else if (!strcmp(key, "resolution")) {
             int n = atoi(val);
             g_settings.res_mode = !strcmp(val, "dynamic") ? RES_DYNAMIC : !strcmp(val, "75%") ? RES_Q75 :
-                                  !strcmp(val, "50%") ? RES_Q50 : !strcmp(val, "25%") ? RES_Q25 : !strcmp(val, "1440p") ? RES_1440 :
+                                  !strcmp(val, "50%") ? RES_Q50 : !strcmp(val, "25%") ? RES_Q25 : !strcmp(val, "1440p") ? RES_1440 : !strcmp(val, "100%") ? RES_DISPLAY :
                                   (n >= 1 && n <= 4) ? n : n > 4 ? 4 : RES_MATCH;
         }
         else if (!strcmp(key, "upscaler")) g_settings.upscaler = !strcmp(val, "bilinear") ? UPSCALE_BILINEAR : UPSCALE_SHARP;  // (metalfx / fsr1: this OS's)
@@ -229,6 +280,7 @@ void settings_load(void) {
         else if (!strcmp(key, "dlss_mode")) g_settings.dlss_mode = named_option(val, dlss_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "dlss_preset")) g_settings.dlss_preset = named_option(val, dlss_presets, DLSS_PRESET_COUNT);
         else if (!strcmp(key, "temporal_backend")) g_settings.temporal_backend = named_option(val, temporal_backends, TEMPORAL_BACKEND_COUNT);
+        else if (!strcmp(key, "upscale_method")) g_settings.temporal_off = !strcmp(val, "off");
         else if (!strcmp(key, "fsr3_mode")) g_settings.fsr3_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "fsr4_mode")) g_settings.fsr4_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "xess_mode")) g_settings.xess_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
@@ -262,7 +314,12 @@ void settings_load(void) {
             g_settings.dlss_rcas_sharpness = n < 0 ? 0 : n > 100 ? 100 : n;
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
-        else if (!strcmp(key, "aspect")) g_settings.aspect = !strcmp(val, "fill") ? ASPECT_FILL : ASPECT_16_9;
+        else if (!strcmp(key, "aspect")) {
+            g_settings.aspect = ASPECT_16_9;
+            for (int i = 0; i < ASPECT_COUNT; i++) if (!strcmp(val, ASPECT_NAMES[i])) g_settings.aspect = i;
+        }
+        else if (!strcmp(key, "console_mode")) g_settings.console_mode = !strcmp(val, "handheld") ? CONSOLE_HANDHELD : CONSOLE_DOCKED;
+        else if (!strcmp(key, "game_dynres")) g_settings.game_dynres = atoi(val) != 0;
         else if (!strcmp(key, "frame_interp")) g_settings.frame_interp = atoi(val) != 0;
         else if (!strcmp(key, "aniso")) {
             int n = atoi(val);
@@ -304,6 +361,8 @@ void settings_load(void) {
             for (int i = 1; i < N_LANGUAGES; i++)
                 if (!strcmp(val, g_language_codes[i])) g_settings.language = i;
         }
+        else if (!strcmp(key, "menu_language"))
+            g_settings.menu_language = !strcmp(val, "en") ? MENU_LANG_EN : !strcmp(val, "ko") ? MENU_LANG_KO : MENU_LANG_AUTO;
         else bind_settings_load(key, val);  // bind_pad_* / bind_key_*: runtime/hle/bindings.c (others: ignored)
     }
     fclose(f);
@@ -319,6 +378,13 @@ void settings_save(void) {
     fprintf(f, "# Super Odyssey PC Recomp settings (edited from the in-game menu: F1, Esc, or the controller's Home button)\n");
     fprintf(f, "window_mode = %s\n", window_modes[g_settings.window_mode]);
     fprintf(f, "display_resolution = %s\n", display_modes[g_settings.display_resolution]);
+    if (g_settings.display_w) fprintf(f, "display_size = %dx%d\n", g_settings.display_w, g_settings.display_h);
+    else fprintf(f, "display_size = auto\n");
+    fprintf(f, "refresh_rate = %d\n", g_settings.refresh_rate);
+    {
+        static const char *const v[VSYNC_COUNT] = {"on", "off", "strict", "adaptive"};
+        fprintf(f, "vsync = %s\n", v[g_settings.vsync >= 0 && g_settings.vsync < VSYNC_COUNT ? g_settings.vsync : 0]);
+    }
     fprintf(f, "monitor = %d\n", g_settings.monitor);
     fprintf(f, "volume = %.2f\n", g_settings.volume);
     fprintf(f, "reverb = %d\n", g_settings.reverb);
@@ -332,12 +398,16 @@ void settings_save(void) {
     fprintf(f, "overlay_hardware = %d\noverlay_render = %d\noverlay_position = %d\n", g_settings.overlay_hardware,
             g_settings.overlay_render, g_settings.overlay_position);
     fprintf(f, "vibration = %d\n", g_settings.rumble);
+    fprintf(f, "vibration_strength = %d\n", g_settings.rumble_strength);
     fprintf(f, "motion = %d\n", g_settings.motion);
+    fprintf(f, "motion_shake_pad = %d\n", g_settings.motion_shake_pad);
+    fprintf(f, "motion_shake_key = %d\n", g_settings.motion_shake_key);
     fprintf(f, "stick_deadzone = %d\n", g_settings.stick_deadzone);
     fprintf(f, "upscaler = %s\n", g_settings.upscaler == UPSCALE_METALFX ? "metalfx" : g_settings.upscaler == UPSCALE_FSR1 ? "fsr1" : "bilinear");
     fprintf(f, "antialias = %s\n", g_settings.antialias == AA_SMAA ? "smaa" : "off");
     fprintf(f, "dlss_mode = %s\n", dlss_modes[g_settings.dlss_mode]);
     fprintf(f, "dlss_preset = %s\n", dlss_presets[g_settings.dlss_preset]);
+    fprintf(f, "upscale_method = %s\n", g_settings.temporal_off ? "off" : temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "temporal_backend = %s\n", temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "fsr3_mode = %s\n", fsr3_modes[g_settings.fsr3_mode]);
     fprintf(f, "fsr3_sharpness = %d\n", g_settings.fsr3_sharpness);
@@ -352,7 +422,9 @@ void settings_save(void) {
     fprintf(f, "dlss_rcas_sharpness = %d\n", g_settings.dlss_rcas_sharpness);
     fprintf(f, "fsr1_sharpness = %d\n", g_settings.fsr1_sharpness);
     fprintf(f, "deband = %d\n", g_settings.deband);
-    fprintf(f, "aspect = %s\n", g_settings.aspect == ASPECT_FILL ? "fill" : "16:9");
+    fprintf(f, "aspect = %s\n", ASPECT_NAMES[g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : 0]);
+    fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
+    fprintf(f, "game_dynres = %d\n", g_settings.game_dynres);
     fprintf(f, "frame_interp = %d\n", g_settings.frame_interp);
     if (g_settings.aniso) fprintf(f, "aniso = %d\n", g_settings.aniso);
     else fprintf(f, "aniso = game\n");
@@ -384,10 +456,12 @@ void settings_save(void) {
     else if (g_settings.res_mode == RES_Q25) fprintf(f, "resolution = 25%%\n");
     else if (g_settings.res_mode == RES_Q50) fprintf(f, "resolution = 50%%\n");
     else if (g_settings.res_mode == RES_1440) fprintf(f, "resolution = 1440p\n");
+    else if (g_settings.res_mode == RES_DISPLAY) fprintf(f, "resolution = 100%%\n");
     else if (g_settings.res_mode >= 1 && g_settings.res_mode <= 8) fprintf(f, "resolution = %dx\n", g_settings.res_mode);
     else fprintf(f, "resolution = match\n");
     fprintf(f, "language = %s\n", g_language_codes[g_settings.language > LANG_AUTO && g_settings.language < N_LANGUAGES
                                                      ? g_settings.language : LANG_AUTO]);
+    fprintf(f, "menu_language = %s\n", g_settings.menu_language == MENU_LANG_EN ? "en" : g_settings.menu_language == MENU_LANG_KO ? "ko" : "auto");
     for (int i = 0; i < g_nmod_off; i++) fprintf(f, "mod_off = %s\n", g_mod_off[i]);
     bind_settings_save(f);
     fclose(f);
