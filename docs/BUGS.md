@@ -74,3 +74,21 @@ the owner.
 | #44 Korean F1 menu | **Done**: menu + launcher in Korean (runtime/ui/lang/ko.txt), Menu language setting. Checked on Windows and the Deck. Commented. |
 | Deck shader preparation | Full preparation on a fresh folder: **5 min 52 s** (scan 58 s, translate 195 s, build 156 s); the first full one last week ~14 min. |
 | Windows stage-entry / respawn pair | The stage's first frame is ~50 ms of GPU work: 1,331 render passes (the game's environment / probe setup, mostly 32x32 and 128x128 targets) + 526 feedback copies (8 ms). Game work, hidden by the fade on the Switch; the fix would be batching passes - open. |
+
+## 2026-11-15 evening, after 0.2.11 (local commits; the owner allowed closing fixed issues)
+
+Closed (fixed in 0.2.11, commented): #13, #27, #39, #44, #46; #50 (thanks, not an issue).
+
+| # | Status |
+|---|--------|
+| #51 blocky picture when turning fast (Linux) | **Fixed** (b5bb266): the game's GPU timer counted the GPU's idle gaps between early-fence submissions, so its dynamic resolution dropped on a fast GPU. Busy time only now: PC, early fences on, camera spin: Reduce steps 10+ s -> none. Workaround commented (Dynamic resolution Off). |
+| #53 gyro inversion / calibration | **Done** (a7ea5ee): Invert gyro X / Y, Calibrate gyro (saved offset). Asked which combination their controllers need. |
+| Mip-chain feedback copies (every frame) | **Fixed** (e25a96b): blur / bloom chains rendering level N while sampling level N - 1 got a copy of level 0 each draw (~7 a frame, and the wrong level read). A view of levels 0..N-1 now: copies 840 -> 0 per 2 s, AMD iGPU 50.3 -> 53.2 FPS, same picture. |
+| Stage-entry frame | Still ~56 + 69 ms on Windows: mostly CPU translation of the first frame (backend exec ~40 ms for 3,081 draws), then GPU. The copies above were not its cause. Open. |
+| #40 keybind crash with interpolation | Launcher binding fixed in 0.2.11. The in-game crash (device lost on NVIDIA, 0.2.10) did not reproduce on 0.2.11 (4 rebinds with 120 FPS interpolation). Asked to retest. |
+| #37 map flags | Works on 0.2.11 (controller: cursor on a flag, "Warp here", A warps). Asked for details. |
+| #19 AMD interpolation crash | Not reproduced on the PC's AMD iGPU (Cap, interpolation on). Open. |
+| #21 1.0.0 crash in LayoutSystem::initFont (Linux) | Needs 1.0.0 game files (not on the PC). Open, owner's. |
+| #41 tearing with every VSync option, #43 no sound on the Deck, #54 video only, #42 / #38 slow spots | Asked for logs / details. |
+| #52 mouse camera feels like a stick | The game's camera eases mouse input like a stick; a direct-angle camera means hooking the camera poser. Asked what feels off. Open. |
+| #35 5.1, #48 amiibo, #29 PT-BR | Feature requests, acknowledged; open. |

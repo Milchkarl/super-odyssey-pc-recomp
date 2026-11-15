@@ -95,6 +95,11 @@ On by default on every platform.
 - The game's dynamic resolution (`al::GraphicsQualityController`, a Wait -> Reduce -> Recover state machine) drops the
   internal resolution to its floor on weak GPUs and never raises it; turning its Reduce step into a no-op (found from
   the RTTI name in both game versions) keeps the full resolution. A setting, off by default on a Steam Deck.
+- The game decides from its GPU timing counters. With early fences a frame is several submissions with the GPU idle
+  between them; counting those gaps made a fast camera turn look like heavy GPU work (#51). The counters now carry
+  busy time only (per-submission begin / end timestamps; ODYSSEY_LOG_QUALITY=1 logs its Reduce steps).
+- Mip chains (blur, bloom, reductions) render level N while sampling the same texture for level N - 1: a sampled view
+  of levels 0..N-1 avoids the feedback copy each draw used to make (~7 a frame; +6% FPS on an AMD iGPU).
 - Any picture shape on any screen: the game's camera and HUD layout take a shape factor (ratio / 16:9); the image is
   fitted into the window with bars where the shapes differ (21:9 on 16:9: bars above and below). Handheld 16:10 needs
   the HUD's rows scaled and full-screen panes stretched back.
