@@ -412,7 +412,18 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
 #endif
     // (a page guarded until the GPU's write to it is done: nvn/vulkan/exec.c - waits there, then the access is retried)
     extern bool renderer_guard_fault(uint64_t addr);
-    if (sig == SIGSEGV && renderer_guard_fault(fa)) return;
+    if (sig == SIGSEGV && renderer_guard_fault(fa)) {
+        static int log = -1, n;  // ODYSSEY_LOG_GUARD=1: where the first 40 came from
+        if (log < 0) log = getenv("ODYSSEY_LOG_GUARD") != NULL;
+        if (log && n++ < 40) {
+            uint64_t off = 0;
+            const char *s = plat_symbol(pc, &off);
+            if (!s) s = rt_host_fn_name(pc, &off);
+            fprintf(stderr, "[guard] fault at %llx from %s+%llx (pc %llx, lr %llx)\n", (unsigned long long)fa,
+                    s ? s : "?", (unsigned long long)off, (unsigned long long)pc, (unsigned long long)lr);
+        }
+        return;
+    }
     if (rt_fault_watch(fa, pc)) return;
     char what[32];
     snprintf(what, sizeof what, "signal %d", sig);

@@ -108,6 +108,19 @@ standing rule for every change.
 - **At 7 W (2026-11-15):** GPU ~300-440 MHz, ~90% busy: first Cap Kingdom visit 42-58 FPS walking, 60 standing. GPU
   time per frame ~17 ms (gpuprof): main scene pass ~4.6-7 ms, 72 one-draw passes ~4.3 ms, 23 passes without draws
   ~1.5 ms (fold clears into the next pass: next), dispatches ~1.5 ms.
+- **Blur at 7 W (2026-11-15):** the game's own dynamic resolution drops to its minimum (960x540 of 1600x900 = 768x480
+  of the Deck's 1280x800) when the GPU is busy - as a docked Switch would, the Deck's GPU at 7 W being about as fast.
+  It is NOT driven only by the counter pair (capping it changed nothing). Rendering the full 1280x800 anyway costs
+  ~10 FPS walking (40-48 vs 47-58); scaling every 16:9 target up by the game's drop breaks the picture (the targets
+  that don't follow the game's resolution get mismatched: dark smeared ground) - don't retry that. The real fix is
+  GPU time per frame (pass overhead, see below), so the game stays at full resolution by itself.
+- **Guarded writes cost at 7 W:** one game function (f_7000931b84) touches the compute buffers' pages every frame
+  (mostly next to the GPU's results: page-level false sharing) and waits for the GPU: 400-500 ms per 2 s, single
+  waits up to 18 ms (stats: `faults N waiting X ms, longest Y`; `ODYSSEY_LOG_GUARD=1` logs where). Guard off is far
+  worse (27-32 FPS). Next: exact copy-back ranges (not merged across gaps) and waiting only when the touched address
+  is inside a written range (single-step the false-sharing accesses).
+- Counter pairs: Odyssey writes start, a counter at a fixed address, then the end (start + 16 bytes): pairs are
+  matched by address among the last few counters (exec.c cq_start_of).
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 
