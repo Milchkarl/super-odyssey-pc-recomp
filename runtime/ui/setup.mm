@@ -761,7 +761,8 @@ bool config_run(void) {
     const char *skip_vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_INPUT", "ODYSSEY_HOST_INPUT", "ODYSSEY_WARP", "ODYSSEY_HIDDEN",
                                "ODYSSEY_EXIT_AFTER_SHOT", "ODYSSEY_SETUP_EXIT_WHEN_DONE", "ODYSSEY_BIND_TEST"};
     for (const char *v : skip_vars)
-        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0"))) return true;
+        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST"))
+            return true;
     const char *force = getenv("ODYSSEY_CONFIG");  // (1: shown even when turned off; 0: never)
 #ifndef __APPLE__
     bool prep_due = vk_prepare_due();  // (shown for that even when the page is turned off: no window of its own)
