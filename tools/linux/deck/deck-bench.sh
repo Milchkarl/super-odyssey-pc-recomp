@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copied from the Deck (~/sopr) into the repo 2026-11-15. Run on the Deck; env: OUT, APP (an AppImage or AppDir/AppRun), FULL=1
-# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV, LAUNCH=steam.
+# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV, LAUNCH=steam, GS_SHOT.
 # Data on the Deck: the 1.4.1 test copy /run/media/deck/SN01T/sopr-fonttest, ~/sopr/bench/savecomplete.tar (sopr-wintest save-complete).
 # Deck bench: Cap Kingdom walk from the test copy, the game thread sampled (Linux sampler, SIGPROF) for 600 frames.
 F=/run/media/deck/SN01T/sopr-fonttest
@@ -44,6 +44,11 @@ PY
     { echo "OUT=$OUT"; export -p | sed -n 's/^declare -x \(ODYSSEY_[A-Z0-9_]*=\)/export \1/p' | grep -v '^export ODYSSEY_WINDOW='; } > /home/deck/sopr/bench/next-run.env
     [ "$FULL" = 1 ] || echo "export ODYSSEY_WINDOW=1280x800" >> /home/deck/sopr/bench/next-run.env
     steam -ifrunning "steam://rungameid/$ID" > /dev/null 2>&1 &
+    # GS_SHOT=<seconds>: also what gamescope shows (the composited screen, as the owner sees it) that long after start
+    if [ -n "${GS_SHOT:-}" ]; then
+        ( for i in $(seq 1 120); do [ -f "$OUT/run.log" ] && break; sleep 1; done; sleep "$GS_SHOT"
+          gamescopectl screenshot "$OUT/gamescope.png" > /dev/null 2>&1 ) &
+    fi
     for i in $(seq 1 960); do [ -f "$OUT/game-exited" ] && break; sleep 1; done
     [ -f "$OUT/game-exited" ] || echo "the game did not finish (or never started) through Steam" >> "$OUT/run.log"
 else

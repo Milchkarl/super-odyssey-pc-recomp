@@ -44,7 +44,7 @@ $SSH "$DECK" 'cd ~/sopr && bash tools/linux/dev_quick.sh > build/dev_quick.log 2
 if [ "$MODE" = bench ]; then
     NAME=${2:?bench name}
     ENVS=""
-    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE LAUNCH; do
+    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE LAUNCH GS_SHOT; do
         [ -n "${!v:-}" ] && ENVS="$ENVS --setenv=$v=${!v}"
     done
     $SSH "$DECK" "systemctl --user reset-failed sopr-bench 2>/dev/null; systemd-run --user --collect --unit=sopr-bench \
