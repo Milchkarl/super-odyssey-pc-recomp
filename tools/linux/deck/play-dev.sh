@@ -31,6 +31,8 @@ export ODYSSEY_VK_PROF=1 ODYSSEY_LOG_SLOW_FRAMES=25 ODYSSEY_LOG_STAGES=1
 ("$D/deck-threads.sh" "$L/threads-$TS.log" &)
 # (the log is kept by a user service once the game has exited: quitting from Steam ends this script, and everything it
 # started, with the game - a detached helper too)
-systemd-run --user --collect --quiet bash -c 'sleep 20; while pgrep -f "AppDir/usr/bin/SuperOdysseyRecomp" > /dev/null; do sleep 2; done
+# (pgrep -x on the process name - SuperOdysseyRec, 15 characters: a -f pattern matched this helper's own command line,
+# and it waited forever)
+systemd-run --user --collect --quiet bash -c 'sleep 20; while pgrep -x SuperOdysseyRec > /dev/null; do sleep 2; done
     cp "$0" "$1"' "$F/SuperOdysseyRecomp.log" "$L/dev-session-$TS.log" > /dev/null 2>&1
 "$APP" "$@"

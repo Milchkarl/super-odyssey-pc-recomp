@@ -147,6 +147,8 @@ standing rule for every change.
 
 ## 4. Priorities (do them roughly in this order)
 
+**The current, owner-approved order is in [ROADMAP.md](ROADMAP.md) (2026-11-15); the list below is the earlier one.**
+
 1. **Deck: the places the owner plays.** The first Cap Kingdom visit is fixed (guarded compute writes, section 3).
    Reproduce with the bench (section 6), with the owner's save (`SAVE=`), in the other places the owner plays,
    compare the stats lines (splits, skipped splits, submit ms, GPU ms, thread CPU). Decide CPU-bound vs GPU-bound per
