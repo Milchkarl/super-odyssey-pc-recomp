@@ -67,6 +67,7 @@ typedef struct {
     int upscaler;        // UPSCALE_*: how a lower internal resolution reaches the window (MetalFX: macOS, FSR 1: Windows)
     int antialias;       // AA_*: anti-aliasing of the game image before it is scaled to the window
     int dlss_mode, dlss_preset;  // Windows NVIDIA modes and model hints, applied during play
+    bool temporal_off;   // the menu's Upscale method: Off (the default) - no temporal upscaler, whatever the modes below
     int temporal_backend, fsr3_mode, fsr3_sharpness, fsr3_cas_sharpness;
     bool fsr3_cas;
     int fsr4_mode, fsr4_sharpness, fsr4_cas_sharpness;

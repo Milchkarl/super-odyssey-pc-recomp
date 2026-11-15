@@ -405,6 +405,25 @@ static void refresh_modes(SDL_Window *w) {
     pthread_mutex_unlock(&g_displays_mutex);
 }
 
+// Auto refresh rate (exclusive fullscreen): the highest rate this size offers that is a whole multiple of the frame
+// rate (60 FPS: 60 / 120 / 180 / 240 Hz; 90: 90 / 180), so every frame stays on screen equally long; the desktop's when
+// there is none. 60 FPS on the desktop's 144 Hz alternated 2 and 3 refreshes a frame, and with Strict / Adaptive VSync
+// that judder held the game back (owner's PC, 2026-11-15: 102 images held in ~85 s at 144 Hz).
+static float smooth_rate(SDL_DisplayID d, int w, int h, float desktop_hz) {
+    int fps = g_settings.frame_rate == FPS_120 ? 120 : g_settings.frame_rate == FPS_90 ? 90 : 60;
+    int n = 0;
+    float best = 0;
+    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(d, &n);
+    for (int i = 0; modes && i < n; i++) {
+        if (modes[i]->w != w || modes[i]->h != h) continue;
+        float r = modes[i]->refresh_rate;
+        int k = (int)(r / fps + 0.5f);
+        if (k >= 1 && fabsf(r - (float)(k * fps)) < 0.6f && r > best) best = r;
+    }
+    SDL_free(modes);
+    return best > 0 ? best : desktop_hz;
+}
+
 void menu_apply_window_requests(void *win) {
     SDL_Window *w = (SDL_Window *)win;
     refresh_displays();
@@ -460,6 +479,7 @@ void menu_apply_window_requests(void *win) {
             int width = height ? width_set : desktop->w;
             int lines = height ? height : desktop->h;
             float hz = g_settings.refresh_rate > 0 ? (float)g_settings.refresh_rate : desktop->refresh_rate;
+            if (g_settings.refresh_rate == 0) hz = smooth_rate(display, width, lines, desktop->refresh_rate);
             if (SDL_GetClosestFullscreenDisplayMode(display, width, lines, hz, true, &selected)) exclusive = &selected;
         }
         applied = (mode != EXCLUSIVE_FULLSCREEN || exclusive) &&
@@ -757,7 +777,7 @@ static void tab_display(void) {
         static char rlabels[34][32];
         const char *rp[34];
         int rn = 0, rsel = 0;
-        snprintf(rlabels[rn], sizeof rlabels[rn], desk_rate ? "Desktop (%d Hz)" : "Desktop", desk_rate);
+        snprintf(rlabels[rn], sizeof rlabels[rn], "Auto"); (void)desk_rate;
         rp[rn] = rlabels[rn], rn++;
         for (int r : rates) {
             if (rn >= 34) break;
@@ -768,8 +788,9 @@ static void tab_display(void) {
         if (g_settings.window_mode != EXCLUSIVE_FULLSCREEN) opt_disable_next();
         if (opt_choice("Refresh rate", &rsel, rp, rn, 0,
                        "The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change "
-                       "it in your system's display settings). A rate that is a multiple of the frame rate (60, 120, 240 Hz "
-                       "for 60 FPS) shows every frame for the same time - the smoothest picture.")) {
+                       "it in your system's display settings). Auto: the highest rate your monitor offers that is a multiple "
+                       "of the frame rate (120 Hz on a 144 Hz monitor at 60 FPS), so every frame is shown for the same time - "
+                       "the smoothest picture. Other rates (144 Hz at 60 FPS) show frames for uneven times: judder.")) {
             g_settings.refresh_rate = rsel == 0 ? 0 : rates[rsel - 1];
             g_want_window_apply.store(true);
         }
@@ -902,13 +923,24 @@ static void tab_graphics(void) {
                "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
                "blends only along them, so textures stay sharp. Most useful at a lower internal resolution.");
 #ifdef _WIN32
-    opt_section("Temporal upscaling");
-    static const char *backends[] = {"NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4 (Beta)", "Intel XeSS (Beta)"};
-    opt_choice("Temporal upscaler", &g_settings.temporal_backend, backends, TEMPORAL_BACKEND_COUNT, TEMPORAL_DLSS,
-               "Selects the temporal anti-aliasing/upscaling technique. Each keeps its own mode and sharpening settings. Changes during play.");
+    opt_section("Upscaling");
+    {   // Off first, off by default (settings: temporal_off): the game renders plainly at the internal resolution
+        static const char *methods[] = {"Off", "NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4 (Beta)", "Intel XeSS (Beta)"};
+        int m = g_settings.temporal_off ? 0 : g_settings.temporal_backend + 1;
+        if (opt_choice("Upscale method", &m, methods, TEMPORAL_BACKEND_COUNT + 1, 0,
+                       "How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal "
+                       "resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: "
+                       "temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and "
+                       "driver for it. Each keeps its own mode and sharpening settings. Changes during play.")) {
+            g_settings.temporal_off = m == 0;
+            if (m > 0) g_settings.temporal_backend = m - 1;
+        }
+    }
     int backend = g_settings.temporal_backend;
     bool fsr = backend == TEMPORAL_FSR3 || backend == TEMPORAL_FSR4;
-    if (backend != TEMPORAL_DLSS) {
+    if (g_settings.temporal_off) {
+        // (nothing more to set: the method's own rows show when one is chosen)
+    } else if (backend != TEMPORAL_DLSS) {
         static const char *modes[] = {"Off", "Native AA", "Quality", "Balanced", "Performance"};
         const char *help = backend == TEMPORAL_XESS ?
             "Experimental Intel XeSS-SR. Native AA, Quality (1.7x), Balanced (2x) and Performance (2.3x). Requires a compatible Vulkan driver and Intel's runtime. Changes during play." :
@@ -930,7 +962,7 @@ static void tab_graphics(void) {
         opt_choice("DLSS preset", &g_settings.dlss_preset, presets, DLSS_PRESET_COUNT, DLSS_PRESET_DEFAULT,
                    "Model hint for NVIDIA DLSS. Default uses K for DLAA/Quality/Balanced and M for Performance. Changes during play.");
     }
-    if (*settings_temporal_mode() != DLSS_OFF) {
+    if (!g_settings.temporal_off && *settings_temporal_mode() != DLSS_OFF) {
         float strength = (float)*settings_temporal_sharpness();
         if (opt_slider(fsr ? "FSR sharpness" : backend == TEMPORAL_XESS ? "XeSS sharpness (RCAS)" : "DLSS sharpness (RCAS)",
                        &strength, 0, 100, 10, 20, "%g%%", "Reconstruction sharpening. 0% bypasses it. Saved independently for each technique; changes at once."))

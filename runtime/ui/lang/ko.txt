@@ -27,7 +27,6 @@ Display resolution ||| 화면 해상도
 The window's size, or in exclusive fullscreen the monitor's mode - the sizes your monitor offers. Desktop: the current window size, or the desktop's resolution in exclusive fullscreen. Borderless always uses the desktop resolution. ||| 창의 크기, 또는 전용 전체 화면에서는 모니터의 모드 - 모니터가 제공하는 크기들입니다. 바탕화면: 현재 창 크기, 또는 전용 전체 화면에서는 바탕화면 해상도. 테두리 없는 창은 항상 바탕화면 해상도를 사용합니다.
 Desktop ||| 바탕화면
 Refresh rate ||| 주사율
-The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change it in your system's display settings). A rate that is a multiple of the frame rate (60, 120, 240 Hz for 60 FPS) shows every frame for the same time - the smoothest picture. ||| 전용 전체 화면에서의 모니터 주사율입니다 (창 모드와 테두리 없는 창은 바탕화면의 주사율을 사용하므로 시스템 디스플레이 설정에서 바꾸세요). 프레임 레이트의 배수인 주사율 (60 FPS라면 60, 120, 240 Hz)은 모든 프레임을 같은 시간 동안 보여 주어 가장 부드러운 화면이 됩니다.
 VSync ||| 수직 동기화
 On: no tearing, the game keeps its own steady pace (recommended). Off: frames go out the moment they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 화면 찢어짐 없이 게임이 자체 속도를 일정하게 유지합니다 (권장). 끄기: 프레임이 완성되는 즉시 표시됩니다 - 가장 낮은 지연, 화면 찢어짐 있음. 엄격: 각 프레임이 화면의 다음 갱신을 기다립니다 (기존 수직 동기화, 늦은 프레임은 한 번의 갱신을 통째로 기다림). 적응형: 엄격과 같지만 늦은 프레임은 바로 표시됩니다 (그때만 찢어짐). GPU나 드라이버가 지원하지 않으면 가장 가까운 방식을 사용합니다.
 Off (tearing) ||| 끄기 (찢어짐)
@@ -221,3 +220,8 @@ Step 3 of 3: compiling the recorded pipelines ||| 3/3단계: 기록된 파이프
 finding the game's shaders... ||| 게임의 셰이더를 찾는 중...
 Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS. ||| Steam Deck 팁: ... 버튼을 누르고 성능을 연 다음, 수동 GPU 클럭 제어를 켜고 1000 MHz로 설정하세요. 낮은 TDP 제한 (7-10 W)에서도 GPU가 안정적인 60 FPS를 낼 만큼 빨라집니다.
 Vibration strength ||| 진동 세기
+The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change it in your system's display settings). Auto: the highest rate your monitor offers that is a multiple of the frame rate (120 Hz on a 144 Hz monitor at 60 FPS), so every frame is shown for the same time - the smoothest picture. Other rates (144 Hz at 60 FPS) show frames for uneven times: judder. ||| 전용 전체 화면에서의 모니터 주사율입니다 (창 모드와 테두리 없는 창은 바탕화면의 주사율을 사용하므로 시스템 디스플레이 설정에서 바꾸세요). 자동: 모니터가 제공하는 주사율 중 프레임 레이트의 배수인 가장 높은 값 (60 FPS일 때 144 Hz 모니터에서 120 Hz)을 골라 모든 프레임을 같은 시간 동안 보여 주므로 가장 부드럽습니다. 다른 주사율 (60 FPS에서 144 Hz)은 프레임 표시 시간이 고르지 않아 떨림이 생깁니다.
+Upscaling ||| 업스케일링
+Upscale method ||| 업스케일 방식
+How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 화면을 재구성하고 확대하는 방식입니다. 끄기: 게임이 내부 해상도로 그대로 렌더링합니다 (위의 공간 업스케일러가 창 크기로 확대). NVIDIA DLSS, AMD FSR, Intel XeSS: 시간적 업스케일링과 안티앨리어싱 - 낮은 내부 해상도에서 더 선명하며, 이를 지원하는 GPU와 드라이버가 필요합니다. 각각 자체 모드와 선명도 설정을 유지합니다. 플레이 중에 바뀝니다.
+Auto ||| 자동
