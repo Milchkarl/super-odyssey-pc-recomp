@@ -10,6 +10,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <atomic>
+#include <algorithm>
 #include <vector>
 
 #include "imgui.h"
@@ -370,9 +371,43 @@ bool menu_handle_event(const SDL_Event *e) {
 
 void menu_request_window_apply(void) { g_want_window_apply.store(true); }
 
+// The window's display's own modes (event thread; the Display tab lists them): sizes (largest first) and refresh rates
+struct ModeSize { int w, h; };
+static std::vector<ModeSize> g_mode_sizes;
+static std::vector<int> g_mode_rates;
+static ModeSize g_desktop_size;
+static int g_desktop_rate;
+static void refresh_modes(SDL_Window *w) {
+    static SDL_DisplayID last;
+    SDL_DisplayID d = SDL_GetDisplayForWindow(w);
+    if (!d || (d == last && !g_mode_sizes.empty())) return;
+    last = d;
+    int n = 0;
+    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(d, &n);
+    std::vector<ModeSize> sizes;
+    std::vector<int> rates;
+    for (int i = 0; modes && i < n; i++) {
+        bool have = false;
+        for (const ModeSize &m : sizes) have = have || (m.w == modes[i]->w && m.h == modes[i]->h);
+        if (!have && modes[i]->w >= 640 && modes[i]->h >= 480) sizes.push_back({modes[i]->w, modes[i]->h});
+        int r = (int)(modes[i]->refresh_rate + 0.5f);
+        if (r >= 24 && std::find(rates.begin(), rates.end(), r) == rates.end()) rates.push_back(r);
+    }
+    SDL_free(modes);
+    std::sort(rates.begin(), rates.end());
+    const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(d);
+    pthread_mutex_lock(&g_displays_mutex);
+    g_mode_sizes.swap(sizes);
+    g_mode_rates.swap(rates);
+    g_desktop_size = dm ? ModeSize{dm->w, dm->h} : ModeSize{0, 0};
+    g_desktop_rate = dm ? (int)(dm->refresh_rate + 0.5f) : 0;
+    pthread_mutex_unlock(&g_displays_mutex);
+}
+
 void menu_apply_window_requests(void *win) {
     SDL_Window *w = (SDL_Window *)win;
     refresh_displays();
+    refresh_modes(w);
     g_pixel_density = SDL_GetWindowPixelDensity(w);
     static bool text_input;
     // Text input only while a text field is being typed into (ui_text_busy) - not whenever the menu is open: in Steam's
@@ -393,7 +428,7 @@ void menu_apply_window_requests(void *win) {
     if (!apply) return;
 
     int mode = g_settings.window_mode;
-    int height = settings_display_height(g_settings.display_resolution);
+    int height = g_settings.display_h, width_set = g_settings.display_w;
     SDL_DisplayID display = SDL_GetDisplayForWindow(w);
     SDL_DisplayID target = 0;
     pthread_mutex_lock(&g_displays_mutex);
@@ -415,15 +450,16 @@ void menu_apply_window_requests(void *win) {
     bool applied;
     if (mode == WINDOWED) {
         applied = SDL_SetWindowFullscreen(w, false) && SDL_SetWindowFullscreenMode(w, NULL);
-        if (applied && height) applied = SDL_SetWindowSize(w, height * 16 / 9, height);
+        if (applied && height) applied = SDL_SetWindowSize(w, width_set, height);
     } else {
         g_last_fullscreen.store(mode);
         SDL_DisplayMode selected;
         const SDL_DisplayMode *exclusive = NULL;
         if (mode == EXCLUSIVE_FULLSCREEN && desktop) {
-            int width = height ? height * 16 / 9 : desktop->w;
+            int width = height ? width_set : desktop->w;
             int lines = height ? height : desktop->h;
-            if (SDL_GetClosestFullscreenDisplayMode(display, width, lines, 0, true, &selected)) exclusive = &selected;
+            float hz = g_settings.refresh_rate > 0 ? (float)g_settings.refresh_rate : desktop->refresh_rate;
+            if (SDL_GetClosestFullscreenDisplayMode(display, width, lines, hz, true, &selected)) exclusive = &selected;
         }
         applied = (mode != EXCLUSIVE_FULLSCREEN || exclusive) &&
                   SDL_SetWindowFullscreenMode(w, exclusive) && SDL_SetWindowFullscreen(w, true);
@@ -609,6 +645,11 @@ static bool toggle(const char *label, bool *v) {
 }
 
 extern "C" void renderer_get_scale(float *sx, float *sy);
+#ifndef __APPLE__
+extern "C" void vk_request_swapchain_remake(void);
+#endif
+extern "C" void output_scale_preview(double dw, double dh, double want, int mode, double *w, double *h);
+extern "C" float odyssey_wide_shape(void);
 extern "C" int input_pad_family(void);  // runtime/hle/input.c
 extern "C" double output_scale_dynamic_factor(void);
 extern "C" bool vk_prepare_requested(void);       // runtime/nvn/vulkan/device.c (the menu's Compile shaders)
@@ -643,14 +684,67 @@ static void tab_display(void) {
                    "Borderless uses the desktop's resolution. Exclusive fullscreen requests a monitor display mode. "
                    "F11 and Alt+Enter toggle between the window and your last fullscreen mode."))
         g_want_window_apply.store(true);
-    static const char *display_modes[] = {"Auto", "1080p", "1440p", "4K"};
-    bool borderless = g_settings.window_mode == BORDERLESS;
-    if (borderless) opt_disable_next();
-    if (opt_choice("Display resolution", &g_settings.display_resolution, display_modes, DISPLAY_MODE_COUNT, DISPLAY_AUTO,
-                   "Changes the window size or selects the closest exclusive fullscreen mode your monitor supports. "
-                   "Auto keeps the current window size or uses the desktop resolution in exclusive fullscreen. "
-                   "Borderless always uses the desktop resolution."))
-        g_want_window_apply.store(true);
+    {   // the monitor's own modes, by their exact sizes and rates (refresh_modes)
+        pthread_mutex_lock(&g_displays_mutex);
+        std::vector<ModeSize> sizes = g_mode_sizes;
+        std::vector<int> rates = g_mode_rates;
+        ModeSize desk = g_desktop_size;
+        int desk_rate = g_desktop_rate;
+        pthread_mutex_unlock(&g_displays_mutex);
+        static char labels[66][48];
+        const char *lp[66];
+        int n = 0, sel = 0;
+        snprintf(labels[n], sizeof labels[n], desk.w ? "Desktop (%d x %d)" : "Desktop", desk.w, desk.h);
+        lp[n] = labels[n], n++;
+        for (const ModeSize &m : sizes) {
+            if (n >= 66) break;
+            snprintf(labels[n], sizeof labels[n], "%d x %d", m.w, m.h);
+            if (m.w == g_settings.display_w && m.h == g_settings.display_h) sel = n;
+            lp[n] = labels[n], n++;
+        }
+        bool borderless = g_settings.window_mode == BORDERLESS;
+        if (borderless) opt_disable_next();
+        if (opt_choice("Display resolution", &sel, lp, n, 0,
+                       "The window's size, or in exclusive fullscreen the monitor's mode - the sizes your monitor offers. "
+                       "Desktop: the current window size, or the desktop's resolution in exclusive fullscreen. Borderless "
+                       "always uses the desktop resolution.")) {
+            if (sel == 0) g_settings.display_w = g_settings.display_h = 0;
+            else g_settings.display_w = sizes[sel - 1].w, g_settings.display_h = sizes[sel - 1].h;
+            g_settings.display_resolution = DISPLAY_AUTO;
+            g_want_window_apply.store(true);
+        }
+        static char rlabels[34][32];
+        const char *rp[34];
+        int rn = 0, rsel = 0;
+        snprintf(rlabels[rn], sizeof rlabels[rn], desk_rate ? "Desktop (%d Hz)" : "Desktop", desk_rate);
+        rp[rn] = rlabels[rn], rn++;
+        for (int r : rates) {
+            if (rn >= 34) break;
+            snprintf(rlabels[rn], sizeof rlabels[rn], "%d Hz", r);
+            if (r == g_settings.refresh_rate) rsel = rn;
+            rp[rn] = rlabels[rn], rn++;
+        }
+        if (g_settings.window_mode != EXCLUSIVE_FULLSCREEN) opt_disable_next();
+        if (opt_choice("Refresh rate", &rsel, rp, rn, 0,
+                       "The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change "
+                       "it in your system's display settings). A rate that is a multiple of the frame rate (60, 120, 240 Hz "
+                       "for 60 FPS) shows every frame for the same time - the smoothest picture.")) {
+            g_settings.refresh_rate = rsel == 0 ? 0 : rates[rsel - 1];
+            g_want_window_apply.store(true);
+        }
+    }
+#ifndef __APPLE__
+    {
+        static const char *vs[] = {"On", "Off (tearing)", "Strict", "Adaptive"};
+        if (opt_choice("VSync", &g_settings.vsync, vs, VSYNC_COUNT, VSYNC_ON,
+                       "On: no tearing, the game keeps its own steady pace (recommended). Off: frames go out the moment "
+                       "they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next "
+                       "refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame "
+                       "goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used.")) {
+            vk_request_swapchain_remake();
+        }
+    }
+#endif
 #ifndef __APPLE__  // (Vulkan: runtime/hle/odyssey_wide.c)
     opt_section("Screen shape");
     {
@@ -684,8 +778,29 @@ static void tab_graphics(void) {
     // display order -> RES_* (the ini / enum order predates the menu order)
     // (up to 4x: 7680 x 4320, 8K - more only ran out of GPU memory, and sat next to 75% in the list)
     // (Match display in the middle: left from it 75% / 50% / 25%, right Dynamic then 1x-4x; user 2026-10-11)
-    static const char *res[] = {"25%", "50%", "75%", "100%", "Match display", "Dynamic", "1080p (1x)", "1440p", "4K (2x)", "3x", "4x"};
+    static const char *res_base[] = {"25%", "50%", "75%", "100%", "Match display", "Dynamic", "1x", "1440p", "2x", "3x", "4x"};
     static const int res_mode[] = {RES_Q25, RES_Q50, RES_Q75, RES_DISPLAY, RES_MATCH, RES_DYNAMIC, 1, RES_1440, 2, 3, 4};
+    // each with the exact size it renders at in this window and picture shape ("Match display (2560 x 1440)")
+    static char res_lab[11][48];
+    const char *res[11];
+    {
+        ImGuiIO &io = ImGui::GetIO();
+        double dw = io.DisplaySize.x * io.DisplayFramebufferScale.x, dh = io.DisplaySize.y * io.DisplayFramebufferScale.y;
+#ifdef __APPLE__
+        double shape = 1.0;
+#else
+        double shape = odyssey_wide_shape();
+#endif
+        for (int i = 0; i < 11; i++) {
+            double rw = 0, rh = 0;
+            if (dw > 0 && dh > 0) output_scale_preview(dw, dh, shape, res_mode[i], &rw, &rh);
+            if (rw <= 0) snprintf(res_lab[i], sizeof res_lab[i], "%s", res_base[i]);
+            else if (res_mode[i] == RES_DYNAMIC) snprintf(res_lab[i], sizeof res_lab[i], "Dynamic (up to %.0f x %.0f)", rw, rh);
+            else if (i < 5) snprintf(res_lab[i], sizeof res_lab[i], "%s (%.0f x %.0f)", res_base[i], rw, rh);
+            else snprintf(res_lab[i], sizeof res_lab[i], "%.0f x %.0f", rw, rh);
+            res[i] = res_lab[i];
+        }
+    }
     enum { RES_MATCH_AT = 4 };
     enum { NRES = sizeof res_mode / sizeof res_mode[0] };
     {
@@ -694,10 +809,13 @@ static void tab_graphics(void) {
         float sx, sy;
         renderer_get_scale(&sx, &sy);
         char d[400];
-        int n = snprintf(d, sizeof d, "How sharp the 3D image is. Match display: your screen's own resolution. Dynamic: "
-                                      "as sharp as your GPU keeps at full speed. 1x-4x: 1080p times that (2x: 4K; the "
-                                      "Switch renders 1600 x 900). 100%%: exactly your screen's pixels (Steam Deck: 1280 x 800). 75%% / 50%% / 25%%: a share of the display, for "
-                                      "slower machines.\n\nRendering at %.0f x %.0f.", 1600.0 * sx, 900.0 * sy);
+        int n = snprintf(d, sizeof d, "How sharp the 3D image is - each choice shows the size it renders at in this window "
+                                      "and picture shape. Match display: your screen's own resolution (at least the "
+                                      "Switch's 1600 x 900). 100%%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
+                                      "Dynamic: as sharp as your GPU keeps at full speed. 75%% / 50%% / 25%%: a share of "
+                                      "the display, for slower machines; the fixed sizes render at exactly that, above the "
+                                      "screen's for a sharper picture (supersampling).\n\nRendering at %.0f x %.0f.",
+                         1600.0 * sx, 900.0 * sy);
         if (g_settings.res_mode == RES_DYNAMIC)
             snprintf(d + n, sizeof d - n, " Dynamic: %.0f%% of the display right now.", output_scale_dynamic_factor() * 100);
 #ifdef _WIN32
