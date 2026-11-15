@@ -718,6 +718,17 @@ static VkImageView evaluate(VkCommandBuffer cb, const TexBackend *color, VkImage
     dlss.history = true;
     dlss.last_eval = frame;
     dlss.last_eval_ns = now;
+    if (vk_fg_active()) {  // (FSR frame generation: this frame's depth and motion vectors, as the upscaler had them)
+        const float *proj = dlss.scene.projection;
+        float near_z = fabsf(proj[11] / (proj[10] - 1)), far_z = fabsf(proj[11] / (proj[10] + 1));
+        if (!isfinite(near_z) || near_z < 0.001f) near_z = 10;
+        if (!isfinite(far_z) || far_z <= near_z) far_z = 1000000;
+        FgFrame g = {.depth = dlss.depth.image, .motion = dlss.motion.image, .w = dlss.w, .h = dlss.h,
+            .jitter = {dlss.scene_jitter[0], dlss.scene_jitter[1]},
+            .dt_ms = elapsed_ms > 0 && elapsed_ms < 100 ? (float)elapsed_ms : 16.667f,
+            .near_z = near_z, .far_z = far_z, .fov_y = 2 * atanf(1 / fabsf(proj[5])), .reset = reset};
+        vk_fg_prepare(cb, &g);
+    }
     if (++dlss.eval_count == 1 || dlss.eval_count % 240 == 0)
         LOG("[%s] frame %llu: %llu evaluated frames\n", xess ? "xess" : fsr3 ?
             (g_settings.temporal_backend == TEMPORAL_FSR4 && vk_fsr4_available() ? "fsr4" : "fsr3") : "dlss",

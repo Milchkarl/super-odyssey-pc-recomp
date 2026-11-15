@@ -936,6 +936,20 @@ static void tab_graphics(void) {
                        "driver for it. Each keeps its own mode and sharpening settings. Changes during play.")) {
             g_settings.temporal_off = m == 0;
             if (m > 0) g_settings.temporal_backend = m - 1;
+            if (g_settings.frame_generation) vk_request_swapchain_remake();  // (frame generation needs an upscaler)
+        }
+    }
+    if (!g_settings.temporal_off) {  // FSR frame generation (runtime/nvn/vulkan/fsr3_sdk.c), with any of the upscalers
+        if (opt_toggle("Frame generation (AMD FSR)", &g_settings.frame_generation, false,
+                       "A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother "
+                       "motion on a 120 Hz or faster display, a little more input delay. Works on any GPU, with any Upscale "
+                       "method above. Needs Frame rate 60 FPS and 120 FPS interpolation off (they make extra frames "
+                       "themselves). The HUD can shimmer slightly on the generated frames."))
+            vk_request_swapchain_remake();
+        if (g_settings.frame_generation && (g_settings.frame_rate != FPS_60 || g_settings.frame_interp)) {
+            opt_disable_next();
+            opt_action("Frame generation status", "Off: set Frame rate 60 FPS, 120 FPS interpolation off",
+                       "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance tab).");
         }
     }
     int backend = g_settings.temporal_backend;

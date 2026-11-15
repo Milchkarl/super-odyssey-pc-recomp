@@ -67,7 +67,8 @@ Program (SuperOdysseyRecomp.exe and the DLLs next to it)
 Upscaler runtimes (unmodified, as the vendors ship them and signed by them; each loaded only when chosen in the menu)
 - nvngx_dlss.dll - NVIDIA DLSS 310.9.1, from https://github.com/NVIDIA/DLSS - NVIDIA-RTX-SDK-LICENSE.txt.
   This software contains source code provided by NVIDIA Corporation.
-- amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll - AMD FidelityFX SDK 2.4.0 (FSR 3.1 / FSR 4), from
+- amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll, amd_fidelityfx_framegeneration_vk.dll - AMD
+  FidelityFX SDK 2.4.0 (FSR 3.1 / FSR 4, FSR frame generation), from
   https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK - AMD-FSR-SDK-LICENSE.md
 - libxess.dll - Intel XeSS 2.0.2, from https://github.com/intel/xess - Intel-XeSS-LICENSE.txt,
   Intel-XeSS-THIRD-PARTY.txt

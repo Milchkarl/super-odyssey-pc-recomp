@@ -3,7 +3,8 @@
 # fetched from the vendors' own repositories at pinned revisions into build/upscalers/, each checked against its
 # sha256 and its Authenticode signature (the vendor's), with the licence it comes under:
 # - NVIDIA DLSS 310.9.1: nvngx_dlss.dll - github.com/NVIDIA/DLSS (NVIDIA RTX SDKs licence)
-# - AMD FidelityFX SDK 2.4.0 (FSR 3.1 / FSR 4): amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll -
+# - AMD FidelityFX SDK 2.4.0 (FSR 3.1 / FSR 4, FSR frame generation): amd_fidelityfx_loader_vk.dll,
+#   amd_fidelityfx_upscaler_vk.dll, amd_fidelityfx_framegeneration_vk.dll -
 #   github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
 # - Intel XeSS 2.0.2: libxess.dll - github.com/intel/xess
 # make dist copies them (and the licences: tools/dist_licenses.sh). Skipped for a file already there with its hash.
@@ -40,5 +41,6 @@ get "$AMD/amd_fidelityfx_loader_vk.dll" 38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2
     amd_fidelityfx_loader_vk.dll "Advanced Micro Devices"
 get "$AMD/amd_fidelityfx_upscaler_vk.dll" 4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7 \
     amd_fidelityfx_upscaler_vk.dll "Advanced Micro Devices"
+get "$AMD/amd_fidelityfx_framegeneration_vk.dll" d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4     amd_fidelityfx_framegeneration_vk.dll "Advanced Micro Devices"
 get "$XESS/bin/libxess.dll" 251659dd84a3e84de67c886a4186e01f3eca49b00641906fe38bb6b807e5d5b7 libxess.dll "Intel Corporation"
 echo "upscalers: $(ls "$O" | tr '\n' ' ')"
