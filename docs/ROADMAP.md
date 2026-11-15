@@ -15,6 +15,9 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
      code that WRITES the request (the dynamic-resolution decision) uses a computed pointer: next step is a runtime
      write-watch on that field (runtime/dispatch.c watch facility) to name it, then a generator patch
      (tools/odyssey_patches.py) behind a setting **"Dynamic resolution: Switch / Off (always full)"**, Off on the Deck.
+   - **Done 2026-11-15:** found as `al::GraphicsQualityController` (its Reduce nerve, hooked at runtime from the RTTI in
+     both builds); setting "Dynamic resolution", off on the Deck. With the manual GPU clock at 1000 MHz: 60 FPS at
+     ~9 W in both console modes at full resolution.
    - Then measure 60 FPS at full 1280x800 at 7 W. At 7 W the Deck's GPU is about a docked Switch's: GPU time per
      frame has to come down (next item) - or the power limit rises a little (owner's call), or a lower internal
      resolution with a good upscaler (Phase 3).

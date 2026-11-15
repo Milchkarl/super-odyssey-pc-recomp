@@ -146,6 +146,8 @@ void odyssey_camera_draw(Cpu *c) {
     guest_call(&draw, camera_matrix);
 }
 
+static void quality_reduce_off(Cpu *c) { (void)c; }  // (dynamic resolution off: the Reduce nerve does nothing)
+
 static void boot_intro(Cpu *c) {
     // HakoniwaStateBootLoadData::exeBootLayout starts controller setup on step zero.
     // Its transition requires both step > 540 and the asynchronous loader to be ready.
@@ -447,6 +449,17 @@ void odyssey_native_120_boot(void) {
         uint64_t decomp = main->base + 0x97e420;
         if ((!e || atoi(e) != 0) && (original_szs_calc = dispatch_lookup(decomp)))
             hle_override(decomp, szs_calc, "SZS decompression off the core gate");
+    }
+    {   // Dynamic resolution off (setting game_dynres; ODYSSEY_GAME_DYNRES=0/1): al::GraphicsQualityController - the game's
+        // own load-driven quality, a nerve machine Wait -> Reduce -> Recover - lowers the resolution when frames run
+        // long (on a Steam Deck at 7-10 W down to 960x540 of 1600x900, or a smaller viewport in handheld: blurry). Its
+        // Reduce nerve's execute (vtable slot 0 of (anonymous)::GraphicsQualityControllerNrvReduce, found from the RTTI
+        // name in both builds) does nothing then: the quality never drops, so Recover has nothing to undo.
+        uint64_t reduce = main->base + (v141 ? 0x5ef6d0 : 0xa57f58);
+        if (!settings_game_dynres() && dispatch_lookup(reduce)) {
+            hle_override(reduce, quality_reduce_off, "Odyssey dynamic resolution off");
+            LOG("[quality] the game's dynamic resolution is off (full resolution)\n");
+        }
     }
     if (!requested && !trace) {
         installed = true;

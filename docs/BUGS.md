@@ -17,7 +17,7 @@ the owner.
 
 | Problem | Status |
 |---------|--------|
-| Resolution far below 1280x800: the game's own dynamic resolution (it also shrinks the viewport inside the same target, which the [res] log doesn't show). Mechanism found (`agl::lyr::RenderDisplay` requested size, applied in `RenderDisplay::calc`); 1.4.1's code differs from 1.0.0's, not found yet by static matching. | **Cause known** - next: catch the write at runtime, then a "Dynamic resolution: off" setting. |
+| Resolution far below 1280x800: the game's own dynamic resolution (`al::GraphicsQualityController`, a nerve machine Wait -> Reduce -> Recover). | **Fixed**: setting **Dynamic resolution** (off by default on a Steam Deck) - the Reduce nerve's execute does nothing (1.0.0 0x7000a57f58, 1.4.1 0x70005ef6d0, from the RTTI). Deck, manual GPU clock 1000 MHz: docked stays 1600x900 at 53-60 FPS ~8.7 W, handheld 1280x720 at 58-60 FPS ~8.9 W. |
 | 60 FPS at 7 W not reachable; target now **10 W** (+ manual GPU clock 1000 MHz recommended on the setup page). | In progress. |
 | Steam keyboard popping up at launch / in the settings. | **Fixed** (6f264b6). |
 | Stutters when new effects appear: game-thread stalls of 40-60 ms (not shader holds) on the Deck. | **Cause unknown** - next: sample the game thread during those frames. |
