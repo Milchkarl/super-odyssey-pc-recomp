@@ -27,7 +27,7 @@ L=/run/media/deck/SN01T/sopr-0.2.9.1/logs
 TS=$(date +%Y%m%d-%H%M%S)
 mkdir -p "$L"
 export ODYSSEY_DATA_ROOT=$F ODYSSEY_SAVE_DIR=$F/save ODYSSEY_SETTINGS=$F/powermoon-0291.ini ODYSSEY_NO_UPDATE_CHECK=1
-export ODYSSEY_VK_PROF=1 ODYSSEY_LOG_SLOW_FRAMES=25 ODYSSEY_LOG_STAGES=1
+export ODYSSEY_VK_PROF=1 ODYSSEY_LOG_SLOW_FRAMES=25 ODYSSEY_LOG_STAGES=1 ODYSSEY_HITCH_MS=30 ODYSSEY_LOG_SHADER_TIME=5
 ("$D/deck-threads.sh" "$L/threads-$TS.log" &)
 # (the log is kept by a user service once the game has exited: quitting from Steam ends this script, and everything it
 # started, with the game - a detached helper too)
