@@ -131,6 +131,12 @@ standing rule for every change.
   57-60. Remaining: single ~65 ms hitches (first shader/texture uses, a game-thread one).
 - Counter pairs: Odyssey writes start, a counter at a fixed address, then the end (start + 16 bytes): pairs are
   matched by address among the last few counters (exec.c cq_start_of).
+- **Console mode (2026-11-15):** setting `console_mode = docked|handheld` (Graphics > Screen shape), Handheld by
+  default on a Steam Deck. Handheld = the game's own handheld rendering (1280x720, lighter effects; the window shows
+  the 1280x720 corner of a 1600x900 texture - its crop is applied at present and counts as the screen). At 7 W in
+  the first Cap Kingdom visit it stays at 1280x720 the whole time (docked falls to 960x540) at 52-60 FPS. Open: blocky
+  stair-step edges on silhouettes against the sky (both modes) - likely a low-resolution effect layer upscaled;
+  compare with Switch footage before "fixing".
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 
