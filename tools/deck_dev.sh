@@ -7,7 +7,8 @@
 #   tools/deck_dev.sh bench <name>    ... + the busy Cap Kingdom walk; results in ~/sopr/bench/<name> on the Deck
 #   tools/deck_dev.sh full            sync + the full AppImage (needed after generator changes, and once at first)
 #
-# Extra bench settings pass through the environment, e.g. FULL=1 USER_INI=/home/deck/sopr/bench/user.ini HANDHELD=1.
+# Extra bench settings pass through the environment, e.g. FULL=1 USER_INI=/home/deck/sopr/bench/user.ini HANDHELD=1,
+# and GAME_ENV=ODYSSEY_X=1,ODYSSEY_Y=2 for any other game setting.
 # The Deck's address: DECK in tools/release.local.sh (git-ignored), e.g. DECK=deck@192.168.1.82.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -34,12 +35,15 @@ if [ "$MODE" = full ]; then
     $SSH "$DECK" 'cd ~/sopr && bash tools/linux/appimage.sh x86_64 > build/appimage.log 2>&1; echo EXIT=$?; tail -1 build/appimage.log'
     exit 0
 fi
-$SSH "$DECK" 'cd ~/sopr && bash tools/linux/dev_quick.sh 2>&1 | grep -E "error|ready|warning: implicit" | head -20'
+# (a failed build stops here: a bench must never run the previous program)
+$SSH "$DECK" 'cd ~/sopr && bash tools/linux/dev_quick.sh > build/dev_quick.log 2>&1; r=$?
+    grep -E -A3 "error|warning: implicit" build/dev_quick.log | head -30; tail -1 build/dev_quick.log; exit $r' ||
+    { echo "BUILD FAILED (log: ~/sopr/build/dev_quick.log on the Deck)"; exit 1; }
 
 if [ "$MODE" = bench ]; then
     NAME=${2:?bench name}
     ENVS=""
-    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES; do
+    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE; do
         [ -n "${!v:-}" ] && ENVS="$ENVS --setenv=$v=${!v}"
     done
     $SSH "$DECK" "systemctl --user reset-failed sopr-bench 2>/dev/null; systemd-run --user --collect --unit=sopr-bench \

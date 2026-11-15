@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copied from the Deck (~/sopr) into the repo 2026-11-15. Run on the Deck; env: OUT, APP (an AppImage or AppDir/AppRun), FULL=1
-# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES.
+# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV.
 # Data on the Deck: the 1.4.1 test copy /run/media/deck/SN01T/sopr-fonttest, ~/sopr/bench/savecomplete.tar (sopr-wintest save-complete).
 # Deck bench: Cap Kingdom walk from the test copy, the game thread sampled (Linux sampler, SIGPROF) for 600 frames.
 F=/run/media/deck/SN01T/sopr-fonttest
@@ -13,7 +13,15 @@ export ODYSSEY_PREPARE=0 ODYSSEY_SETTINGS=$OUT/set.ini ODYSSEY_VK_PROF=1 ODYSSEY
 export ODYSSEY_INPUT="${INPUT:-600:A:8,750:A:8,900:A:8,1050:A:8,2300:STICK_UP:240,2600:RSTICK_LEFT:150,2800:STICK_UP:300}"
 [ "$FULL" = 1 ] && unset ODYSSEY_WINDOW ODYSSEY_HIDDEN
 export ODYSSEY_LOG_PROGRAMS=${LOGP:-} ODYSSEY_SAMPLE_AT=${SAMPLE_AT:-2300} ODYSSEY_SAMPLE_FRAMES=${SAMPLE_FRAMES:-600} ODYSSEY_WINDOW_SHOT=${SHOT:-3300} ODYSSEY_WINDOW_SHOT_PATH=$OUT/shot.png ODYSSEY_EXIT_AFTER_SHOT=1
-rm -rf "$OUT/save"; mkdir -p "$OUT/save"; tar -xf /home/deck/sopr/bench/savecomplete.tar -C "$OUT/save/"
+# GAME_ENV=A=1,B=2: any other game settings (comma-separated)
+[ -n "${GAME_ENV:-}" ] && export ${GAME_ENV//,/ }
+# (a setting left empty above is dropped: the game may read "" as 0 / off instead of its default - early fences were
+# off in every bench before 2026-11-15 unless EARLY=1 was given)
+for v in $(env | grep -o '^ODYSSEY_[A-Z0-9_]*=$' | tr -d =); do unset "$v"; done
+# SAVE=<a .tar or a save folder>: start from that save (copied; the original is never written)
+rm -rf "$OUT/save"; mkdir -p "$OUT/save"
+SAVE=${SAVE:-/home/deck/sopr/bench/savecomplete.tar}
+if [ -d "$SAVE" ]; then cp -a "$SAVE/." "$OUT/save/"; else tar -xf "$SAVE" -C "$OUT/save/"; fi
 [ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
 %b" "${EXTRA_INI:-}" > "$OUT/set.ini"
 rm -f "$F/build/samples.txt"

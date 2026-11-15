@@ -135,6 +135,7 @@ uint64_t rq_push(int type, void *p, uint64_t a) {
 }
 
 bool rq_is_done(uint64_t ticket) { return atomic_load(&q_done) >= ticket; }
+uint64_t rq_done_ticket(void) { return atomic_load(&q_done); }
 
 uint64_t rq_last_ticket(void) {
     pthread_mutex_lock(&q_mx);

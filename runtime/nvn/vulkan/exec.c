@@ -641,7 +641,9 @@ static bool split_on_write(void) {
     }
     return on;
 }
-static void vk_note_guest_write(void) {
+uint64_t prof_gw[5];  // (stats) GPU writes to game memory: linear targets, compute copy-back, compute / vertex / fragment stores
+static void vk_note_guest_write_k(int k) {
+    prof_gw[k]++;
     atomic_store(&g_guest_write_seq, renderer_fence_seq());
     if (split_on_write()) g_split_pending = true;
 }
@@ -1249,6 +1251,12 @@ const char *renderer_stats(void) {
                      (unsigned long long)prof_tex_watch_skips, (unsigned long long)prof_gmem_binds, (unsigned long long)prof_splits,
                      (unsigned long long)prof_splits_skipped, atomic_load(&g_submit_ns) / 1e6);
             prof_tex_watch_skips = prof_gmem_binds = prof_splits = prof_splits_skipped = 0;
+            extern uint64_t prof_gw[5];
+            n = strlen(stats_text);
+            snprintf(stats_text + n, sizeof stats_text - n, " | gpu writes: linear %llu, compute back %llu, stores cs %llu vs %llu fs %llu",
+                     (unsigned long long)prof_gw[0], (unsigned long long)prof_gw[1], (unsigned long long)prof_gw[2],
+                     (unsigned long long)prof_gw[3], (unsigned long long)prof_gw[4]);
+            memset(prof_gw, 0, sizeof prof_gw);
         }
         pthread_mutex_lock(&wait_tab_lock);
         for (int i = 0; i < 12 && wait_tab[i].why; i++) {
@@ -5486,7 +5494,7 @@ static void linear_writeback(void) {
         VkBufferImageCopy c = {.bufferOffset = off, .bufferRowLength = (uint32_t)(t->stride / fi->bpb),
                                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {t->width, t->height, 1}};
         vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, gmem_buf, 1, &c);
-        vk_note_guest_write();
+        vk_note_guest_write_k(0);
         static int nlog;
         if (nlog++ < 12)
             LOG("[vk] linear render target %ux%u f%#x at %llx (pitch %llu) written back to guest memory\n", t->width, t->height,
@@ -5580,7 +5588,7 @@ static void gfast_finish(VkCommandBuffer cb) {
     vk_full_barrier(cb);
     vkCmdCopyBuffer(cb, gfast_buf, gmem_buf, (uint32_t)gfast_n, back);
     vk_full_barrier(cb);
-    vk_note_guest_write();
+    vk_note_guest_write_k(1);
     gfast_n = 0;
 }
 
@@ -6183,8 +6191,41 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     vkCmdDispatch(cb, cp->split_x ? gx * 3 : gx, gy, gz);
     for (int i = 0; i < cp->si->nimages; i++)
         if (written[i]) renderer_mark_gpu_owned(written[i]);
-    if (cp->si->uses_gmem_map && cp->si->uses_gmem_store) gfast_finish(cb);
-    if (cp->si->uses_gmem_store) vc_mark_sbufs(5), vk_note_guest_write();
+    // (diagnostics) ODYSSEY_LOG_GPU_WRITES=<frame>: each dispatch storing to game memory in that frame - its shader, size
+    // and the storage buffers it may write. ODYSSEY_GPU_WRITE_NOWAIT=1 or =<cs hex>,...: (experiment) those dispatches'
+    // stores don't make the game's fence wait for the GPU (early fences): only right if the CPU never reads them.
+    static int gw_init;
+    static uint64_t gw_frame, gw_skip[16];
+    static int gw_nskip, gw_all;
+    if (!gw_init) {
+        gw_init = 1;
+        const char *e = getenv("ODYSSEY_LOG_GPU_WRITES");
+        gw_frame = e ? strtoull(e, NULL, 10) : 0;
+        if ((e = getenv("ODYSSEY_GPU_WRITE_NOWAIT")) && *e) {
+            if (!strcmp(e, "1")) gw_all = 1;
+            else for (const char *s = e; *s && gw_nskip < 16; s++) {
+                char *end; uint64_t v = strtoull(s, &end, 16);
+                if (end != s) gw_skip[gw_nskip++] = v, s = end;
+                if (!*s) break;
+            }
+        }
+    }
+    uint64_t cs_addr = st.program->stages[5].code_addr;
+    if (cp->si->uses_gmem_store && gw_frame && vk_frame_counter() == gw_frame) {
+        LOG("[gpu-write] frame %llu cs %llx %ux%ux%u map %d:", (unsigned long long)gw_frame, (unsigned long long)cs_addr, gx, gy,
+            gz, cp->si->uses_gmem_map);
+        for (int i = 0; i < 16; i++)
+            if (st.sbuf[5][i].addr) LOG(" %llx+%llx", (unsigned long long)st.sbuf[5][i].addr, (unsigned long long)st.sbuf[5][i].size);
+        LOG("\n");
+    }
+    bool gw_wait = !gw_all;
+    for (int i = 0; i < gw_nskip && gw_wait; i++) if (gw_skip[i] == cs_addr) gw_wait = false;
+    if (cp->si->uses_gmem_map && cp->si->uses_gmem_store) {
+        if (gw_wait) gfast_finish(cb);
+        else { uint64_t keep = atomic_load(&g_guest_write_seq); bool sp = g_split_pending; gfast_finish(cb);
+               atomic_store(&g_guest_write_seq, keep); g_split_pending = sp; }
+    }
+    if (cp->si->uses_gmem_store) { vc_mark_sbufs(5); if (gw_wait) vk_note_guest_write_k(2); else prof_gw[2]++; }
     stat_dispatches++;
     split_if_pending();
 }
@@ -6711,8 +6752,8 @@ static void draw_(CmdRec *r, bool indexed) {
     if (prof) prof_sets += SDL_GetTicksNS() - prof_t1_;
     VkDescriptorSet sets[2] = {vset, fset};
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);  // (always new sets)
-    if (pr->vi->uses_gmem_store) vc_mark_sbufs(0), vk_note_guest_write();
-    if (pr->fi->uses_gmem_store) vc_mark_sbufs(1), vk_note_guest_write();
+    if (pr->vi->uses_gmem_store) vc_mark_sbufs(0), vk_note_guest_write_k(3);
+    if (pr->fi->uses_gmem_store) vc_mark_sbufs(1), vk_note_guest_write_k(4);
 
     uint64_t prof_t2_ = prof ? SDL_GetTicksNS() : 0;
     // ---- indices (copied; the largest index bounds the vertex data copied below)

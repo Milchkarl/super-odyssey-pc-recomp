@@ -59,16 +59,27 @@ standing rule for every change.
 - The owner's manual play on the same build: **30-56 FPS** after reaching Cap Kingdom. ~1,100-1,400 draws a frame,
   GPU busy ~1,050-1,250 ms of every 2 s (i.e. GPU-bound at times), render thread ~45-52% of a core, main game thread
   ~50-63%, a decompressor thread up to 68%. **Why the manual run is slower than the scripted one is the open question.**
-- **Reproducible case (2026-11-15):** `tools/deck_dev.sh bench <name>` with `FULL=1 USER_INI=... WARP=world:CapWorldHomeStage@1700`
-  and *no* `INPUT` (Mario stands where the warp puts him) holds a steady **40 FPS**, ~1,485 draws a frame, while
-  **nothing is saturated**: main game thread (p44) 66%, render thread 52%, GPU ~55% busy, splits 0. The stats show
-  `SyncWait 82x 753 ms` per 2 s: the game waits ~9 ms of every ~24 ms frame in `nvnSyncWait` for the render thread to
-  reach the fence (rq_wait on the ticket in runtime/nvn/objects.c). The game thread (~16 ms of work) and the render
-  thread (~12.7 ms) run in series instead of overlapping; overlapped, this scene would be ~60 FPS.
-  **This is the lead to follow first.** Find which fence the game waits on (current frame or previous) and why
-  the render thread is behind it. Before returning earlier, consider what the game does after the wait: it may
-  overwrite memory that the render thread still reads (uniforms, vertices). Fixes might be render-thread speed, a
-  snapshot of the data the render thread reads, or pipelining.
+- **Bench bug, fixed 2026-11-15:** deck-bench.sh exported `ODYSSEY_SYNC_EARLY=` (empty) when `EARLY` wasn't given,
+  and the game read "" as off, so early fences were OFF in every Deck bench before that date unless `EARLY=1` was
+  given. Bench numbers from before then are without early fences. Now empty settings are dropped, and the game
+  treats an empty `ODYSSEY_SYNC_EARLY` as unset. With early fences really on, the scripted Bonneton walk is a locked
+  60 (standing still too), also at the owner's 1440p settings.
+- **The real cause of the owner's 30-56 FPS (found 2026-11-15):** the owner's save is at the first visit to Cap
+  Kingdom (the Cappy-throw tutorial, fog). In that state the game runs **~21 small compute dispatches a frame that
+  store into game memory** (mostly `cs 727710c000`, also `727713dc00` and `7277124200`; a few hundred bytes each,
+  all in one area of the heap). Each store is a GPU write to game memory, so the early fence must wait for the GPU up
+  to it. Splits are capped at 8 a frame, so the game waits for most of the GPU's frame (`SyncWait` ~800 ms per 2 s).
+  Reproduce: `SAVE=/run/media/deck/SN01T/sopr-fonttest/save GAME_ENV=ODYSSEY_WARP=,ODYSSEY_LOG_GPU_WRITES=1400
+  SHOT=1700 USER_INI=... tools/deck_dev.sh bench <name>`: **46-49 FPS**. The stats line's `gpu writes:` field counts
+  them by kind.
+  Experiment `ODYSSEY_GPU_WRITE_NOWAIT=1` (don't wait for compute stores): **58-60 FPS**, picture intact. It is
+  **not safe to ship as is**: the copy-back (gfast_finish) writes the whole bound ranges back into the heap when the
+  GPU gets to it, which could overwrite what the game has written for the next frame, and the CPU might read the
+  results.
+  **The lead to follow first:** make these dispatches finish early instead of not waiting. Options: run gmem-only
+  compute dispatches (no images) on a separate Vulkan compute queue, submitted right away, with graphics waiting on
+  a timeline semaphore; or copy-back only the bytes the shader wrote; or prove with page protection (diagnostic only)
+  that the CPU never touches those ranges before the GPU is done.
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
   (render thread, lifter code quality) therefore raises GPU-bound frame rates too.
 
@@ -85,8 +96,8 @@ standing rule for every change.
 
 ## 4. Priorities (do them roughly in this order)
 
-1. **Deck: why manual play is 30-56 FPS.** Start with the 40 FPS standing case in section 3: the game thread waits
-   in `nvnSyncWait` for the render thread, so the two run in series. Then reproduce with the bench (section 6) in the places the owner plays,
+1. **Deck: compute writes to game memory** (section 3): make the first Cap Kingdom visit 60 FPS without the unsafe
+   no-wait shortcut. Then reproduce with the bench (section 6) in the other places the owner plays,
    compare the stats lines (splits, skipped splits, submit ms, GPU ms, thread CPU). Decide CPU-bound vs GPU-bound per
    place before changing code.
 2. **Deck CPU cost.** Biggest lever on a shared-power device:
@@ -143,6 +154,13 @@ tools/deck_dev.sh full                 # full AppImage (needed once, and after a
 - Bench options (environment): `FULL=1`, `USER_INI=/home/deck/sopr/bench/user.ini`, `WARP=world:<Stage>@<frame>`,
   `INPUT=...`, `SHOT=<frame>`, `HANDHELD=1`, `HITCH_MS=`, `PRESENT=`, `EARLY=`, `NOGMEM=` and more (see the header of
   tools/linux/deck/deck-bench.sh). Results and the game log land in `~/sopr/bench/<name>/` on the Deck.
+  `SAVE=<folder or .tar>` starts from another save (copied, never written); the default is the completed save, which
+  does NOT show first-visit scenes. `GAME_ENV=ODYSSEY_A=1,ODYSSEY_B=2` passes any game setting
+  (`ODYSSEY_WARP=` with nothing after it turns the bench's warp off).
+- Diagnostics: `ODYSSEY_SYNC_TRACE=1` (the game thread's frame: submits, fence waits, present throttle),
+  `ODYSSEY_LOG_GPU_WRITES=<frame>` (each compute dispatch storing to game memory in that frame).
+- A failed quick build stops deck_dev.sh, so a bench never runs an old program; the build log is
+  `~/sopr/build/dev_quick.log` on the Deck.
 - tools/linux/deck/deck-threads.sh and deck-gpu.sh sample per-thread CPU and GPU busy/clock while it runs.
 - The Deck test copy of the game is `/run/media/deck/SN01T/sopr-fonttest`. Never use the owner's real Deck install.
 - On the Deck: no sudo, no installs, no system setting changes. Start long jobs with `setsid nohup ... < /dev/null &`
