@@ -125,7 +125,8 @@ static void *ticker(void *a) {
     pid_t pid = getpid();
     pid_t presenter = g_tid;
     const char *want = getenv("ODYSSEY_SAMPLE_THREAD_NAME");
-    pid_t named = want && *want ? thread_by_name(want) : 0;
+    // ("present": the thread that presents - the game's main thread - by its id, not a name)
+    pid_t named = want && !strcmp(want, "present") ? presenter : want && *want ? thread_by_name(want) : 0;
     g_tid = named ? named : busiest_thread();
     LOG("[sample] sampling thread %d (the presenting thread is %d)\n", (int)g_tid, (int)presenter);
     struct timespec ts = {0, 500 * 1000};  // (2 kHz)

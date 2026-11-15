@@ -37,6 +37,14 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
      (~95 ms of first uses spread over views, texture hashing, uploads, allocations - no single cause), which the
      display shows as one or two images held. Render-thread profiles: SAMPLE_AT + GAME_ENV=ODYSSEY_SAMPLE_THREAD_NAME=
      render,ODYSSEY_SAMPLE_STACK=1, then tools/linux/deck/stacks.py on the Deck.
+   - **Effects route (2026-11-15):** tools/linux/deck/effects-route.txt (throws, spin throw, jumps, ground pounds,
+     rolls, dives, camera, two falls, pause menu, map) with `GAME_ENV=ODYSSEY_WARP=` - with the owner's save the
+     default warp at 1200 starts the Odyssey's travel cutscene, so the plain bench's "walk" was that cutscene.
+     `SHOTS=<frame>,...` saves the window at those frames to check where a route went (it stalls the presenter:
+     don't measure in the same run). 85 s of play: 9 images held. Shaders for new effects (44-228 ms builds) all
+     built in the background - no frame waited, none was skipped. The held ones: the stage-entry autosave moment
+     (~frame 1435, 45 ms, game thread waiting on a guest worker) and respawns after a fall (~50 ms, the stage-entry
+     first-use pattern). Not found: which guest worker the game thread waits for at ~1435.
 4. **Gyro on the Deck, automatic.** The Switch's motion controls (shaking to throw Cappy, motion aiming) from the
    Deck's gyro through SDL3 sensors - working when the game is added to Steam without a Steam Input setup (to be
    tested in Gaming Mode: Steam Input owns the controller there) - and a settings page for gyro (sensitivity,

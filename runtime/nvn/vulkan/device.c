@@ -1055,7 +1055,11 @@ static bool present_fast(TexBackend *w) {
     VkBuffer sbuf = VK_NULL_HANDLE;
     VmaAllocation smem = NULL;
     VmaAllocationInfo sinfo = {0};
-    if (ws_at && (long)total_frames + 1 >= ws_at && ws_i < ws_n) {
+    // (a test script's "frame:shot:<name>" - runtime/hle/input.c - asks for this present too)
+    extern char g_window_shot_request[256];
+    char req[256] = "";
+    if (g_window_shot_request[0]) snprintf(req, sizeof req, "%s", g_window_shot_request), g_window_shot_request[0] = 0;
+    if (req[0] || (ws_at && (long)total_frames + 1 >= ws_at && ws_i < ws_n)) {
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)e.width * e.height * 4,
                                   .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
         VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
@@ -1105,10 +1109,12 @@ static bool present_fast(TexBackend *w) {
             px[i * 4 + 3] = 255;
         }
         char path[1024];
-        if (ws_n > 1) snprintf(path, sizeof path, "build/window_%02d.png", ws_i);
+        if (req[0]) snprintf(path, sizeof path, "%s", req);
+        else if (ws_n > 1) snprintf(path, sizeof path, "build/window_%02d.png", ws_i);
         else snprintf(path, sizeof path, "%s", getenv("ODYSSEY_WINDOW_SHOT_PATH") ? getenv("ODYSSEY_WINDOW_SHOT_PATH") : "build/window.png");
         vk_save_png(path, px, e.width, e.height);
         vmaDestroyBuffer(g_vk.vma, sbuf, smem);
+        if (req[0]) return true;
         if (++ws_i == ws_n && getenv("ODYSSEY_EXIT_AFTER_SHOT")) { extern void sampler_flush(void); sampler_flush(); fflush(stderr); _exit(0); }
     }
     return true;
