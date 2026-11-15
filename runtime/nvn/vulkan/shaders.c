@@ -318,6 +318,16 @@ static uint32_t *vk_glsl_to_spirv_(const char *src, int stage, const char *name,
     if (nocache < 0) nocache = getenv("ODYSSEY_VK_NO_SPIRV_CACHE") != NULL;
     uint32_t *out = nocache ? NULL : cache_load(h, nwords);
     if (out) return out;
+    {   // ODYSSEY_DUMP_GLSL=<folder> (diagnostics): each source compiled here (not from the cache) as <key>.glsl
+        static const char *dump = (const char *)1;
+        if (dump == (const char *)1) dump = getenv("ODYSSEY_DUMP_GLSL");
+        if (dump) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s/%016llx.glsl", dump, (unsigned long long)h);
+            FILE *df = fopen(path, "w");
+            if (df) { fputs(src, df); fclose(df); }
+        }
+    }
     static __thread shaderc_compiler_t comp;
     if (!comp) comp = shaderc_compiler_initialize();
     shaderc_compile_options_t o = shaderc_compile_options_initialize();
