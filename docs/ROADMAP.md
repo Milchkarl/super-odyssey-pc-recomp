@@ -75,6 +75,13 @@ Target: **a real 1280x800 picture, a locked 60 FPS with a flat frame-time graph,
 
 ## Phase 3 - Image quality at low power
 
+- **Plan (2026-11-15):** Windows has DLSS, FSR 3.1, FSR 4 (beta) and XeSS through the vendors' prebuilt Windows
+  runtimes. The Deck / Linux have FSR 1 only. A temporal upscaler there needs either AMD's FidelityFX SDK built for
+  Linux (its shader permutations come from a Windows-only tool) or a port of FSR 2's open shaders to the renderer's
+  GLSL (a few thousand lines; the jitter and motion vectors the Windows path feeds DLSS are reused). The port is the
+  realistic route; it needs the FSR 2 source downloaded (MIT). Frame generation: FSR 3 frame generation is
+  Windows/DX12-centric; on Linux the practical options are the existing 120 FPS interpolation or a driver-level one.
+
 - A better upscaler for low internal resolutions. HelixSR / "FSR4-lite" is D3D12; options on Vulkan: AMD FSR 3.1
   (third_party/fsr3_sdk, Vulkan), Intel XeSS (Vulkan), or porting a shader-based one - license checked first.
 

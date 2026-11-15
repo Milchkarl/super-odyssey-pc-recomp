@@ -65,3 +65,12 @@ the owner.
 | #46, #44 Korean | Commented (font has no Hangul / map font). Not fixed. |
 | Owner: hard hitches at captures / boxes | **Fix in**: the picture is no longer held for a blended effect's first shader build. Needs the owner's play test. |
 | Kingdom tour (PC, 17 kingdoms, cold caches) | All arrive, render and play; no crash. Holds only on each kingdom's first frame (pipelines building - an unprepared cache). |
+
+## 2026-11-15 day (local; comments posted, nothing closed)
+
+| # | Status |
+|---|--------|
+| #46 Korean map "???" | **Fixed**: shared system fonts by type (Korean / Chinese get Malgun Gothic, YaHei, JhengHei, Steam's Go Noto Kurrent on Linux / Deck). Commented. |
+| #44 Korean F1 menu | **Done**: menu + launcher in Korean (runtime/ui/lang/ko.txt), Menu language setting. Checked on Windows and the Deck. Commented. |
+| Deck shader preparation | Full preparation on a fresh folder: **5 min 52 s** (scan 58 s, translate 195 s, build 156 s); the first full one last week ~14 min. |
+| Windows stage-entry / respawn pair | The stage's first frame is ~50 ms of GPU work: 1,331 render passes (the game's environment / probe setup, mostly 32x32 and 128x128 targets) + 526 feedback copies (8 ms). Game work, hidden by the fade on the Switch; the fix would be batching passes - open. |
