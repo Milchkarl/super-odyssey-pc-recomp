@@ -16,6 +16,7 @@
 #include "../settings.h"
 #include "../gameplay_clock.h"
 #include "../ui/menu.h"
+#include "../nvn/nvn.h"
 
 static bool hooks_ok, trace, extra_draw;
 static bool safe_scene_load = true;
@@ -187,6 +188,19 @@ static void follow_update(Cpu *c) {
                 *(float *)(uintptr_t)(holder + 0xc0), *(float *)(uintptr_t)(holder + 0xc4), dh, dv);
     }
     original_follow_update(c);
+}
+// The HUD at the output resolution (nvn/vulkan/exec.c "HUD layer"): nn::ui2d::Layout::Draw(DrawInfo&, gfx::CommandBuffer&)
+// draws one layout - the HUD, menus, wipes - into the command buffer (the gfx one holds its NVNcommandBuffer* at +0xb8,
+// both builds); its draws are marked there, so the renderer can draw them at the window's resolution after the scene
+// was upscaled (DLSS / FSR / XeSS, a lower internal resolution) instead of upscaling them with it.
+// ODYSSEY_HUD_MARKS=0: not marked.
+static GuestFn original_layout_draw;
+static void layout_draw(Cpu *c) {
+    static _Thread_local int depth;
+    uint64_t ncb = c->x[2] ? *(uint64_t *)(uintptr_t)(c->x[2] + 0xb8) : 0;
+    if (!depth++) nvn_ui_mark(c, ncb, 1);
+    original_layout_draw(c);
+    if (!--depth) nvn_ui_mark(c, ncb, 0);
 }
 static void quality_reduce_log(Cpu *c) {
     static uint64_t window, n;
@@ -545,6 +559,12 @@ void odyssey_native_120_boot(void) {
         uint64_t dec = main->base + 0x97dae0;
         if (v141 && (!e || atoi(e) != 0) && (original_szs_decoder = dispatch_lookup(dec)))
             hle_override(dec, szs_decoder, "SZS decoder off the core gate");
+    }
+    {   // the HUD's draws marked (layout_draw)
+        uint64_t ld = main->base + (v141 ? 0x903d60 : 0xb02b2c);
+        const char *e = getenv("ODYSSEY_HUD_MARKS");
+        if ((!e || atoi(e) != 0) && (original_layout_draw = dispatch_lookup(ld)))
+            hle_override(ld, layout_draw, "Odyssey layouts: their draws marked (the HUD at the output resolution)");
     }
     {   // the mouse camera, direct (follow_update)
         uint64_t upd = main->base + (v141 ? 0xbd2b0 : 0xca8b0);
