@@ -29,6 +29,7 @@ extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.c
 extern "C" {
 #include "../hle.h"
 #include "../mods.h"
+#include "../localization.h"
 #include "../diagnostics.h"
 #include "../settings.h"
 #include "../updater.h"
@@ -1085,6 +1086,7 @@ static void tab_about(void) {
     }
     hint("The game's text language. Auto keeps the one your save has (the game's own Options > Language changes it); "
          "any other choice replaces it. Applies the next time the game starts.");
+    if (g_settings.language == LANG_PT_BR) hint(localization_ptbr_message());
     ImGui::Spacing();
     header("Controller");
     toggle("Motion controls", &g_settings.motion);
