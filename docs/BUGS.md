@@ -53,3 +53,15 @@ the owner.
 ## Requests (not bugs)
 
 #44 Korean in the F1 menu, #41 V-Sync option, #35 5.1 surround, #29 Brazilian Portuguese fan translation.
+
+## Night of 2026-11-15 (local, not released; comments posted, nothing closed)
+
+| # | Status |
+|---|--------|
+| #45 shader stutters after a full compile | Their 0.2.10 log: after a full preparation the game loaded **none** of the prepared libraries (994 absent at the first frame). The current build loads them: full preparation then play, 1,231 loaded / 2 absent on an RTX 4090 and on an AMD (Radeon iGPU) - commented, asked to retest the next build. Also: blended full-screen-sized draws no longer hold the picture; library builds ~45% cheaper on a Deck. |
+| #41 V-Sync | **Done**: VSync On / Off / Strict / Adaptive, refresh rate (exclusive fullscreen), real monitor resolutions. Commented. |
+| #39, #27 motion shake on a button | **Done**: Shake button (controller) / Shake key (middle mouse by default). Commented. |
+| #13, #42 slow motion | **Fixed**: catch-up clock on by default on Windows (120 ticks / 2 s at ~32 FPS instead of 60). Commented; #42's frame drops themselves still need a log. |
+| #46, #44 Korean | Commented (font has no Hangul / map font). Not fixed. |
+| Owner: hard hitches at captures / boxes | **Fix in**: the picture is no longer held for a blended effect's first shader build. Needs the owner's play test. |
+| Kingdom tour (PC, 17 kingdoms, cold caches) | All arrive, render and play; no crash. Holds only on each kingdom's first frame (pipelines building - an unprepared cache). |
