@@ -1,0 +1,23 @@
+#!/bin/bash
+# Copied from the Deck (~/sopr) into the repo 2026-11-15. Run on the Deck; env: OUT, APP (an AppImage or AppDir/AppRun), FULL=1
+# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES.
+# Data on the Deck: the 1.4.1 test copy /run/media/deck/SN01T/sopr-fonttest, ~/sopr/bench/savecomplete.tar (sopr-wintest save-complete).
+# Deck bench: Cap Kingdom walk from the test copy, the game thread sampled (Linux sampler, SIGPROF) for 600 frames.
+F=/run/media/deck/SN01T/sopr-fonttest
+APP=${APP:-/home/deck/sopr/build/dist/Super Odyssey PC Recomp-0.2.10-linux-x86_64.AppImage}
+OUT=${OUT:-$HOME/sopr/bench/run}
+mkdir -p "$OUT"
+export XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0 DISPLAY=:0
+export ODYSSEY_NO_CONFIG=1 ODYSSEY_DATA_ROOT=$F ODYSSEY_SAVE_DIR=$OUT/save ODYSSEY_WINDOW=1280x800 ODYSSEY_NO_UPDATE_CHECK=1
+export ODYSSEY_PREPARE=0 ODYSSEY_SETTINGS=$OUT/set.ini ODYSSEY_VK_PROF=1 ODYSSEY_SYNC_EARLY=${EARLY:-} ODYSSEY_VK_NO_GMEM=${NOGMEM:-} ODYSSEY_HANDHELD=${HANDHELD:-0} ODYSSEY_VK_PRESENT=${PRESENT:-mailbox} ODYSSEY_VK_IMAGES=${IMAGES:-} ODYSSEY_HITCH_MS=${HITCH_MS:-50} ODYSSEY_LOG_GATE_MS=${GATE_MS:-} ODYSSEY_LOG_SLOW_FRAMES=40 ODYSSEY_WARP=${WARP:-world:CapWorldHomeStage@1200}
+export ODYSSEY_INPUT="${INPUT:-600:A:8,750:A:8,900:A:8,1050:A:8,2300:STICK_UP:240,2600:RSTICK_LEFT:150,2800:STICK_UP:300}"
+[ "$FULL" = 1 ] && unset ODYSSEY_WINDOW ODYSSEY_HIDDEN
+export ODYSSEY_LOG_PROGRAMS=${LOGP:-} ODYSSEY_SAMPLE_AT=${SAMPLE_AT:-2300} ODYSSEY_SAMPLE_FRAMES=${SAMPLE_FRAMES:-600} ODYSSEY_WINDOW_SHOT=${SHOT:-3300} ODYSSEY_WINDOW_SHOT_PATH=$OUT/shot.png ODYSSEY_EXIT_AFTER_SHOT=1
+rm -rf "$OUT/save"; mkdir -p "$OUT/save"; tar -xf /home/deck/sopr/bench/savecomplete.tar -C "$OUT/save/"
+[ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
+%b" "${EXTRA_INI:-}" > "$OUT/set.ini"
+rm -f "$F/build/samples.txt"
+D=$(dirname "$(readlink -f "$0")"); ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout 900 "$APP" > "$OUT/run.log" 2>&1
+echo "EXIT=$?" >> "$OUT/run.log"
+cp "$F/build/samples.txt" "$OUT/" 2>/dev/null
+echo DONE >> "$OUT/run.log"
