@@ -592,7 +592,7 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
         ImGui::TextWrapped("The game's shaders are turned into ones your GPU runs, once, before playing. Without it they "
                            "are made the first time each one is needed, which shows as short stutters for a while. "
-                           "It takes a few minutes (longer on a Steam Deck) and is only needed again after an update "
+                           "It takes a few minutes (about 6 on a Steam Deck) and is only needed again after an update "
                            "that changes them, or when you ask for it in the menu.");
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, 18 * scale));
@@ -611,7 +611,7 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         ImGui::Dummy(ImVec2(0, 6 * scale));
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccentV);
         char ov[64];
-        snprintf(ov, sizeof ov, n > 0 ? "%d / %d" : "starting...", d, n);
+        snprintf(ov, sizeof ov, n > 0 ? "%d / %d" : "finding the game's shaders...", d, n);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10 * scale, 8 * scale));
         ImGui::ProgressBar(f, ImVec2(w, 0), ov);
         ImGui::PopStyleVar();
