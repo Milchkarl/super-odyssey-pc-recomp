@@ -122,8 +122,13 @@ standing rule for every change.
   of waiting: 2,000-21,000 such touches per 2 s cost microseconds. What still waits: the game's writes ON the result
   buffers (~50-70 per 2 s at 7 W, up to ~17 ms each, because the GPU runs ~a frame behind). A word-exact merge copy
   back (ODYSSEY_GFAST_MERGE=1, off) lets writes through, but then the game's reads around them wait instead - no gain.
-  **Next:** make these ~20 small dispatches finish right away - a separate Vulkan compute queue, submitted at once,
-  graphics waiting on a timeline semaphore - so a wait is ~1 ms instead of a GPU frame.
+  **Done 2026-11-15 - compute queue** (Linux default; `ODYSSEY_VK_COMPUTE_QUEUE=0` off; exec.c "compute queue"): a
+  dispatch storing through the fast-copy table whose textures / images are small (shared CONCURRENT, at most 65,536
+  texels) and not written in the graphics submission being recorded runs on a compute-only queue, submitted at once,
+  waiting only for the last graphics submission that wrote game memory; the next graphics submission waits for it.
+  The guard tracks each range's queue (seq / cseq). Deck at 7 W, first Cap Kingdom visit: all ~20 dispatches a frame
+  there, guard waits 0 ms (were 300-450 ms per 2 s), heaviest walking stretch 53-60 FPS (was 45-48); Bonneton town
+  57-60. Remaining: single ~65 ms hitches (first shader/texture uses, a game-thread one).
 - Counter pairs: Odyssey writes start, a counter at a fixed address, then the end (start + 16 bytes): pairs are
   matched by address among the last few counters (exec.c cq_start_of).
 - The Deck has a **15 W budget shared by CPU and GPU**: CPU time saved gives the GPU clock headroom. Cutting CPU work
