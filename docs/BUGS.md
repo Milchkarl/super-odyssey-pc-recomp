@@ -46,7 +46,7 @@ the owner.
 
 | # | Report | Status |
 |---|--------|--------|
-| #40 | Key binds can't be changed on the launcher (configuration) page: the "press a key" prompt ignores mouse and keyboard. Mouse camera feels slow. | **Needs a look** (input isn't routed to the binding prompt on that page). |
+| #40 | Key binds can't be changed on the launcher (configuration) page: the "press a key" prompt ignores mouse and keyboard. Mouse camera feels slow. | **Fixed** (the prompt only got presses while the in-game menu was open; now also on the configuration page) - needs the owner's test on the PC launcher. Mouse speed: a setting (25-400 %, default 100 %); default tuning goes with Phase 2's Windows controls. |
 | #37 | Map flags / checkpoints can't be selected (PS4 controller, 1.4.1) | **Needs repro** (similar to closed #22, Switch controller). |
 | #39, #27 | Map motion shake to a button | Feature - together with the owner's motion-control work. |
 
