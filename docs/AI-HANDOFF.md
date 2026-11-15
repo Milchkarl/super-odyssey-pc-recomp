@@ -166,8 +166,13 @@ tools/deck_dev.sh full                 # full AppImage (needed once, and after a
   (`ODYSSEY_WARP=` with nothing after it turns the bench's warp off).
 - Diagnostics: `ODYSSEY_SYNC_TRACE=1` (the game thread's frame: submits, fence waits, present throttle),
   `ODYSSEY_LOG_GPU_WRITES=<frame>` (each compute dispatch storing to game memory in that frame).
-- On the Deck, `/run/media/deck/SN01T/sopr-0.2.9.1/Play dev.sh` plays the newest quick build (the AppDir) on the test
-  copy with stats logging (logs/dev-session-*.log): the owner can test a change minutes after it's made, no AppImage.
+- **Testing is done in Gaming Mode** (the owner's choice, 2026-11-15). The owner's Steam has a non-Steam shortcut to
+  `/home/deck/sopr/tools/linux/deck/play-dev.sh`: played from Steam it runs the newest quick build (the AppDir) on the
+  test copy with stats logging (`/run/media/deck/SN01T/sopr-0.2.9.1/logs/dev-session-*.log`), so a change can be
+  played minutes after it's made, without an AppImage. Scripted runs from the PC go through the same shortcut:
+  `LAUNCH=steam tools/deck_dev.sh bench <name>` leaves the run's settings in `~/sopr/bench/next-run.env` (used once,
+  only if under 2 minutes old) and starts the shortcut with `steam -ifrunning steam://rungameid/<id>`. Without
+  `LAUNCH=steam` a bench starts the game directly (needs Desktop Mode).
 - A failed quick build stops deck_dev.sh, so a bench never runs an old program; the build log is
   `~/sopr/build/dev_quick.log` on the Deck.
 - tools/linux/deck/deck-threads.sh and deck-gpu.sh sample per-thread CPU and GPU busy/clock while it runs.

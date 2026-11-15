@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copied from the Deck (~/sopr) into the repo 2026-11-15. Run on the Deck; env: OUT, APP (an AppImage or AppDir/AppRun), FULL=1
-# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV.
+# (fullscreen), USER_INI, HANDHELD, EARLY, NOGMEM, HITCH_MS, GATE_MS, WARP, INPUT, SAMPLE_AT, SHOT, EXTRA_INI, PRESENT, IMAGES, SAVE, GAME_ENV, LAUNCH=steam.
 # Data on the Deck: the 1.4.1 test copy /run/media/deck/SN01T/sopr-fonttest, ~/sopr/bench/savecomplete.tar (sopr-wintest save-complete).
 # Deck bench: Cap Kingdom walk from the test copy, the game thread sampled (Linux sampler, SIGPROF) for 600 frames.
 F=/run/media/deck/SN01T/sopr-fonttest
@@ -25,7 +25,30 @@ if [ -d "$SAVE" ]; then cp -a "$SAVE/." "$OUT/save/"; else tar -xf "$SAVE" -C "$
 [ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
 %b" "${EXTRA_INI:-}" > "$OUT/set.ini"
 rm -f "$F/build/samples.txt"
-D=$(dirname "$(readlink -f "$0")"); ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout 900 "$APP" > "$OUT/run.log" 2>&1
-echo "EXIT=$?" >> "$OUT/run.log"
+D=$(dirname "$(readlink -f "$0")")
+if [ "${LAUNCH:-}" = steam ]; then
+    # Through Steam (Gaming Mode as the owner plays it): the Steam shortcut to play-dev.sh runs this with the settings
+    # left in next-run.env (only the game's own; the display comes from Steam / gamescope)
+    ID=$(python3 - <<'PY'
+import glob, re, struct
+for f in glob.glob('/home/deck/.steam/steam/userdata/*/config/shortcuts.vdf'):
+    b = open(f, 'rb').read()
+    for m in re.finditer(rb'\x02appid\x00(....)', b, re.I):
+        e = re.search(rb'\x01exe\x00([^\x00]*)', b[m.end():m.end() + 2048], re.I)
+        if e and b'play-dev.sh' in e.group(1):
+            print((struct.unpack('<I', m.group(1))[0] << 32) | 0x02000000); raise SystemExit
+PY
+)
+    [ -n "$ID" ] || { echo "no Steam shortcut to play-dev.sh: add it once (see play-dev.sh)" >> "$OUT/run.log"; echo DONE >> "$OUT/run.log"; exit 1; }
+    rm -f "$OUT/game-exited" "$OUT/run.log"
+    { echo "OUT=$OUT"; export -p | sed -n 's/^declare -x \(ODYSSEY_[A-Z0-9_]*=\)/export \1/p' | grep -v '^export ODYSSEY_WINDOW='; } > /home/deck/sopr/bench/next-run.env
+    [ "$FULL" = 1 ] || echo "export ODYSSEY_WINDOW=1280x800" >> /home/deck/sopr/bench/next-run.env
+    steam -ifrunning "steam://rungameid/$ID" > /dev/null 2>&1 &
+    for i in $(seq 1 960); do [ -f "$OUT/game-exited" ] && break; sleep 1; done
+    [ -f "$OUT/game-exited" ] || echo "the game did not finish (or never started) through Steam" >> "$OUT/run.log"
+else
+    ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout 900 "$APP" > "$OUT/run.log" 2>&1
+    echo "EXIT=$?" >> "$OUT/run.log"
+fi
 cp "$F/build/samples.txt" "$OUT/" 2>/dev/null
 echo DONE >> "$OUT/run.log"

@@ -8,7 +8,8 @@
 #   tools/deck_dev.sh full            sync + the full AppImage (needed after generator changes, and once at first)
 #
 # Extra bench settings pass through the environment, e.g. FULL=1 USER_INI=/home/deck/sopr/bench/user.ini HANDHELD=1,
-# and GAME_ENV=ODYSSEY_X=1,ODYSSEY_Y=2 for any other game setting.
+# and GAME_ENV=ODYSSEY_X=1,ODYSSEY_Y=2 for any other game setting. LAUNCH=steam: through the Steam shortcut to
+# tools/linux/deck/play-dev.sh, i.e. in Gaming Mode as the owner plays it (add the shortcut once: see play-dev.sh).
 # The Deck's address: DECK in tools/release.local.sh (git-ignored), e.g. DECK=deck@192.168.1.82.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,7 +44,7 @@ $SSH "$DECK" 'cd ~/sopr && bash tools/linux/dev_quick.sh > build/dev_quick.log 2
 if [ "$MODE" = bench ]; then
     NAME=${2:?bench name}
     ENVS=""
-    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE; do
+    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE LAUNCH; do
         [ -n "${!v:-}" ] && ENVS="$ENVS --setenv=$v=${!v}"
     done
     $SSH "$DECK" "systemctl --user reset-failed sopr-bench 2>/dev/null; systemd-run --user --collect --unit=sopr-bench \
