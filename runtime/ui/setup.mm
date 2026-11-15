@@ -28,6 +28,7 @@
 
 #include "imgui.h"
 #include "theme.h"
+#include "i18n.h"
 #include "backdrop.h"
 
 #ifdef __APPLE__
@@ -458,7 +459,7 @@ static bool accent_button(const char *label, float scale, bool enabled = true) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(34 * scale, 14 * scale));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6 * scale);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2 * scale);
-    bool r = ImGui::Button(label);
+    bool r = ImGui::Button(tr(label));
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(5);
     ImGui::EndDisabled();
@@ -468,7 +469,7 @@ static bool small_button(const char *label, float scale) {
     ImGui::PushStyleColor(ImGuiCol_Button, kSurfaceHoverV);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16 * scale, 7 * scale));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5 * scale);
-    bool r = ImGui::Button(label);
+    bool r = ImGui::Button(tr(label));
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
     return r;
@@ -585,15 +586,15 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
     ImGui::BeginGroup();
     ImGui::PushTextWrapPos(p0.x + w);
     ImGui::PushFont(big);
-    ImGui::TextUnformatted(g_prep.load() == PREP_ASK ? "Compile the shaders now?" : "Compiling the shaders");
+    ImGui::TextUnformatted(tr(g_prep.load() == PREP_ASK ? "Compile the shaders now?" : "Compiling the shaders"));
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, 8 * scale));
     if (g_prep.load() == PREP_ASK) {
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextWrapped("The game's shaders are turned into ones your GPU runs, once, before playing. Without it they "
+        ImGui::TextWrapped("%s", tr("The game's shaders are turned into ones your GPU runs, once, before playing. Without it they "
                            "are made the first time each one is needed, which shows as short stutters for a while. "
                            "It takes a few minutes (about 6 on a Steam Deck) and is only needed again after an update "
-                           "that changes them, or when you ask for it in the menu.");
+                           "that changes them, or when you ask for it in the menu."));
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, 18 * scale));
         if (accent_button("Compile now", scale)) prep_start();
@@ -606,12 +607,12 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         if (ph != g_prep_last_phase) g_prep_last_phase = ph, g_prep_phase_t0 = now;
         static const char *const steps[] = {"Step 1 of 3: translating the game's shaders", "Step 2 of 3: compiling them for your GPU",
                                             "Step 3 of 3: compiling the recorded pipelines"};
-        ImGui::TextUnformatted(steps[ph >= 0 && ph <= 2 ? ph : 1]);
+        ImGui::TextUnformatted(tr(steps[ph >= 0 && ph <= 2 ? ph : 1]));
         float f = n > 0 ? (float)d / (float)n : 0;
         ImGui::Dummy(ImVec2(0, 6 * scale));
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccentV);
         char ov[64];
-        snprintf(ov, sizeof ov, n > 0 ? "%d / %d" : "finding the game's shaders...", d, n);
+        snprintf(ov, sizeof ov, n > 0 ? "%d / %d" : tr("finding the game's shaders..."), d, n);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10 * scale, 8 * scale));
         ImGui::ProgressBar(f, ImVec2(w, 0), ov);
         ImGui::PopStyleVar();
@@ -629,7 +630,7 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         if (accent_button("Stop and play", scale)) g_prep_cancel = 1;
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextWrapped("What is compiled so far is kept; the rest is made while you play.");
+        ImGui::TextWrapped("%s", tr("What is compiled so far is kept; the rest is made while you play."));
         ImGui::PopStyleColor();
     }
     ImGui::PopTextWrapPos();
@@ -661,7 +662,7 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.55f), sz, IM_COL32(59, 196, 90, 255), 0);
         ImGui::Dummy(ImVec2(sz, lh));
         ImGui::SameLine(0, lh * 0.35f);
-        ImGui::TextUnformatted("Configuration");
+        ImGui::TextUnformatted(tr("Configuration"));
     }
     ImGui::PopFont();
     ImGui::EndGroup();
@@ -669,8 +670,8 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         ImGui::SetCursorPosX(c0.x + pad);
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
         ImGui::PushTextWrapPos(c0.x + cardw - pad);
-        ImGui::TextWrapped("Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set "
-                           "it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS.");
+        ImGui::TextWrapped("%s", tr("Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set "
+                           "it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS."));
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     }
@@ -706,11 +707,11 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         ImGui::PushStyleColor(ImGuiCol_CheckMark, kTextV);
         ImGui::PushStyleColor(ImGuiCol_FrameBg, kSurfaceV);
         ImGui::PushStyleColor(ImGuiCol_NavCursor, kAccentV);
-        if (ImGui::Checkbox("Show this screen at every start", &g_settings.config_at_start)) settings_save();
+        if (ImGui::Checkbox(tr("Show this screen at every start"), &g_settings.config_at_start)) settings_save();
         ImGui::PopStyleColor(3);
     }
     {   // (the controller's hint, at the right)
-        const char *hint = "Start: Play";
+        const char *hint = tr("Start: Play");
         ImGui::SetWindowFontScale(0.8f);
         ImVec2 ts = ImGui::CalcTextSize(hint);
         ImGui::SameLine(c0.x + cardw - pad - ts.x);

@@ -17,6 +17,7 @@ podman run --rm --arch amd64 -v "$PWD:/src" -w /src "$IMG" \
     make -j"$(nproc)" B=/src/build/linux/x86_64/game DEPS=/src/build/linux/x86_64/deps SHADERC=-lshaderc_shared ARCH=x86_64 \
     /src/build/linux/x86_64/game/SuperOdysseyRecomp
 cp "$L/game/SuperOdysseyRecomp" "$A/usr/bin/SuperOdysseyRecomp"
+mkdir -p "$A/usr/bin/lang" && cp runtime/ui/lang/*.txt "$A/usr/bin/lang/"  # (the menu's translations)
 # (as tools/linux/package.sh does: the AppDir's own libraries, through $ORIGIN/../lib)
 podman run --rm --arch amd64 -v "$PWD:/src" -w /src "$IMG" \
     patchelf --set-rpath '$ORIGIN/../lib' /src/build/linux/x86_64/AppDir/usr/bin/SuperOdysseyRecomp
