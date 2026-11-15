@@ -71,6 +71,15 @@ static void settings_steam_deck(void) {
     settings_battery_saver();
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
+    g_settings.console_mode = CONSOLE_HANDHELD;  // (the game's handheld rendering: what a Switch shows on its own screen)
+}
+bool settings_handheld(void) {
+    static int h = -1;
+    if (h < 0) {
+        const char *e = getenv("ODYSSEY_HANDHELD");
+        h = e && *e ? atoi(e) != 0 : g_settings.console_mode == CONSOLE_HANDHELD;
+    }
+    return h;
 }
 void settings_battery_saver(void) {
     g_settings.res_mode = RES_Q75;
@@ -268,6 +277,7 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
         else if (!strcmp(key, "aspect")) g_settings.aspect = !strcmp(val, "fill") ? ASPECT_FILL : ASPECT_16_9;
+        else if (!strcmp(key, "console_mode")) g_settings.console_mode = !strcmp(val, "handheld") ? CONSOLE_HANDHELD : CONSOLE_DOCKED;
         else if (!strcmp(key, "frame_interp")) g_settings.frame_interp = atoi(val) != 0;
         else if (!strcmp(key, "aniso")) {
             int n = atoi(val);
@@ -358,6 +368,7 @@ void settings_save(void) {
     fprintf(f, "fsr1_sharpness = %d\n", g_settings.fsr1_sharpness);
     fprintf(f, "deband = %d\n", g_settings.deband);
     fprintf(f, "aspect = %s\n", g_settings.aspect == ASPECT_FILL ? "fill" : "16:9");
+    fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
     fprintf(f, "frame_interp = %d\n", g_settings.frame_interp);
     if (g_settings.aniso) fprintf(f, "aniso = %d\n", g_settings.aniso);
     else fprintf(f, "aniso = game\n");

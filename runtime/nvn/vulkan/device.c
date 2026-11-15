@@ -1327,7 +1327,10 @@ static bool frame_placement(float v[4], float pv[8]) {
         os.sy = os.vh * dlss_scale / GAME_H;
     }
 #endif
-    float crop[4] = {0, 0, 1, 1};  // uv origin and size: all of it
+    // (uv origin and size: the game's window crop - in handheld mode the 1280x720 corner of its window texture)
+    extern void renderer_present_crop(float crop[4]);
+    float crop[4];
+    renderer_present_crop(crop);
     renderer_set_scale((float)os.sx, (float)os.sy);
     vk_overlay_resolution((unsigned)(GAME_W * os.sx + 0.5), (unsigned)(GAME_H * os.sy + 0.5), (unsigned)(os.vw + 0.5),
                           (unsigned)(os.vh + 0.5));  // (the performance overlay's "1600 x 900 -> 3840 x 2160")
