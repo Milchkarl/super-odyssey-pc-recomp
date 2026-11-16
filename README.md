@@ -174,6 +174,16 @@ The program folder holds the program; the install folder (the same one unless yo
 
 Never share `extracted\` or anything built from it: it's Nintendo's game.
 
+### Brazilian Portuguese fan translation
+
+The separately obtained **JumpManClub Brasil v1.1** RomFS mod can be selected
+with **Controls > System language > Português (Brasil)**. It uses the game's
+US English slot, and the menu reports whether the complete known package is
+enabled without conflicting files. See [installation, limitations and credits](docs/PT-BR.md).
+If the translation is missing, selecting the language offers to download and install
+the official package. Confirm the installation, then restart when prompted.
+No translation files are bundled; no download starts without confirmation.
+
 ## Building from source
 
 Needs MSYS2 (UCRT64: clang, SDL3, FFmpeg, shaderc, Python) - `tools\setup_windows.ps1` installs them. See
