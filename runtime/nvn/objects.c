@@ -239,11 +239,7 @@ NVN(nvnSyncWait) {  // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
         const char *e = getenv("ODYSSEY_SYNC_EARLY");
         env = !e || !*e ? -1 : atoi(e) != 0;  // (empty: as unset)
     }
-#ifdef __linux__
-    int early = env >= 0 ? env : g_settings.early_fences != 0;
-#else
-    int early = env >= 0 ? env : g_settings.early_fences == 1;
-#endif
+    int early = env >= 0 ? env : g_settings.early_fences != 0;  // (Auto: on everywhere - owner 2026-11-16)
     static int logged = -1;
     if (logged != early) { logged = early; LOG("[nvn] early frame hand-off %s\n", early ? "on" : "off"); }
     if (early && rq_enabled() && !flush && !whole && !drain && fs->ticket) {

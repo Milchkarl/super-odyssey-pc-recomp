@@ -722,6 +722,7 @@ extern "C" double output_scale_dynamic_factor(void);
 extern "C" bool vk_prepare_requested(void);       // runtime/nvn/vulkan/device.c (the menu's Compile shaders)
 extern "C" void vk_prepare_request(bool on);
 #ifndef __APPLE__
+extern "C" bool vk_gpu_is_nvidia(void);     // runtime/nvn/vulkan/device.c
 extern "C" bool vk_temporal_enabled(void);  // runtime/nvn/vulkan/dlss_probe.c
 extern "C" bool vk_fsr2_available(void);    // runtime/nvn/vulkan/fsr2.c
 #endif
@@ -966,7 +967,7 @@ static void tab_graphics(void) {
         int was = g_settings.frame_gen;
         if (opt_choice("Frame generation", &g_settings.frame_gen, fgn, FG_COUNT, FG_OFF,
                        "A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother "
-                       "motion on a 120 Hz or faster display, a little more input delay (Low latency below takes most of it "
+                       "motion on a 120 Hz or faster display, a little more input delay (Performance > Low latency takes most of it "
                        "back). AMD FSR: any GPU; changes during play. NVIDIA DLSS: GeForce RTX 40 series or newer, with "
                        "Reflex; applies the next time the game starts. Intel XeSS frame generation exists only for "
                        "DirectX 12, not for this Vulkan renderer. Needs Frame rate 60 FPS and 120 FPS interpolation off. "
@@ -979,13 +980,6 @@ static void tab_graphics(void) {
                        "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > "
                        "Frame rate, and Graphics > Experimental at the bottom of this tab).");
         }
-    }
-    {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
-        static const char *lln[] = {"Off", "On", "On + Boost"};
-        opt_choice("Low latency (NVIDIA Reflex)", &g_settings.low_latency, lln, 3, 0,
-                   "Less delay between your input and the picture: the game starts each frame as late as it can instead of "
-                   "queuing frames ahead. Boost also keeps the GPU clocks up. NVIDIA GPUs; always on with DLSS frame "
-                   "generation. Applies the next time the game starts.");
     }
     int backend = g_settings.temporal_backend;
     bool fsr = backend == TEMPORAL_FSR3 || backend == TEMPORAL_FSR4 || backend == TEMPORAL_FSR2;
@@ -1079,7 +1073,7 @@ static void tab_graphics(void) {
                                 "textures are raised; shadows and screen effects keep the game's setting. Game: the level "
                                 "the game asks for, as on the Switch.%s",
                  settings_aniso_at_start() != g_settings.aniso ? "\n\nApplies when the game starts again." : "");
-        if (opt_choice("Anisotropic filtering", &ai, an, 5, 4, ad, false)) g_settings.aniso = an_v[ai];
+        if (opt_choice("Anisotropic filtering", &ai, an, 5, 0, ad, false)) g_settings.aniso = an_v[ai];
     }
     {
         static const int td_start = g_settings.texture_detail;  // (samplers are made once: read at start)
@@ -1123,6 +1117,47 @@ static void tab_graphics(void) {
 static void tab_performance(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##performance", scale);
+    // The speed-ups, on by default and first in the tab (owner 2026-11-16), each saying to turn it off on trouble
+    opt_section("Optimizations");
+    {
+        int v = g_settings.early_fences + 1;  // (-1 Auto, 0 Off, 1 On)
+        static const char *ef[] = {"Auto (on)", "Off", "On"};
+        opt_choice("Early frame hand-off", &v, ef, 3, 0,
+                   "The game starts its next frame as soon as this one is handed to the graphics card, instead of "
+                   "waiting for the card to finish it - the game and the drawing run side by side. Busy places: about "
+                   "10-15% more FPS on a PC (132 -> 148 at 240 FPS), and 45 -> 58-60 FPS on a Steam Deck. On by "
+                   "default. If you see flickering or broken objects, set it to Off.", false);
+        g_settings.early_fences = v - 1;
+    }
+#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
+    {
+        static const int rt_start = g_settings.record_thread;  // (read at start)
+        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
+        static char autolab[48];
+        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
+        const char *rt[] = {autolab, "Off", "On"};
+        char d[900];
+        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
+                                         "prepares the next ones. Busy places at high frame rates: about 25-30% more FPS on a fast "
+                                         "PC (148 -> 179 at 240 FPS). Uses one more CPU core. Auto: on with an NVIDIA graphics "
+                                         "card, where it was tested; off with AMD and Intel for now - try On there. If you see "
+                                         "flickering, missing objects or crashes, set it to Off."),
+                 rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
+        if (opt_choice("Multithreaded rendering", &v, rt, 3, 0, d, false)) g_settings.record_thread = v - 1;
+    }
+#endif
+#ifdef _WIN32
+    {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
+        static const char *lln[] = {"Off", "On", "On + Boost"};
+        bool nv = vk_gpu_is_nvidia();
+        if (!nv) opt_disable_next();
+        opt_choice("Low latency (NVIDIA Reflex)", &g_settings.low_latency, lln, 3, 0,
+                   nv ? "Less delay between your input and the picture: the game starts each frame as late as it can "
+                        "instead of queuing frames ahead. Boost also keeps the GPU clocks up. Always on with DLSS frame "
+                        "generation. Applies the next time the game starts."
+                      : "NVIDIA graphics cards only: not available with this one.");
+    }
+#endif
 #ifndef __APPLE__  // (Vulkan: runtime/hle/odyssey_120.c, nvn/interp.c)
     opt_section("Frame rate");
     {
@@ -1145,36 +1180,10 @@ static void tab_performance(void) {
         g_settings.frame_rate = order[pos];
     }
 #endif
-    {
-        int v = g_settings.early_fences + 1;  // (-1 Auto, 0 Off, 1 On)
-        static const char *ef[] = {"Auto", "Off", "On"};
-#ifdef __linux__
-        const char *autod = "Auto: on (as the Steam Deck has always run).";
-#else
-        const char *autod = "Auto: off on Windows for now.";
-#endif
-        char d[600];
-        snprintf(d, sizeof d, "On: the game starts its next frame as soon as this one is handed to the graphics card, "
-                              "instead of waiting for the card to finish it - the game and the drawing run side by side. "
-                              "Busy places at high frame rates: about 10-15%% more FPS (132 -> 148 on average at 240 FPS). If you see "
-                              "flickering or broken geometry, set it to Off. %s", autod);
-        if (opt_choice("Early frame hand-off", &v, ef, 3, 0, d, false)) g_settings.early_fences = v - 1;
-    }
-#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
-    {
-        static const bool rt_start = g_settings.record_thread;  // (read at start)
-        char d[600];
-        snprintf(d, sizeof d, "A second CPU thread hands the drawing commands to the graphics driver while the first prepares "
-                              "the next ones. Busy places at high frame rates: about 25-30%% more FPS on a fast PC (139 -> 179 "
-                              "at 240 FPS). Uses one more CPU core. If you see flickering, missing objects or crashes, turn it "
-                              "off.%s", rt_start != g_settings.record_thread ? "\n\nApplies when the game starts again." : "");
-        opt_toggle("Multithreaded rendering", &g_settings.record_thread, false, d);
-    }
-#endif
     opt_section("Power");
     if (opt_action("Battery saver", "",
                    "Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, "
-                   "no SMAA, no 120 FPS or interpolation, 4x texture filtering. The game itself still runs at its normal "
+                   "no SMAA, no 120 FPS or interpolation, the game's own texture filtering. The game itself still runs at its normal "
                    "speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) "
                    "for the biggest savings. Some changes apply at the next start.")) {
         settings_battery_saver();
@@ -1217,22 +1226,14 @@ static void tab_performance(void) {
 #ifndef __APPLE__  // (Vulkan: nvn/vulkan/device.c vk_prepare_before_start)
     opt_section("Shaders");
     {
-        static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
-        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_AUTO,
-                   "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
-                   "RAM with an NVIDIA GPU). Low builds each shader the first time it is drawn: a short stutter the first "
-                   "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
-                   "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
+        bool on = vk_prepare_requested();
+        if (opt_action("Compile shaders", on ? "At next start" : "", on
+                       ? "The shader preparation pass will run the next time the game starts (a window shows the "
+                         "progress; a few minutes). Quit and start the game again to do it now. Select again to cancel."
+                       : "Compiles the game's shader archives and pipeline states recorded during play at the next "
+                         "start. A progress window shows both passes. Use after a driver update or after visiting new areas."))
+            vk_prepare_request(!on);
     }
-    opt_toggle("Preload area shaders", &g_settings.shader_preload, false,
-               "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
-               "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
-               "Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on.");
-    opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
-               "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
-               "the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS "
-               "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
-               "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
     {
         bool async = !g_settings.shader_wait;
         if (opt_toggle("Asynchronous shader building", &async, true,
@@ -1242,6 +1243,15 @@ static void tab_performance(void) {
             g_settings.shader_wait = !async;  // (opt_toggle flipped it)
     }
     {
+        static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
+        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_AUTO,
+                   "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
+                   "RAM with an NVIDIA GPU). Low builds each shader the first time it is drawn: a short stutter the first "
+                   "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
+                   "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
+    }
+    opt_section("Shaders - advanced");
+    {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
         opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_AUTO,
                    "How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter "
@@ -1249,15 +1259,16 @@ static void tab_performance(void) {
                    "(at most half of this PC's memory). Auto: Long with 16 GB of memory or more. Applies at the next "
                    "start.", false);
     }
-    {
-        bool on = vk_prepare_requested();
-        if (opt_action("Compile shaders", on ? "At next start" : "", on
-                       ? "The shader preparation pass will run the next time the game starts (a window shows the "
-                         "progress; a few minutes). Quit and start the game again to do it now. Select again to cancel."
-                       : "Compiles the game's shader archives and pipeline states recorded during play at the next "
-                         "start. A progress window shows both passes. Use after a driver update or after visiting new areas."))
-            vk_prepare_request(!on);
-    }
+    opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
+               "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
+               "the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS "
+               "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
+               "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
+    opt_section("Experimental");
+    opt_toggle("Preload area shaders (uses a lot of memory)", &g_settings.shader_preload, false,
+               "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
+               "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
+               "Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on.");
 #endif
     opt_end();
 }

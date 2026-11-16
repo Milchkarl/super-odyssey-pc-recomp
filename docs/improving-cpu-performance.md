@@ -25,7 +25,8 @@ Commits:
   `vk_cmd()`, `vk_alloc_set()`). Checked: six-kingdom tour (frames match on/off), pause/map at 75% (HUD layer),
   FSR 3.1, DLSS Quality. **Not** checked: the Deck, hours of hand play, frame interpolation (it's bypassed there).
 
-Both new options default to off on Windows until the owner has played with them.
+Defaults since 2026-11-16 (owner): Early frame hand-off Auto = on everywhere; Multithreaded rendering Auto = on with an
+NVIDIA GPU, off with AMD / Intel (Steam Deck: tested forced on, 60 FPS locked either way, 12.8 vs 12.9 W, no errors).
 
 ## What was learned
 

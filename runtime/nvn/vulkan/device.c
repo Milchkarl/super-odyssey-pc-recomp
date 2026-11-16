@@ -2171,6 +2171,7 @@ static bool prepare_due(bool log, char key[64]) {
     }
     return true;
 }
+bool vk_gpu_is_nvidia(void) { return g_vk.props.vendorID == 0x10de; }  // (the menu: Reflex, Multithreaded rendering Auto)
 bool vk_prepare_due(void) { char key[64]; return prepare_due(false, key); }
 void vk_prepare_skip_this_start(void) { g_prepare_skipped = true; LOG("[prep] shader preparation put off (Later)\n"); }
 

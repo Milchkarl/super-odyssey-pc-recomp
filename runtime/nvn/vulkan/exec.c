@@ -1225,7 +1225,10 @@ static bool dq_enabled(void) {
     static int on = -1;
     if (on < 0) {
         const char *e = getenv("ODYSSEY_VK_RECORD_THREAD");  // (overrides the setting: Performance > Multithreaded rendering)
-        on = e && *e ? atoi(e) != 0 : g_settings.record_thread;
+        // Auto: on with an NVIDIA GPU, the one it was tested on (2026-11-16); off elsewhere until players have tried it -
+        // in the TOTK port the same kind of thread lost the device or hung the GPU at start on AMD's drivers
+        on = e && *e ? atoi(e) != 0
+                     : g_settings.record_thread == 1 || (g_settings.record_thread < 0 && g_vk.props.vendorID == 0x10de);
         if (on) {
             dq_ring = malloc(DQ_RING);
             VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,

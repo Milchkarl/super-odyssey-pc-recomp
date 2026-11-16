@@ -57,10 +57,11 @@ Settings g_settings = {
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
-    .aniso = 16,
+    .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
-    .early_fences = -1,  // (Auto: on on Linux / the Deck, off on Windows - nvn/objects.c nvnSyncWait)
+    .early_fences = -1,  // (Auto: on - nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default)
+    .record_thread = -1,  // (Auto: on with an NVIDIA GPU - nvn/vulkan/exec.c dq_enabled)
     .stick_deadzone = 10,  // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22)
     .skip_intro = true,
     .warmup = WARMUP_AUTO,
@@ -73,7 +74,7 @@ volatile bool g_app_unfocused;
 // The battery saver (Steam Deck's defaults, and the menu's Performance > Battery saver): less work per frame. Odyssey's
 // gameplay steps once per drawn frame, so a lower frame rate cap would slow the game down, not save power - the savings
 // come from the picture instead: 75% of the display (960 x 600 on a Deck) upscaled with FSR 1, no SMAA, no extra
-// frames (120 FPS, interpolation), 4x anisotropic filtering, the shorter warm-up at start.
+// frames (120 FPS, interpolation), the game's own texture filtering, the shorter warm-up at start.
 // The Steam Deck's defaults (no settings file yet): the battery saver's, at its own screen's 1280 x 800 rendered and
 // shown 1:1 and filled - the game's view made 16:10 (runtime/hle/odyssey_wide.c) instead of 16:9 with bars (75% + FSR 1
 // before, 2026-11-15).
@@ -109,7 +110,7 @@ void settings_battery_saver(void) {
     g_settings.antialias = AA_OFF;
     g_settings.frame_rate = FPS_60;
     g_settings.frame_interp = false;
-    g_settings.aniso = 4;
+    g_settings.aniso = ANISO_GAME;
     g_settings.dlss_mode = DLSS_OFF;
     g_settings.warmup = WARMUP_NORMAL;
     // (no preloading: every program a stage sets up built in the background competed with the game thread on a Deck's
@@ -355,7 +356,8 @@ void settings_load(void) {
         else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
         else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
-        else if (!strcmp(key, "record_thread")) g_settings.record_thread = atoi(val) != 0;
+        else if (!strcmp(key, "record_thread"))  // (auto / on / off; 0 / 1 before 2026-11-16 - 0 was the default then: Auto)
+            g_settings.record_thread = !strcmp(val, "on") || !strcmp(val, "1") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
@@ -486,7 +488,7 @@ void settings_save(void) {
     fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
     fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
     fprintf(f, "early_fences = %s\n", g_settings.early_fences == 1 ? "on" : g_settings.early_fences == 0 ? "off" : "auto");
-    fprintf(f, "record_thread = %d\n", g_settings.record_thread);
+    fprintf(f, "record_thread = %s\n", g_settings.record_thread == 1 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);
