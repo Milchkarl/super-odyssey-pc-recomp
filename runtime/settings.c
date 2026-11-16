@@ -347,6 +347,8 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "shader_preload")) g_settings.shader_preload = atoi(val) != 0;
         else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
+        else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
+        else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -473,6 +475,8 @@ void settings_save(void) {
     else fprintf(f, "frame_rate = %d\n", settings_fps_hz(g_settings.frame_rate));
     fprintf(f, "shader_preload = %d\n", g_settings.shader_preload);
     fprintf(f, "shader_known_only = %d\n", g_settings.shader_known_only);
+    fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
+    fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);
