@@ -202,3 +202,5 @@ static int rm_entry(const char *path, const struct stat *sb, int flag, struct FT
 bool plat_remove_tree(const char *dir) { return nftw(dir, rm_entry, 16, FTW_DEPTH | FTW_PHYS) == 0; }
 
 void plat_sample_this_thread(uint64_t now_ms) { (void)now_ms; }  // (Windows only)
+// (the Vulkan backend's quick exit - runtime/nvn/vulkan/device.c; the Metal one quits through exit()'s handlers)
+void vk_exit_now(void) { exit(0); }

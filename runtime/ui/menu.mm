@@ -719,6 +719,7 @@ extern "C" int input_pad_family(void);  // runtime/hle/input.c
 extern "C" void input_motion_calibrate(void);
 extern "C" int input_motion_calibration(void);
 extern "C" double output_scale_dynamic_factor(void);
+extern "C" double output_game_w(void), output_game_h(void);  // runtime/nvn/output_scale.c (1600 x 900 docked, 1280 x 720 handheld)
 extern "C" bool vk_prepare_requested(void);       // runtime/nvn/vulkan/device.c (the menu's Compile shaders)
 extern "C" void vk_prepare_request(bool on);
 #ifndef __APPLE__
@@ -900,7 +901,7 @@ static void tab_graphics(void) {
         char d[1024];  // (400 cut the text off mid-sentence - and the Dynamic line below then wrote past the end)
         // (translated in parts - the text, then the size it renders at: tr() finds whole texts only)
         char at[160];
-        snprintf(at, sizeof at, tr("Rendering at %.0f x %.0f."), 1600.0 * sx, 900.0 * sy);
+        snprintf(at, sizeof at, tr("Rendering at %.0f x %.0f."), output_game_w() * sx, output_game_h() * sy);  // (handheld: 1280 x 720 base)
         int n = snprintf(d, sizeof d, "%s\n\n%s", tr("How sharp the 3D image is - each choice shows the size it renders at in this window "
                                       "and picture shape. The default, shown as your screen's resolution: that resolution (at least the "
                                       "Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
@@ -1886,7 +1887,26 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
                          (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false) ||
                           ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
     opt_focus_first(down_from_tab);
-    if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons)) {
+    // The tabs' side padding, narrower where all names wouldn't fit at the usual one (the Steam Deck's 1280 x 800 cut
+    // "Graphics", "Performance" and "Language" short): each name keeps its full width, the gaps give way
+    float tab_pad = ImGui::GetStyle().FramePadding.x;
+    {
+        float text = 0, inner = ImGui::GetStyle().ItemInnerSpacing.x;
+        for (int k = 0; k < ntabs; k++) {
+            char l[64];
+            snprintf(l, sizeof l, " %s ", tr(tabs[k].name));
+            text += ImGui::CalcTextSize(l).x;
+        }
+        float avail = ImGui::GetContentRegionAvail().x - (ntabs - 1) * inner - 2;
+        // (a few pixels a tab to spare: ImGui rounds each tab's width, and the last one was still cut by a letter)
+        avail -= ntabs * 3 * ImGui::GetFontSize() / 34;
+        if (text + ntabs * 2 * tab_pad > avail) tab_pad = fmaxf(1.0f, (avail - text) / (2 * ntabs));
+    }
+    // (the bar lays its tabs out in BeginTabBar, from their widths and the padding then: the same padding there)
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(tab_pad, ImGui::GetStyle().FramePadding.y));
+    bool tab_bar = ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons);
+    ImGui::PopStyleVar();
+    if (tab_bar) {
         for (int k = 0; k < ntabs; k++) {
             const Tab &t = tabs[k];
             ImGuiTabItemFlags f = g_tab_request == t.id && t.on ? ImGuiTabItemFlags_SetSelected : 0;
@@ -1911,7 +1931,9 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             if (g_focus_tab == -1 && !prelaunch) g_focus_tab = -100;
             // (-100: the shown tab - the one being switched to, when a switch is asked for this frame)
             bool focus_here = g_focus_tab == t.id || (g_focus_tab == -100 && t.id == (g_tab_request >= 0 ? g_tab_request : g_tab));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(tab_pad, ImGui::GetStyle().FramePadding.y));
             bool open = ImGui::BeginTabItem(lbl, NULL, f);
+            ImGui::PopStyleVar();
             ImGui::PopStyleColor(pushed);
             if (focus_here && !any_popup) {  // the controller's cursor starts on this tab (SetKeyboardFocusHere skips tabs: no tab stop)
                 ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
