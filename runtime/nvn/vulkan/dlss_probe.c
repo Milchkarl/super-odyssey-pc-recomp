@@ -54,6 +54,9 @@ static int temporal_mode(void) {
     return *settings_temporal_mode();
 }
 
+// NVIDIA DLSS can run here (the probe found the GPU, driver and NGX runtime for it): the menu greys it out otherwise
+bool vk_dlss_available(void) { return !forced_off && atomic_load_explicit(&available, memory_order_acquire); }
+
 bool vk_temporal_enabled(void) {
     if (g_settings.temporal_off) return false;  // (the menu's Upscale method: Off - the default)
     if (g_settings.temporal_backend == TEMPORAL_FSR3)

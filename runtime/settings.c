@@ -50,7 +50,10 @@ Settings g_settings = {
     .motion_shake_pad = -1,
     .motion_shake_key = 514,  // (BIND_MOUSE_MIDDLE: the middle mouse button - nothing else uses it by default)
     .mouse_camera = true,
-    .game_dynres = true,
+    // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
+    // (always the full resolution) and VSync off.
+    .game_dynres = false,
+    .vsync = VSYNC_OFF,
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -80,6 +83,8 @@ static void settings_steam_deck(void) {
     g_settings.hud_edges = 1;
     g_settings.console_mode = CONSOLE_HANDHELD;  // (the game's handheld rendering: what a Switch shows on its own screen)
     g_settings.game_dynres = false;  // (always the full 1280x800: at 7-10 W the game's own drops went to 768x480)
+    g_settings.vsync = VSYNC_OFF;
+    g_settings.upscaler = UPSCALE_BILINEAR;  // (Upscale method Off by default - at 100% there is nothing to scale anyway)
 }
 bool settings_game_dynres(void) {
     static int v = -1;
@@ -287,7 +292,7 @@ void settings_load(void) {
                                   (n >= 1 && n <= 4) ? n : n > 4 ? 4 : RES_MATCH;
         }
         else if (!strcmp(key, "upscaler")) g_settings.upscaler = !strcmp(val, "bilinear") ? UPSCALE_BILINEAR : UPSCALE_SHARP;  // (metalfx / fsr1: this OS's)
-        else if (!strcmp(key, "antialias")) g_settings.antialias = !strcmp(val, "off") ? AA_OFF : AA_SMAA;
+        else if (!strcmp(key, "antialias")) g_settings.antialias = !strcmp(val, "off") ? AA_OFF : !strcmp(val, "fxaa") ? AA_FXAA : AA_SMAA;
         else if (!strcmp(key, "dlss_mode")) g_settings.dlss_mode = named_option(val, dlss_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "dlss_preset")) g_settings.dlss_preset = named_option(val, dlss_presets, DLSS_PRESET_COUNT);
         else if (!strcmp(key, "temporal_backend")) g_settings.temporal_backend = named_option(val, temporal_backends, TEMPORAL_BACKEND_COUNT);
@@ -436,7 +441,7 @@ void settings_save(void) {
     fprintf(f, "motion_shake_key = %d\n", g_settings.motion_shake_key);
     fprintf(f, "stick_deadzone = %d\n", g_settings.stick_deadzone);
     fprintf(f, "upscaler = %s\n", g_settings.upscaler == UPSCALE_METALFX ? "metalfx" : g_settings.upscaler == UPSCALE_FSR1 ? "fsr1" : "bilinear");
-    fprintf(f, "antialias = %s\n", g_settings.antialias == AA_SMAA ? "smaa" : "off");
+    fprintf(f, "antialias = %s\n", g_settings.antialias == AA_SMAA ? "smaa" : g_settings.antialias == AA_FXAA ? "fxaa" : "off");
     fprintf(f, "dlss_mode = %s\n", dlss_modes[g_settings.dlss_mode]);
     fprintf(f, "dlss_preset = %s\n", dlss_presets[g_settings.dlss_preset]);
     fprintf(f, "upscale_method = %s\n", g_settings.temporal_off ? "off" : temporal_backends[g_settings.temporal_backend]);

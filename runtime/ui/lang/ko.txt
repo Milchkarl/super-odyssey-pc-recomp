@@ -28,7 +28,7 @@ The window's size, or in exclusive fullscreen the monitor's mode - the sizes you
 Desktop ||| 바탕화면
 Refresh rate ||| 주사율
 VSync ||| 수직 동기화
-On: no tearing, the game keeps its own steady pace (recommended). Off: frames go out the moment they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 화면 찢어짐 없이 게임이 자체 속도를 일정하게 유지합니다 (권장). 끄기: 프레임이 완성되는 즉시 표시됩니다 - 가장 낮은 지연, 화면 찢어짐 있음. 엄격: 각 프레임이 화면의 다음 갱신을 기다립니다 (기존 수직 동기화, 늦은 프레임은 한 번의 갱신을 통째로 기다림). 적응형: 엄격과 같지만 늦은 프레임은 바로 표시됩니다 (그때만 찢어짐). GPU나 드라이버가 지원하지 않으면 가장 가까운 방식을 사용합니다.
+On: no tearing, the game keeps its own steady pace. Off (the default): frames go out the moment they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 화면 찢어짐 없이 게임이 자체 속도를 일정하게 유지합니다. 끄기 (기본값): 프레임이 완성되는 즉시 표시됩니다 - 가장 낮은 지연, 화면 찢어짐 있음. 엄격: 각 프레임이 화면의 다음 갱신을 기다립니다 (기존 수직 동기화, 늦은 프레임은 한 번의 갱신을 통째로 기다림). 적응형: 엄격과 같지만 늦은 프레임은 바로 표시됩니다 (그때만 찢어짐). GPU나 드라이버가 지원하지 않으면 가장 가까운 방식을 사용합니다.
 Off (tearing) ||| 끄기 (찢어짐)
 Strict ||| 엄격
 Adaptive ||| 적응형

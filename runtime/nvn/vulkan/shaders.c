@@ -647,6 +647,60 @@ static const char *builtin_src(const char *name, int *stage) {
                "  o=vec4(sharp,1);\n"
                "}\n";
     }
+    // FXAA (Graphics > Anti-aliasing): one pass over the game image, in the manner of FXAA 3.11's quality path - the
+    // luma contrast around the pixel (skipped below a threshold), the edge's orientation from second derivatives, a
+    // search along the edge both ways in growing steps for where it ends, a blend across it by the pixel's position
+    // on that span, and a sub-pixel term for single-pixel features. a.xy = 1 / image size. (Our own code.)
+    if (!strcmp(name, "fxaa.frag")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(binding=0) uniform sampler2D src;\n"
+               "layout(push_constant) uniform P { vec4 a; vec4 b; } pc;\n"
+               "layout(location=0) out vec4 o;\n"
+               "float L(vec3 c) { return dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114)); }\n"
+               "float Lat(vec2 uv) { return L(textureLod(src, uv, 0.0).rgb); }\n"
+               "void main() {\n"
+               "  vec2 r = pc.a.xy, uv = gl_FragCoord.xy * r;\n"
+               "  vec3 cm = textureLod(src, uv, 0.0).rgb;\n"
+               "  float m = L(cm), n = Lat(uv + vec2(0, -r.y)), s = Lat(uv + vec2(0, r.y));\n"
+               "  float w = Lat(uv + vec2(-r.x, 0)), e = Lat(uv + vec2(r.x, 0));\n"
+               "  float hi = max(m, max(max(n, s), max(w, e))), lo = min(m, min(min(n, s), min(w, e)));\n"
+               "  float range = hi - lo;\n"
+               "  if (range < max(0.0312, hi * 0.125)) { o = vec4(cm, 1); return; }\n"
+               "  float nw = Lat(uv + vec2(-r.x, -r.y)), ne = Lat(uv + vec2(r.x, -r.y));\n"
+               "  float sw = Lat(uv + vec2(-r.x, r.y)), se = Lat(uv + vec2(r.x, r.y));\n"
+               "  float eh = abs(nw + sw - 2.0 * w) + 2.0 * abs(n + s - 2.0 * m) + abs(ne + se - 2.0 * e);\n"
+               "  float ev = abs(nw + ne - 2.0 * n) + 2.0 * abs(w + e - 2.0 * m) + abs(sw + se - 2.0 * s);\n"
+               "  bool horz = eh >= ev;\n"  // (a horizontal edge: the luma changes up / down)
+               "  float l1 = horz ? n : w, l2 = horz ? s : e;\n"
+               "  float g1 = l1 - m, g2 = l2 - m;\n"
+               "  bool steep1 = abs(g1) >= abs(g2);\n"
+               "  float grad = 0.25 * max(abs(g1), abs(g2));\n"
+               "  float stp = horz ? r.y : r.x;\n"
+               "  float avg;\n"
+               "  if (steep1) { stp = -stp; avg = 0.5 * (l1 + m); } else avg = 0.5 * (l2 + m);\n"
+               "  vec2 c = uv; if (horz) c.y += 0.5 * stp; else c.x += 0.5 * stp;\n"
+               "  vec2 off = horz ? vec2(r.x, 0) : vec2(0, r.y);\n"
+               "  vec2 u1 = c - off, u2 = c + off;\n"
+               "  float e1 = Lat(u1) - avg, e2 = Lat(u2) - avg;\n"
+               "  bool d1 = abs(e1) >= grad, d2 = abs(e2) >= grad;\n"
+               "  const float q[11] = float[](1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);\n"
+               "  for (int i = 0; i < 11 && !(d1 && d2); i++) {\n"
+               "    if (!d1) { u1 -= off * q[i]; e1 = Lat(u1) - avg; d1 = abs(e1) >= grad; }\n"
+               "    if (!d2) { u2 += off * q[i]; e2 = Lat(u2) - avg; d2 = abs(e2) >= grad; }\n"
+               "  }\n"
+               "  float dist1 = horz ? uv.x - u1.x : uv.y - u1.y, dist2 = horz ? u2.x - uv.x : u2.y - uv.y;\n"
+               "  bool near1 = dist1 < dist2;\n"
+               "  float span = dist1 + dist2, pix = -min(dist1, dist2) / max(span, 1e-6) + 0.5;\n"
+               "  bool ok = ((near1 ? e1 : e2) < 0.0) != (m < avg);\n"
+               "  float f = ok ? pix : 0.0;\n"
+               "  float la = (2.0 * (n + s + w + e) + nw + ne + sw + se) / 12.0;\n"
+               "  float s1 = clamp(abs(la - m) / range, 0.0, 1.0), s2 = (-2.0 * s1 + 3.0) * s1 * s1;\n"
+               "  f = max(f, s2 * s2 * 0.75);\n"
+               "  vec2 fu = uv; if (horz) fu.y += f * stp; else fu.x += f * stp;\n"
+               "  o = vec4(textureLod(src, fu, 0.0).rgb, 1);\n"
+               "}\n";
+    }
     // FSR 1 RCAS: contrast-adaptive sharpening of the EASU output (same size). a.x = sharpness (exp2(-stops)),
     // b.xy = image size. The lobe is limited so the result stays inside the neighbours' range; noise is damped.
     if (!strcmp(name, "rcas.frag") || !strcmp(name, "dlss_rcas.frag")) {

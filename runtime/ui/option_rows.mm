@@ -144,6 +144,28 @@ bool opt_choice(const char *label, int *v, const char *const *names, int n, int 
     return true;
 }
 
+// opt_choice whose choices this machine may not support (avail[i] false): left / right / A skip those, and the
+// description names them ("Not available on this PC: ...") so they read as greyed out rather than missing. A choice
+// saved earlier that isn't available here stays selectable away from (the row isn't disabled).
+bool opt_choice_avail(const char *label, int *v, const char *const *names, int n, int def, const char *desc, const bool *avail) {
+    int cur = *v >= 0 && *v < n ? *v : 0;
+    std::string d = desc ? tr(desc) : "";
+    std::string missing;
+    for (int i = 0; i < n; i++)
+        if (!avail[i]) missing += (missing.empty() ? "" : ", ") + std::string(tr(names[i]));
+    if (!missing.empty()) d += "\n\n" + std::string(tr("Not available on this PC (greyed out):")) + " " + missing + ".";
+    int step = row(label, names[cur], cur != def, d.c_str(), false, true);
+    if (!step) return false;
+    int dir = step == 2 ? 1 : step, nv = cur;
+    for (int k = 0; k < n; k++) {  // (the next available one that way, wrapping)
+        nv = (nv + dir + n) % n;
+        if (avail[nv]) break;
+    }
+    if (nv == cur || !avail[nv]) return false;
+    *v = nv;
+    return true;
+}
+
 bool opt_slider(const char *label, float *v, float lo, float hi, float step, float def, const char *fmt, const char *desc) {
     char buf[32];
     snprintf(buf, sizeof buf, fmt, *v);

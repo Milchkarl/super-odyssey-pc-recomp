@@ -729,6 +729,7 @@ extern "C" bool vk_fsr2_available(void);    // runtime/nvn/vulkan/fsr2.c
 extern "C" bool vk_fsr3_available(void);
 extern "C" bool vk_fsr4_available(void);
 extern "C" bool vk_xess_available(void);
+extern "C" bool vk_dlss_available(void);   // runtime/nvn/vulkan/dlss_probe.c
 #endif
 
 static void tab_display(void) {
@@ -807,8 +808,8 @@ static void tab_display(void) {
 #ifndef __APPLE__
     {
         static const char *vs[] = {"On", "Off (tearing)", "Strict", "Adaptive"};
-        if (opt_choice("VSync", &g_settings.vsync, vs, VSYNC_COUNT, VSYNC_ON,
-                       "On: no tearing, the game keeps its own steady pace (recommended). Off: frames go out the moment "
+        if (opt_choice("VSync", &g_settings.vsync, vs, VSYNC_COUNT, VSYNC_OFF,  /* (the default: settings.c) */
+                       "On: no tearing, the game keeps its own steady pace. Off (the default): frames go out the moment "
                        "they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next "
                        "refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame "
                        "goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used.")) {
@@ -841,7 +842,7 @@ static void tab_display(void) {
                    "Handheld: its own handheld rendering (1280 x 720, lighter effects), as on a Switch Lite - much less "
                    "work for the GPU, for handhelds and low-power PCs. Applies at the next start.");
     }
-    opt_toggle("Dynamic resolution", &g_settings.game_dynres, !plat_is_steam_deck(),
+    opt_toggle("Dynamic resolution", &g_settings.game_dynres, false,
                "On: as on the Switch - the game lowers its resolution when frames take long. Off: always its full "
                "resolution (sharper; needs a fast enough GPU or a higher power limit). Applies at the next start.");
 #endif
@@ -907,51 +908,48 @@ static void tab_graphics(void) {
 #endif
         if (opt_choice("Internal resolution", &ri, res, NRES, RES_MATCH_AT, d, false)) g_settings.res_mode = res_mode[ri];
     }
-    {   // each OS's own upscaler next to bilinear (UPSCALE_SHARP: MetalFX on macOS, AMD FSR 1 on Windows)
 #ifdef __APPLE__
+    {   // macOS's own upscaler next to bilinear (Windows / Linux: AMD FSR 1 is in the Upscaling list below)
         static const char *ups[] = {"Bilinear", "MetalFX"};
         const char *ud = "How the image is scaled up to the window when it renders at a lower resolution. MetalFX: Apple's "
                          "upscaler, sharper. Bilinear: plain and soft.";
-#else
-        static const char *ups[] = {"Bilinear", "AMD FSR 1"};
-        const char *ud = "How the image is scaled up to the window when it renders at a lower resolution. AMD FSR 1: "
-                         "edge-aware upscaling and sharpening, sharper. Bilinear: plain and soft.";
-#endif
         int ui = g_settings.upscaler == UPSCALE_BILINEAR ? 0 : 1;
         char udm[512];
-        if (g_settings.res_mode == RES_MATCH
-#ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
-            && !vk_temporal_enabled()
-#endif
-        ) {  // (renders at the window's size: nothing to scale up)
+        if (g_settings.res_mode == RES_MATCH) {  // (renders at the window's size: nothing to scale up)
             snprintf(udm, sizeof udm, "%s\n\nNot used at your screen's resolution (the default): the game already renders at your display's resolution.", ud);
             ud = udm;
             opt_disable_next();
         }
-#ifdef __APPLE__
-        constexpr int default_upscaler = 1;
-#else
-        constexpr int default_upscaler = 0;
-#endif
-        if (opt_choice("Spatial upscaler", &ui, ups, 2, default_upscaler, ud)) g_settings.upscaler = ui ? UPSCALE_SHARP : UPSCALE_BILINEAR;
+        if (opt_choice("Spatial upscaler", &ui, ups, 2, 1, ud)) g_settings.upscaler = ui ? UPSCALE_SHARP : UPSCALE_BILINEAR;
     }
+#endif
     opt_section("Anti-aliasing");
-    static const char *aa[] = {"Off", "SMAA"};
-    opt_choice("Anti-aliasing", &g_settings.antialias, aa, 2, AA_OFF,
+    static const char *aa[AA_COUNT] = {"Off", "SMAA", "FXAA"};
+    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_OFF,
                "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
-               "blends only along them, so textures stay sharp. Most useful at a lower internal resolution.");
+               "blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every "
+               "high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. "
+               "(MSAA isn't offered: the game lights its scene in several full-screen passes after the geometry, where "
+               "MSAA has nothing to work on - a higher internal resolution, 2x and up, is the supersampling that works.)");
 #ifdef _WIN32
     opt_section("Upscaling");
-    {   // Off first, off by default (settings: temporal_off): the game renders plainly at the internal resolution
-        static const char *methods[] = {"Off", "NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4 (Beta)", "Intel XeSS (Beta)", "AMD FSR 2"};
-        int m = g_settings.temporal_off ? 0 : g_settings.temporal_backend + 1;
-        if (opt_choice("Upscale method", &m, methods, TEMPORAL_BACKEND_COUNT + 1, 0,
-                       "How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal "
-                       "resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: "
-                       "temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and "
-                       "driver for it. Each keeps its own mode and sharpening settings. Changes during play.")) {
-            g_settings.temporal_off = m == 0;
-            if (m > 0) g_settings.temporal_backend = m - 1;
+    {   // Off first, off by default (settings: temporal_off). AMD FSR 1 (spatial: settings upscaler) sits in this list
+        // too (it was a row of its own under Internal resolution); the temporal ones follow in TEMPORAL_* order.
+        // Those this PC can't run are skipped and named (opt_choice_avail).
+        static const char *methods[] = {"Off", "AMD FSR 1", "NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4 (Beta)", "Intel XeSS (Beta)", "AMD FSR 2"};
+        bool avail[] = {true, true, vk_dlss_available(), vk_fsr3_available(), vk_fsr4_available(), vk_xess_available(), vk_fsr2_available()};
+        int m = !g_settings.temporal_off ? g_settings.temporal_backend + 2 : g_settings.upscaler == UPSCALE_FSR1 ? 1 : 0;
+        if (opt_choice_avail("Upscale method", &m, methods, TEMPORAL_BACKEND_COUNT + 2, 0,
+                             "How the picture is upscaled to the window. Off: the game renders plainly at the internal "
+                             "resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and "
+                             "sharpening of each frame - set Internal resolution below your screen's (75% for example); at your "
+                             "screen's resolution there is nothing to scale. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4 and Intel XeSS: "
+                             "temporal upscaling and anti-aliasing from several frames - sharper at a lower internal resolution, "
+                             "needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play.",
+                             avail)) {
+            g_settings.temporal_off = m <= 1;
+            g_settings.upscaler = m == 1 ? UPSCALE_FSR1 : UPSCALE_BILINEAR;
+            if (m >= 2) g_settings.temporal_backend = m - 2;
             if (g_settings.frame_gen == FG_FSR) vk_request_swapchain_remake();  // (frame generation needs an upscaler)
         }
     }
@@ -1027,16 +1025,20 @@ static void tab_graphics(void) {
     // Linux / Steam Deck: AMD FSR 2, run by our own code (runtime/nvn/vulkan/fsr2.c) - the vendors' other runtimes are
     // Windows DLLs. It shares FSR 3.1's mode and sharpness settings.
     opt_section("Upscaling");
-    {
-        static const char *methods[] = {"Off", "AMD FSR 2"};
-        int m = !g_settings.temporal_off && g_settings.temporal_backend == TEMPORAL_FSR2;
-        if (opt_choice("Upscale method", &m, methods, 2, 0,
-                       "How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal "
-                       "resolution (the Spatial upscaler above scales it to the window). AMD FSR 2: temporal upscaling and "
-                       "anti-aliasing - the game renders fewer pixels and FSR 2 rebuilds the picture at the display "
-                       "resolution from several frames, sharper than a plain upscale. Changes during play.")) {
-            g_settings.temporal_off = m == 0;
-            if (m) g_settings.temporal_backend = TEMPORAL_FSR2;
+    {   // Off, AMD FSR 1 (spatial: settings upscaler), AMD FSR 2 (temporal)
+        static const char *methods[] = {"Off", "AMD FSR 1", "AMD FSR 2"};
+        bool avail[] = {true, true, vk_fsr2_available()};
+        int m = !g_settings.temporal_off && g_settings.temporal_backend == TEMPORAL_FSR2 ? 2 : g_settings.upscaler == UPSCALE_FSR1 ? 1 : 0;
+        if (opt_choice_avail("Upscale method", &m, methods, 3, 0,
+                             "How the picture is upscaled to the window. Off: the game renders plainly at the internal "
+                             "resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and "
+                             "sharpening of each frame - set Internal resolution below your screen's (75% for example). AMD FSR 2: "
+                             "temporal upscaling and anti-aliasing - the game renders fewer pixels and FSR 2 rebuilds the picture "
+                             "at the display resolution from several frames, sharper than a plain upscale. Changes during play.",
+                             avail)) {
+            g_settings.temporal_off = m != 2;
+            g_settings.upscaler = m == 1 ? UPSCALE_FSR1 : UPSCALE_BILINEAR;
+            if (m == 2) g_settings.temporal_backend = TEMPORAL_FSR2;
         }
     }
     if (!g_settings.temporal_off && g_settings.temporal_backend == TEMPORAL_FSR2) {
@@ -2007,7 +2009,7 @@ static void draw_performance(void) {
     }
     if (g_settings.overlay_render) {
         const char *up = g_settings.res_mode == RES_MATCH ? "Off" : g_settings.upscaler == UPSCALE_FSR1 ? "FSR 1" : "Bilinear";
-        const char *aa = g_settings.antialias == AA_SMAA ? "SMAA" : "Off";
+        const char *aa = g_settings.antialias == AA_SMAA ? "SMAA" : g_settings.antialias == AA_FXAA ? "FXAA" : "Off";
 #ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
         char name[48];
         if (vk_temporal_enabled()) {

@@ -8932,7 +8932,8 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
     }
 #endif
     bool fsr = g_settings.upscaler == UPSCALE_FSR1 && (ow > b->width + 1 || oh > b->height + 1);  // (an upscale only)
-    if (!smaa && !fsr) return v;
+    bool fxaa = g_settings.antialias == AA_FXAA;
+    if (!smaa && !fsr && !fxaa) return v;
     extern void vk_frame_suspend(void);
     extern void vk_frame_resume(void);
     vk_frame_suspend();
@@ -8947,6 +8948,13 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
         post_pass(cb, "smaa_weight.frag", wi, 3, weights, m, true);
         VkImageView bi[3] = {v, post_view(weights)};
         post_pass(cb, "smaa_blend.frag", bi, 2, out, m, false);
+        v = post_view(out);
+    }
+    if (fxaa) {  // FXAA: one pass (shaders.c fxaa.frag), into SMAA's output image (only one of them runs)
+        float m[8] = {1.0f / b->width, 1.0f / b->height, (float)b->width, (float)b->height};
+        TexBackend *out = post_image(2, b->width, b->height);
+        VkImageView in[3] = {v};
+        post_pass(cb, "fxaa.frag", in, 1, out, m, false);
         v = post_view(out);
     }
     if (fsr) {
