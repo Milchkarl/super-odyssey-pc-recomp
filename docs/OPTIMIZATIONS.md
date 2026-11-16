@@ -24,11 +24,26 @@ held frame is the spike the eye sees.
 measured display spacing (filtered) and is nudged (at most 0.25 ms a tick) until its ticks fall a fixed offset after
 the reported screen updates. Unlocked, its phase is wherever it started and creeps (~0.03 ms/s on a Deck), so every
 few minutes it sits at the latch point. Deck, 50 s walk: images held 5-9 unlocked, 0-2 locked at a 9 ms offset (each
-remaining one a real game hitch); offsets 1 / 5 / 13 ms gave 2 / 7 / 6. Linux default (`ODYSSEY_VSYNC_LOCK`,
-`ODYSSEY_VSYNC_LOCK_MS`). On Windows (DWM, windowed) it made no measurable difference, so it stays off there.
+remaining one a real game hitch); offsets 1 / 5 / 13 ms gave 2 / 7 / 6. Default on Linux and, since 2026-11-16, on
+Windows too (`ODYSSEY_VSYNC_LOCK`, `ODYSSEY_VSYNC_LOCK_MS`; NVIDIA and AMD drivers have present wait there).
 
 **A refresh rate that isn't a multiple of the frame rate can't be smooth.** 60 FPS on a 144 Hz monitor alternates
-13.9 / 20.8 ms on screen (p99 ~20.5 ms in the logs). Use 60/120/240 Hz or VRR.
+13.9 / 20.8 ms on screen - a judder no VSync mode removes. Draw at a rate the refresh divides instead: Frame rate
+"Match display" picks the highest one up to 120 (144 Hz -> 72, 240 -> 120). Borderless on a 144 Hz monitor, RTX 4090:
+60 FPS p99 19 ms between images shown; 72 FPS every image 2 refreshes, p99 16 ms, 0-5 held per 10 s. (144 FPS itself
+held only ~113 FPS in busy stretches on that PC: a rate the machine can't hold is worse than a lower even one.)
+
+**Draw every frame, don't generate them.** Rates above 60 (72 ... 240) draw the game every vsync with Mario and the
+camera placed at that vsync's moment between two 60 Hz gameplay ticks (`runtime/hle/odyssey_120.c`): real frames, no
+interpolated images, gameplay logic untouched (it counts frames). 240 FPS on an RTX 4090: a camera pan moves 5-6 px
+every frame.
+
+**Draw the HUD after upscaling.** Upscalers (DLSS / FSR / XeSS, or a lower internal resolution) take the game's final
+picture, HUD included: the HUD came out blocky and smeared. Marking the game's UI draws (here: hooking its UI library's
+draw entry and recording a marker into the command stream) lets the renderer send them to a layer at the output
+resolution, composited after the upscale (`runtime/nvn/vulkan/exec.c`, "HUD layer"). When the game draws scene content
+over UI it drew earlier (a 3D model over a menu background), the layer is flattened into the picture first, keeping the
+game's order.
 
 ## 2. Don't make the game wait for the GPU when it doesn't need to
 
