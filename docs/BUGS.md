@@ -114,3 +114,13 @@ Closed (fixed in 0.2.11, commented): #13, #27, #39, #44, #46; #50 (thanks, not a
 | Native frame rate up to 240 | **Done, as far as the game allows** (b98a75f): Frame rate 60 / 72 / 90 / 100 / 120 / 144 / 165 / 180 / 240; every frame really drawn, Mario and the camera at that frame's moment (no generated images). Gameplay logic stays at the game's 60 steps a second: its code counts frames (timers, physics, animations), so running it faster would speed the game up. RTX 4090 1280x720: 72 / 144 / 240 FPS held, 60 ticks a second, camera pan even (5-6 px every frame at 240). |
 | FSR 2 at the Deck's defaults | **Done, docked** (b1f0402): 100% and any picture shape (16:10 Fill) now let the mode lower the input (853x533 -> 1280x800). Handheld mode not yet: its scene is the 1280x720 corner of the window texture. |
 | PR #56 (pt-BR installer) | Reviewed: no malicious code found (HTTPS only, size limit, SHA-256 pinned before extraction, system tar without a shell, fingerprints after, no overwrite; Linux bsdtar built from libarchive's pinned source). Windows: builds, offline tests 7 passed / 6 skipped (need the archive / network). Not run on the Deck (off). Open question for the owner: automated download of a third-party translation from its Google Drive link (no redistribution / automation grant found). |
+
+## 2026-11-16: owner's 0.3.0 test findings
+
+| Item | Status |
+|---|---|
+| Shader stutter after updating | **Fixed** (1057abb): a cache marked prepared was never prepared again - after a driver update (saved pipeline binaries refused) or a new version every effect built while playing. The mark now records GPU, driver and app version; a change makes the preparation due. Owner's protocol (cache deleted, NVIDIA's disk cache redirected to an empty folder, full preparation, play): 0 shaders built in Cap Kingdom, 0 held frames. |
+| Preparation time | 31 threads instead of 16 (155f976): cold 136.7 s -> 110.0 s on an RTX 4090. |
+| Start time | NGX's DLSS check on its own thread (cd6a043): first frames 1.5 s sooner. Left: 1.3 s of single-threaded pipeline warm-up before the game. |
+| Controller screen still shown | **Fixed** (a8ccb5e): with Skip on it is not drawn at all - black until the title. |
+| Shadows vanishing (Sand Kingdom ruins, camera looking down / two steps) | Not reproduced at the Sand start (Mario's midday shadow is under him from above; consecutive frames at 240 FPS keep it). Shadow map passes dumped: the sun map is fitted by the game's GPU compute (agl::sdw, updateViewGpu) - early fences / compute queue / sync-all make no difference. Needs the owner's save near the ruins checkpoint. |
