@@ -74,6 +74,7 @@ typedef struct {
     bool temporal_off;   // the menu's Upscale method: Off (the default) - no temporal upscaler, whatever the modes below
     int frame_gen;          // FG_*: frame generation (Windows; needs an Upscale method): a generated frame between each two
     int low_latency;        // 0 off, 1 on, 2 on + boost: NVIDIA Reflex (Streamline: sl_glue.cpp)
+    int hud_edges;          // pictures wider than 16:9: 1 the HUD at the picture's edges (default), 0 in a centred 16:9 box
     int temporal_backend, fsr3_mode, fsr3_sharpness, fsr3_cas_sharpness;
     bool fsr3_cas;
     int fsr4_mode, fsr4_sharpness, fsr4_cas_sharpness;

@@ -244,3 +244,7 @@ Frame generation status ||| 프레임 생성 상태
 Off: set Frame rate 60 FPS, 120 FPS interpolation off ||| 꺼짐: 프레임 레이트 60 FPS, 120 FPS 보간 끄기로 설정하세요
 Frame generation waits until the game renders 60 FPS without its own extra frames (Performance tab). ||| 게임이 자체 추가 프레임 없이 60 FPS로 렌더링할 때까지 프레임 생성은 대기합니다 (성능 탭).
 Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a stick (the usual follow camera; the other camera kinds take the mouse as a stick). ||| 마우스 축마다 따로 정하는 속도입니다. 카메라가 마우스를 움직인 만큼 즉시 돌아갑니다 - 스틱처럼 서서히 가감속하지 않습니다 (일반 추적 카메라; 다른 종류의 카메라는 마우스를 스틱처럼 받습니다).
+HUD position (wide) ||| HUD 위치 (와이드)
+Centered (16:9) ||| 가운데 (16:9)
+Edges ||| 가장자리
+In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, the life gauge, the button guides and the mini map go to the picture's corners, as on a 16:9 screen. Centered: the whole HUD in a 16:9 box in the middle. Menus and messages stay in the middle either way. ||| 16:9보다 넓은 화면 (21:9, 32:9, 울트라와이드에서 창 채우기)에서. 가장자리: 코인과 문 카운터, 체력 게이지, 버튼 안내, 미니맵이 16:9 화면처럼 그림의 모서리로 갑니다. 가운데: HUD 전체가 가운데 16:9 상자 안에 있습니다. 메뉴와 메시지는 어느 쪽이든 가운데에 남습니다.

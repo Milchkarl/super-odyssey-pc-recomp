@@ -77,6 +77,7 @@ static void settings_steam_deck(void) {
     settings_battery_saver();
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
+    g_settings.hud_edges = 1;
     g_settings.console_mode = CONSOLE_HANDHELD;  // (the game's handheld rendering: what a Switch shows on its own screen)
     g_settings.game_dynres = false;  // (always the full 1280x800: at 7-10 W the game's own drops went to 768x480)
 }
@@ -290,6 +291,7 @@ void settings_load(void) {
         else if (!strcmp(key, "upscale_method")) g_settings.temporal_off = !strcmp(val, "off");
         else if (!strcmp(key, "frame_generation")) g_settings.frame_gen = atoi(val) ? FG_FSR : FG_OFF;  // (0.2.12 dev)
         else if (!strcmp(key, "frame_gen")) g_settings.frame_gen = !strcmp(val, "fsr") ? FG_FSR : !strcmp(val, "dlss") ? FG_DLSS : FG_OFF;
+        else if (!strcmp(key, "hud_position")) g_settings.hud_edges = strcmp(val, "centered") != 0;
         else if (!strcmp(key, "low_latency")) { int v = atoi(val); g_settings.low_latency = v >= 0 && v <= 2 ? v : 0; }
         else if (!strcmp(key, "fsr3_mode")) g_settings.fsr3_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "fsr4_mode")) g_settings.fsr4_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
@@ -426,6 +428,7 @@ void settings_save(void) {
     fprintf(f, "upscale_method = %s\n", g_settings.temporal_off ? "off" : temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "frame_gen = %s\n", g_settings.frame_gen == FG_FSR ? "fsr" : g_settings.frame_gen == FG_DLSS ? "dlss" : "off");
     fprintf(f, "low_latency = %d\n", g_settings.low_latency);
+    fprintf(f, "hud_position = %s\n", g_settings.hud_edges ? "edges" : "centered");
     fprintf(f, "temporal_backend = %s\n", temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "fsr3_mode = %s\n", fsr3_modes[g_settings.fsr3_mode]);
     fprintf(f, "fsr3_sharpness = %d\n", g_settings.fsr3_sharpness);
