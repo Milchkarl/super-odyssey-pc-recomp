@@ -15,6 +15,7 @@
 #include "rt.h"
 #include "settings.h"
 #include "version.h"
+#include "download.h"
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static UpdStatus g_st = {.state = UPD_IDLE};
@@ -211,16 +212,22 @@ extern char **environ;
 
 // GET url into the file out with the system's curl (HTTPS only, redirects followed: GitHub's release files live on
 // its download host). total (may be 0): the expected size, for the progress. HTTP status, or -1 (no curl, no network).
-static int curl_get(const char *url, const char *out, bool api, uint64_t total) {
+static int curl_transfer(const char *url, const char *out, bool api, uint64_t total, uint64_t limit,
+                         DownloadProgress progress, void *ctx) {
     if (strncmp(url, "https://", 8)) return -1;
     int pfd[2];
     if (pipe(pfd)) return -1;
-    const char *argv[24];
+    const char *argv[32];
+    char max_size[32];
     int n = 0;
     argv[n++] = "curl", argv[n++] = "-sSL", argv[n++] = "--proto", argv[n++] = "=https", argv[n++] = "--proto-redir";
     argv[n++] = "=https", argv[n++] = "--connect-timeout", argv[n++] = "15", argv[n++] = "--max-time";
-    argv[n++] = api ? "30" : "3600", argv[n++] = "-A", argv[n++] = "SuperOdysseyRecomp-Updater";  // (nothing about the player)
+    argv[n++] = api ? "30" : limit ? "60" : "3600", argv[n++] = "-A", argv[n++] = "SuperOdysseyRecomp-Updater";  // (nothing about the player)
     if (api) argv[n++] = "-H", argv[n++] = "Accept: application/vnd.github+json";
+    if (limit) {
+        snprintf(max_size, sizeof max_size, "%llu", (unsigned long long)limit);
+        argv[n++] = "--max-filesize", argv[n++] = max_size;
+    }
     argv[n++] = "-o", argv[n++] = out, argv[n++] = "-w", argv[n++] = "%{http_code}", argv[n++] = "--", argv[n++] = url;
     argv[n] = NULL;
     posix_spawn_file_actions_t fa;
@@ -238,9 +245,16 @@ static int curl_get(const char *url, const char *out, bool api, uint64_t total) 
         pid_t w = waitpid(pid, &status, WNOHANG);
         if (w == pid || (w < 0 && errno != EINTR)) break;
         struct stat st;
-        if (total && stat(out, &st) == 0) {
+        uint64_t got = stat(out, &st) == 0 ? (uint64_t)st.st_size : 0;
+        if ((limit && got > limit) || (progress && !progress(got, total, ctx))) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            close(pfd[0]);
+            return -1;
+        }
+        if (!progress && total) {
             pthread_mutex_lock(&g_lock);
-            g_st.progress = (float)((double)st.st_size / (double)total) * 0.95f;
+            g_st.progress = (float)((double)got / (double)total) * 0.95f;
             pthread_mutex_unlock(&g_lock);
         }
         struct timespec ts = {0, 200 * 1000 * 1000};
@@ -251,7 +265,11 @@ static int curl_get(const char *url, const char *out, bool api, uint64_t total) 
     close(pfd[0]);
     code[r > 0 ? r : 0] = 0;
     int http = atoi(code);
-    return http > 0 ? http : -1;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0 && http > 0 ? http : -1;
+}
+
+static int curl_get(const char *url, const char *out, bool api, uint64_t total) {
+    return curl_transfer(url, out, api, total, 0, NULL, NULL);
 }
 
 static int fetch_json(const char *url, char **body, size_t *len) {
@@ -769,3 +787,53 @@ void updater_check(void) {}
 void updater_install(void) {}
 void updater_restart(void) {}
 #endif
+
+#ifdef _WIN32
+typedef struct {
+    FILE *file;
+    uint64_t got, limit;
+    DownloadProgress progress;
+    void *ctx;
+} LimitedDownload;
+
+static bool limited_sink(void *ctx, const void *data, DWORD n) {
+    LimitedDownload *d = ctx;
+    if (n > d->limit - d->got) return false;
+    if (d->progress && !d->progress(d->got, d->limit, d->ctx)) return false;
+    if (fwrite(data, 1, n, d->file) != n) return false;
+    d->got += n;
+    return !d->progress || d->progress(d->got, d->limit, d->ctx);
+}
+#endif
+
+bool download_https_file(const char *url, const char *path, uint64_t limit,
+                         DownloadProgress progress, void *ctx, char *why, size_t cap) {
+    if (!url || strncmp(url, "https://", 8) || !limit) {
+        snprintf(why, cap, "The download requires HTTPS and a size limit.");
+        return false;
+    }
+    if (progress && !progress(0, limit, ctx)) {
+        snprintf(why, cap, "Download cancelled.");
+        return false;
+    }
+    int status = -1;
+#ifdef _WIN32
+    wchar_t *wpath = wide(path);
+    FILE *file = wpath ? _wfopen(wpath, L"wb") : NULL;
+    free(wpath);
+    if (!file) { snprintf(why, cap, "Couldn't create the download file."); return false; }
+    LimitedDownload d = {.file = file, .limit = limit, .progress = progress, .ctx = ctx};
+    status = http_get(url, limited_sink, &d, NULL, NULL, NULL);
+    if (fclose(file)) status = -1;
+#elif defined(__linux__)
+    status = curl_transfer(url, path, false, limit, limit, progress, ctx);
+#else
+    (void)path; (void)ctx;
+#endif
+    if (status != 200) {
+        remove(path);
+        snprintf(why, cap, "Couldn't download the official package. Check your connection or use the translation page.");
+        return false;
+    }
+    return true;
+}

@@ -7,6 +7,7 @@
 
 #include "mods.h"
 #include "nxcrypto.h"
+#include "utf8file.h"
 
 static const struct { const char *path, *sha; size_t size; } ptbr_files[PTBR_FILES] = {
     {"LocalizedData/USen/LayoutData/FontData.szs",
@@ -25,9 +26,13 @@ int localization_ptbr_file(const char *rel) {
     return -1;
 }
 
+const char *localization_ptbr_path(int file) {
+    return file >= 0 && file < PTBR_FILES ? ptbr_files[file].path : NULL;
+}
+
 bool localization_ptbr_matches(int file, const char *host) {
     if (file < 0 || file >= PTBR_FILES) return false;
-    FILE *f = fopen(host, "rb");
+    FILE *f = rt_fopen_utf8(host, "rb");
     if (!f) return false;
     size_t size = ptbr_files[file].size;
     // Limita a leitura mesmo se um pacote desconhecido contiver arquivos muito grandes.
