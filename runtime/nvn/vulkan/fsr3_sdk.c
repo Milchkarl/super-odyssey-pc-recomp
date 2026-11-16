@@ -180,7 +180,7 @@ static int fg_env(void) {
 bool vk_fg_wanted(void) {
     int e = fg_env();
     // (not with the 90 / 120 FPS modes or 120 FPS interpolation: those make the extra frames themselves)
-    bool want = e >= 0 ? e : g_settings.frame_gen == FG_FSR && !g_settings.temporal_off && g_settings.frame_rate == FPS_60 &&
+    bool want = e >= 0 ? e : g_settings.frame_gen == FG_FSR && !g_settings.temporal_off && settings_game_hz() == 60 &&
                              !g_settings.frame_interp;
     return want && !fg.failed && fsr.loader && fsr.configure && g_vk.fgfam[0] != UINT32_MAX && g_vk.fgfam[1] != UINT32_MAX;
 }
