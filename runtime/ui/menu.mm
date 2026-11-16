@@ -971,15 +971,15 @@ static void tab_graphics(void) {
                        "motion on a 120 Hz or faster display, a little more input delay (Performance > Low latency takes most of it "
                        "back). AMD FSR: any GPU; changes during play. NVIDIA DLSS: GeForce RTX 40 series or newer, with "
                        "Reflex; applies the next time the game starts. Intel XeSS frame generation exists only for "
-                       "DirectX 12, not for this Vulkan renderer. Needs Frame rate 60 FPS and 120 FPS interpolation off. "
+                       "DirectX 12, not for this Vulkan renderer. Needs Frame rate 60 FPS. "
                        "The HUD can shimmer slightly on generated frames.")) {
             if (was == FG_FSR || g_settings.frame_gen == FG_FSR) vk_request_swapchain_remake();
         }
-        if (g_settings.frame_gen && (settings_game_hz() != 60 || g_settings.frame_interp)) {
+        if (g_settings.frame_gen && settings_game_hz() != 60) {
             opt_disable_next();
-            opt_action("Frame generation status", "Off: set Frame rate 60 FPS, 120 FPS interpolation off",
+            opt_action("Frame generation status", "Off: set Frame rate 60 FPS",
                        "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > "
-                       "Frame rate, and Graphics > Experimental at the bottom of this tab).");
+                       "Frame rate).");
         }
     }
     int backend = g_settings.temporal_backend;
@@ -1099,18 +1099,6 @@ static void tab_graphics(void) {
                "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
                "Costs almost nothing. Off: the picture exactly as on the Switch.");
 #endif
-#ifndef __APPLE__  // (Vulkan: runtime/hle/odyssey_120.c, nvn/interp.c - at the bottom on purpose: owner 2026-11-16)
-    opt_section("Experimental");
-    if (settings_game_hz() != 60) opt_disable_next();
-    else if (vk_temporal_enabled()) opt_disable_next();
-    opt_toggle("120 FPS interpolation (may crash)", &g_settings.frame_interp, false,
-               "Warning: this can crash the game - several players' games crashed with it on (NVIDIA and AMD), and it "
-               "can make shadows flicker. Leave it off unless you want to try it; if the game crashes or shows "
-               "glitches, turn it off first. For a higher frame rate use Performance > Frame rate instead (72-240 FPS, "
-               "real frames). What it does: adds a made-up image between the game's frames, targeting 120 FPS on a "
-               "120 Hz or faster display. Needs Frame rate 60 FPS and Upscale method Off or AMD FSR 1. Busy scenes can "
-               "fall back to 60 FPS.");
-#endif
     opt_end();
 }
 
@@ -1184,7 +1172,7 @@ static void tab_performance(void) {
     opt_section("Power");
     if (opt_action("Battery saver", "",
                    "Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, "
-                   "no SMAA, no 120 FPS or interpolation, the game's own texture filtering. The game itself still runs at its normal "
+                   "no SMAA, Frame rate 60 FPS, the game's own texture filtering. The game itself still runs at its normal "
                    "speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) "
                    "for the biggest savings. Some changes apply at the next start.")) {
         settings_battery_saver();

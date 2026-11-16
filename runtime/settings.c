@@ -347,7 +347,7 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "console_mode")) g_settings.console_mode = !strcmp(val, "handheld") ? CONSOLE_HANDHELD : CONSOLE_DOCKED;
         else if (!strcmp(key, "game_dynres")) g_settings.game_dynres = atoi(val) != 0;
-        else if (!strcmp(key, "frame_interp")) g_settings.frame_interp = atoi(val) != 0;
+        else if (!strcmp(key, "frame_interp")) {}  // (120 FPS interpolation: removed 2026-11-16 - it crashed; an old "1" is ignored)
         else if (!strcmp(key, "aniso")) {
             int n = atoi(val);
             g_settings.aniso = n == 2 || n == 4 || n == 8 || n == 16 ? n : ANISO_GAME;  // ("game")
@@ -478,7 +478,6 @@ void settings_save(void) {
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : 0]);
     fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
     fprintf(f, "game_dynres = %d\n", g_settings.game_dynres);
-    fprintf(f, "frame_interp = %d\n", g_settings.frame_interp);
     if (g_settings.aniso) fprintf(f, "aniso = %d\n", g_settings.aniso);
     else fprintf(f, "aniso = game\n");
     if (g_settings.frame_rate == FPS_AUTO) fprintf(f, "frame_rate = display\n");

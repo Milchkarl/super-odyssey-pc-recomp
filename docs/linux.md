@@ -45,9 +45,9 @@ the previous file only while it still matches the change this app made; later
 Steam edits are never overwritten. No shortcut is created during updates or
 without pressing the button.
 
-On a Steam Deck the game starts with the **battery saver** settings: 75% internal resolution (960 x 600) upscaled with
-AMD FSR 1, no SMAA, 60 FPS without interpolation, 4x texture filtering. The menu's Performance tab has a *Battery
-saver* button to apply them again after changing things. For the biggest savings, also lower the power limit in the
+On a Steam Deck the game starts with settings made for it: the Deck's own 1280 x 800 screen, filled (16:10), the
+game's handheld rendering, no SMAA, 60 FPS and the game's own texture filtering. The menu's Performance tab has a
+*Battery saver* button for lighter settings still (75% internal resolution upscaled with AMD FSR 1). For the biggest savings, also lower the power limit in the
 Deck's Quick Access menu (Performance > TDP Limit, e.g. 8-10 W). Don't use the Deck's frame limit below 60: Odyssey's
 gameplay runs one step per frame, so a 30 or 40 FPS limit slows the game itself down.
 

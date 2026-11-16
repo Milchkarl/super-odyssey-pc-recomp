@@ -97,8 +97,8 @@ This is a preview. Known problems and things not done yet:
   - With a Switch controller, the map pointer doesn't select icons (#22). The game's own Joy-Con tips while
     playing can't be turned off (#23): the setting only skips the controller screen at start.
 - **Version 1.4.1 at 90 or 120 FPS can crash while loading Wooded Kingdom.** Use 60 FPS there for now.
-- **Version 1.4.1** is newer in this port than 1.0.0 and less tested: native 90/120 FPS and the frame interpolation's
-  pose smoothing are tuned on 1.0.0, so 1.4.1 can show more jitter or small glitches with them on.
+- **Version 1.4.1** is newer in this port than 1.0.0 and less tested: native 90/120 FPS is tuned on 1.0.0, so 1.4.1
+  can show more jitter or small glitches with it on.
 - **Native 90 and 120 FPS** are experimental on both versions: some objects or effects can move unevenly or look doubled.
 - **A short stutter can still happen** the first time a rare effect is drawn whose pipeline state nobody has recorded
   yet. It's prepared then and kept for next time.
