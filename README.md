@@ -45,9 +45,15 @@ while you play. The parts of the Switch the game talks to (kernel, system servic
 reimplemented on the PC, with Vulkan for graphics.
 
 - **Installer** that takes your game's extracted `exefs` and `romfs` folders (1.0.0, or 1.4.1 with the update applied)
-- **Every shader compiled at install time**, so effects don't stutter the first time they appear
-- **Up to 4x internal resolution**, NVIDIA **DLSS / DLAA**, AMD FSR 1, SMAA, ultrawide *Fill window*
-- **Native 90 or 120 FPS** (experimental) or frame interpolation, anisotropic filtering, smooth gradients
+- **Every shader compiled ahead of play** (and again by itself after a GPU driver or game update), so effects don't
+  stutter the first time they appear - see [How the shader stutter was solved](#how-the-shader-stutter-was-solved)
+- **Frame rates from 60 up to 240 FPS**, every frame really drawn, with **Match display** picking the smoothest rate
+  for your screen
+- **Up to 4x internal resolution**, NVIDIA **DLSS / DLAA**, AMD **FSR 2 / 3.1 / 4**, Intel **XeSS**, FSR 1, SMAA - with
+  the **HUD drawn at full resolution** over the upscaled picture - and frame generation (AMD FSR, NVIDIA DLSS beta)
+  with NVIDIA Reflex
+- **Any screen shape**: 16:9, 16:10, 21:9, 32:9, 4:3 or Fill window, with the **HUD at the edges** on ultrawide
+- **Motion controls as on the Switch** (the game's 200 Hz sensor history), mouse camera, 5.1 surround
 - Keyboard and controller rebinding, RomFS mods, an in-game settings menu, and **built-in updates** from this page
 
 Windows 10 / 11 (x64). **Linux and Steam Deck: experimental** - an AppImage, see [docs/linux.md](docs/linux.md).
@@ -252,6 +258,74 @@ Bug reports are read and worked on the same way: the maintainer tests, and Claud
   [LZ4](https://github.com/python-lz4/python-lz4) (BSD). The release carries every licence in `licenses/`.
 
 The installer's pixel-art background and the icon are original artwork made for this project.
+
+## Contributing
+
+Bug reports, logs and pull requests are welcome - see [Reporting a problem](#reporting-a-problem) for what a report
+needs. Every pull request is checked line by line for anything harmful, then built and played on **Windows and a
+Steam Deck** before it is merged; nothing from a contributor ships untested. Never include or link game files.
+
+**Contributors**
+
+- **[galaxyhf](https://github.com/galaxyhf) (Caio Silva)** - Brazilian Portuguese: the localization support, the
+  Language tab and the fan translation's installer (#49, #56, #58).
+- **zzzarathustra-dev** - shaders precompiled before the first start and the first Steam Deck defaults (0.2.1).
+- **Codex** (OpenAI) - fixes and features across the runtime (see [Who made this](#who-made-this)).
+- Everyone who reported a bug with logs, screenshots and saves: most of the fixes below started there.
+
+## How the shader stutter was solved
+
+A Switch game ships its shaders ready for one GPU. On a PC every shader has to be translated (Maxwell -> GLSL ->
+SPIR-V) and then compiled by your graphics driver - and the first time an effect appears, that compile is a stutter.
+What fixed it, measured on an RTX 4090 and a Steam Deck:
+
+1. **Compile everything ahead of play.** The launcher scans the game's own shader archives (about 32,800 programs),
+   translates every one and builds its pipeline pieces, saving them as `VK_KHR_pipeline_binary` data. It asks first,
+   shows progress and time left, and keeps what's done if you stop it.
+2. **Make sure the game finds what was compiled.** A piece is looked up by its content plus the driver's own key; if
+   the compile and the game build anything even slightly differently, every lookup misses and the work is wasted.
+   The log reports what was loaded, refused or missing, so coverage can be checked.
+3. **Compile again when the cache goes stale.** A GPU driver update makes the driver refuse saved pieces, and a new
+   version of the game may translate shaders differently. The cache now records the GPU, driver and version it was
+   made for and is rebuilt (after asking) when any of them changes - this was the stutter many players still saw.
+4. **Never freeze the picture for an effect.** If a piece isn't ready, that one draw waits a frame or two on another
+   thread; only real full-screen passes (lighting, composites) hold the frame.
+5. **Less work for the driver.** A post-pass inlines the translator's one-instruction helper calls and strips debug
+   data from the SPIR-V: about 45% less driver time per shader on a Steam Deck.
+6. **Use the whole CPU.** The compile runs on every core but one (137 s -> 110 s from nothing on a 32-thread CPU).
+
+Tested the strict way: game cache deleted, the driver's own cache emptied, full compile, then play - no shader built
+while playing, on Windows and on the Steam Deck. A first compile takes about 2 minutes on a fast PC and about 6 on a
+Deck.
+
+## Steam Deck optimizations
+
+What took the Deck to a steady 1280x800 at 60 FPS in Gaming Mode at 10 W:
+
+- **Don't wait for the GPU when the game doesn't need to.** The game waited for its whole GPU frame every frame
+  (fences); it now continues once the render thread has its data, and waits only where the GPU writes game memory:
+  45 -> 58-60 FPS in busy views.
+- **Guarded GPU writes**: GPU results copied back into game memory protect their pages instead of forcing a wait; only
+  a thread that actually touches them waits. The first Cap Kingdom visit went from 46-49 FPS to ~60.
+- **A separate compute queue** for small dispatches that write game memory, so they never queue behind a frame.
+- **Map the game's memory straight into Vulkan** (`VK_EXT_map_memory_placed`): about 3 ms less per submission that
+  the AMD driver spent re-checking an imported pointer.
+- **Loading stutters**: file decompression runs outside the emulated CPU core it was blocking (12-26 ms hitches when
+  new things loaded), and a first CPU read of GPU data (the fog) no longer waits for the GPU.
+- **Frame pacing**: the game's 60 Hz timer is locked to when the screen really shows each frame (present wait), so
+  frames aren't shown twice or skipped.
+- **The game's own dynamic resolution** dropped to its floor on the Deck and stayed there; it can be turned off (off by
+  default on the Deck), and its GPU timing now counts busy time only.
+- **Power**: CPU and GPU share the Deck's power budget, so CPU time saved is GPU clock gained; at a low power limit a
+  manual GPU clock of 1000 MHz keeps 60 FPS (the launcher shows this tip).
+- **Deck defaults**: 16:10 picture, Handheld console mode, FSR 2 available for Docked mode.
+
+## Performance techniques for other projects
+
+Everything above - and more: frame pacing, native high frame rates, drawing the HUD after upscaling, keeping game
+speed real time below 60 FPS, mip chains without copies, any screen shape - is written up with how it was measured in
+**[docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)**, for anyone building a recompiled or emulated port. The code it
+points to is MIT licensed: take what helps.
 
 ## Legal
 

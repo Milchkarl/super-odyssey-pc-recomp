@@ -489,12 +489,20 @@ static std::string fit(std::string s, float w) {
 }
 
 // one choice: its label and the chosen value (or a hint) on the left, the buttons on the right
+// ODYSSEY_SETUP_DOCS=1 (the README's picture, docs/installer.png): the page as the documentation describes it - the game
+// as its extracted folder, then the install folder; nothing else changes
+static bool setup_docs_view(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("ODYSSEY_SETUP_DOCS") != NULL;
+    return on;
+}
 static void row(const char *label, const std::string &value, const char *empty, float colw, float scale, int which,
                 const std::string &notice, int notice_row, bool off = false) {
     // Two columns: the label and the value (or a hint) on the left, wrapped before the buttons; the buttons on the
     // right, their right edge on the column's, centred on the left column's height. A thin line between rows.
     float pad = 2 * 16 * scale, gap = ImGui::GetStyle().ItemSpacing.x, colgap = 24 * scale;
-    float btnw = which == ROW_GAME ? ImGui::CalcTextSize("NSP / XCI file").x + ImGui::CalcTextSize("Folder").x + 2 * pad + gap
+    float btnw = which == ROW_GAME && setup_docs_view() ? ImGui::CalcTextSize("Folder").x + pad
+               : which == ROW_GAME ? ImGui::CalcTextSize("NSP / XCI file").x + ImGui::CalcTextSize("Folder").x + 2 * pad + gap
                                    : ImGui::CalcTextSize(which == ROW_KEYS || which == ROW_UPDATE ? "Choose..." : "Change...").x + pad;
     float btnh = ImGui::GetFontSize() + 2 * 7 * scale;
     float leftw = colw - btnw - colgap;
@@ -518,8 +526,10 @@ static void row(const char *label, const std::string &value, const char *empty, 
         ImGui::SetCursorPos(ImVec2(x0 + colw - btnw, by));
         ImGui::PushID(which);
         if (which == ROW_GAME) {
-            if (small_button("NSP / XCI file", scale)) g_want_dialog = DLG_GAME_FILE;
-            ImGui::SameLine();
+            if (!setup_docs_view()) {
+                if (small_button("NSP / XCI file", scale)) g_want_dialog = DLG_GAME_FILE;
+                ImGui::SameLine();
+            }
             if (small_button("Folder", scale)) g_want_dialog = DLG_GAME_FOLDER;
         } else if (small_button(which == ROW_KEYS || which == ROW_UPDATE ? "Choose..." : "Change...", scale)) {
             g_want_dialog = which == ROW_KEYS ? DLG_KEYS : which == ROW_UPDATE ? DLG_UPDATE : DLG_DEST;
@@ -964,6 +974,21 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
             ImGui::Dummy(ImVec2(0, 6 * scale));
         }
         bool pkg = game_is_package(game);
+        if (setup_docs_view()) {
+            row("1. Your game: Super Mario Odyssey", "", "The extracted exefs and romfs folders of your own copy of the game",
+                textw, scale, ROW_GAME, notice, notice_row);
+            row("2. Install the game to", dest, "", textw, scale, ROW_DEST, notice, notice_row);
+            ImGui::Dummy(ImVec2(0, 16 * scale));
+            accent_button("Install", scale, true);
+            ImGui::Dummy(ImVec2(0, 10 * scale));
+            ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+            ImGui::SetWindowFontScale(0.7f);
+            ImGui::TextUnformatted("Nothing of the game is included, and nothing is uploaded anywhere: your game files are only "
+                                   "read on this PC. The install takes about the size of the game plus a few GB (the recompiled "
+                                   "code and the compiled shaders).");
+            ImGui::SetWindowFontScale(1);
+            ImGui::PopStyleColor();
+        } else {
         row("1. Your game: Super Mario Odyssey", game, "An NSP or XCI dumped from your console, or the extracted folder",
             textw, scale, ROW_GAME, notice, notice_row);
         if (update_supported())
@@ -988,6 +1013,7 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
                                "(the recompiled code and the compiled shaders).");
         ImGui::SetWindowFontScale(1);
         ImGui::PopStyleColor();
+        }
     }
     ImGui::PopTextWrapPos();
     content_h = ImGui::GetCursorPosY() / scale;
@@ -1132,6 +1158,12 @@ bool setup_run(const char *root) {
         // While it works, about 15 pictures a second are plenty for a progress bar: drawn at the display's rate the
         // page took most of a core the game code's compile could use (a Steam Deck has four).
         if (busy) SDL_Delay(50);
+        else {  // (60 a second otherwise: with a mailbox swapchain the page was drawn thousands of times a second)
+            static uint64_t next;
+            uint64_t now = SDL_GetTicksNS();
+            if (next > now && next - now < 100000000ull) SDL_DelayPrecise(next - now);
+            next = (next > now && next - now < 100000000ull ? next : now) + 16666667ull;
+        }
     }
     menu_setup_mode(false);
     return true;

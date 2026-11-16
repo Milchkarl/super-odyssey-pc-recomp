@@ -91,6 +91,17 @@ libraries built and saved as `VK_KHR_pipeline_binary` data, before the first sta
 - *Ask, in the launcher, before doing it* - with a progress bar, a time estimate and a way to stop (it keeps what's
   done).
 - Know where the time goes: on a Deck, scan 43-66 s, translation 159-241 s, library builds 215-539 s.
+- *Prepare again when the cache goes stale.* A driver update makes the driver refuse saved pipeline binaries, and a new
+  version may translate shaders differently; a cache marked "prepared" once was trusted forever and every effect built
+  while playing. Record what the cache was made for (GPU vendor / device, driver version, program version) and ask to
+  prepare again when it differs (`runtime/nvn/vulkan/device.c prep_identity` - read from a short-lived Vulkan instance,
+  before the renderer starts).
+- *Use the whole CPU.* The driver's compile is CPU-bound: every core but one instead of at most 16 took a truly cold
+  preparation (our cache deleted, the driver's disk cache redirected to an empty folder) from 136.7 s to 110.0 s on a
+  32-thread CPU.
+- *Test it cold.* Delete the cache, empty the driver's cache (NVIDIA: `__GL_SHADER_DISK_CACHE_PATH` to an empty folder
+  for the test process; Mesa: `MESA_SHADER_CACHE_DIR`), prepare, then play: a run on a warm cache hides what players
+  see after an update.
 
 ## 4. Game-side hitches from emulated threading
 
