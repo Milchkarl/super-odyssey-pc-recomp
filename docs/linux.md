@@ -7,7 +7,7 @@ The Linux version is an AppImage: one file that runs on SteamOS and on desktop d
 Ubuntu 22.04, Debian 12, Fedora 36, Arch, SteamOS, ...). It's built with `make appimage` (`tools/linux/appimage.sh`,
 in Ubuntu 22.04 containers).
 
-You need a Vulkan 1.3 driver (Mesa RADV / ANV / NVK, or NVIDIA's), a CPU with AVX2 (2013 or newer), about 12 GB of free
+You need a Vulkan 1.3 driver (Mesa RADV / ANV / NVK, or NVIDIA's), a 64-bit x86 CPU (AVX2, 2013 or newer, recommended; older ones work, slower), about 12 GB of free
 space, and the extracted **`exefs`** and **`romfs`** folders of your own copy of Super Mario Odyssey (version 1.0.0, or
 1.4.1 with the update already applied).
 

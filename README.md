@@ -108,8 +108,8 @@ This is a preview. Known problems and things not done yet:
 - **Windows Defender** may flag the new, unsigned program by its machine-learning guess (a `!ml` detection) - it
   reads game files, builds code and starts helper programs, which looks unusual. Please report it as a false positive at
   https://www.microsoft.com/wdsi/filesubmission and open an issue with the detection name.
-- **Linux and Steam Deck are experimental**: less tested than Windows ([docs/linux.md](docs/linux.md)). A CPU with
-  AVX2 and a Vulkan 1.3 GPU are required everywhere.
+- **Linux and Steam Deck are experimental**: less tested than Windows ([docs/linux.md](docs/linux.md)). A Vulkan 1.3
+  GPU is required everywhere.
 - Graphics glitches can show up in places nobody has tested yet - please report them with a screenshot.
 
 ## Reporting a problem
@@ -124,8 +124,8 @@ For a graphics glitch, pressing **F9** where it happens saves the frame's detail
 
 ## What you need
 
-- Windows 10 / 11 (x64), a CPU with AVX2 (Intel Haswell / AMD Zen or newer), a GPU with Vulkan 1.3 and an up-to-date
-  driver
+- Windows 10 / 11 (x64), a 64-bit CPU - AVX2 (Intel Haswell / AMD Zen or newer) recommended; older CPUs without AVX2
+  (Intel Sandy / Ivy Bridge and earlier) are supported but slower - a GPU with Vulkan 1.3 and an up-to-date driver
 - 8 GB RAM (16 GB recommended), about 12 GB free disk space
 - The extracted `exefs` and `romfs` folders of your own Super Mario Odyssey (1.0.0, or 1.4.1 with the update applied)
 

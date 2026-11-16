@@ -164,14 +164,11 @@ static void log_to_file_without_terminal(void) {
 }
 
 #if defined(__x86_64__)
-// The recompiled game code is built for x86-64-v3 (Makefile GENARCH: AVX2, FMA, BMI2): say so instead of crashing
-// with an illegal instruction on an older CPU.
+// The recompiled game code is compiled on this PC for the CPU it has (runtime/gamelib.c: AVX2 as built, or AVX /
+// SSE4.2 / baseline on older CPUs, with an id of its own), so any x86-64 CPU runs it: nothing to refuse, only noted.
 static void require_cpu(void) {
-    __builtin_cpu_init();
-    if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2")) return;
-    fprintf(stderr, "FATAL: Super Odyssey PC Recomp needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or "
-                    "newer).\n");
-    exit(1);
+    extern const char *gamelib_cpu_name(void);
+    fprintf(stderr, "[cpu] game code target: %s\n", gamelib_cpu_name());
 }
 #else
 static void require_cpu(void) {}
