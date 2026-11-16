@@ -417,6 +417,7 @@ static void create_device(void) {
     b->shaderInt16 = h->shaderInt16;
     b->depthBiasClamp = h->depthBiasClamp;
     b->depthClamp = h->depthClamp;
+    g_vk.features_depth_clamp = h->depthClamp;
     b->largePoints = h->largePoints;
     b->wideLines = h->wideLines;
     b->imageCubeArray = h->imageCubeArray;
