@@ -28,9 +28,6 @@ The window's size, or in exclusive fullscreen the monitor's mode - the sizes you
 Desktop ||| 바탕화면
 Refresh rate ||| 주사율
 VSync ||| 수직 동기화
-On: no tearing, the game keeps its own steady pace. Off (the default): frames go out the moment they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 화면 찢어짐 없이 게임이 자체 속도를 일정하게 유지합니다. 끄기 (기본값): 프레임이 완성되는 즉시 표시됩니다 - 가장 낮은 지연, 화면 찢어짐 있음. 엄격: 각 프레임이 화면의 다음 갱신을 기다립니다 (기존 수직 동기화, 늦은 프레임은 한 번의 갱신을 통째로 기다림). 적응형: 엄격과 같지만 늦은 프레임은 바로 표시됩니다 (그때만 찢어짐). GPU나 드라이버가 지원하지 않으면 가장 가까운 방식을 사용합니다.
-Off (tearing) ||| 끄기 (찢어짐)
-Strict ||| 엄격
 Adaptive ||| 적응형
 Screen shape ||| 화면 비율
 Aspect ratio ||| 화면 비율
@@ -72,12 +69,8 @@ Sharpness ||| 선명도
 Image ||| 이미지
 Anisotropic filtering ||| 이방성 필터링
 Keeps ground, roads and walls seen at a shallow angle sharp into the distance. Only surface textures are raised; shadows and screen effects keep the game's setting. Game: the level the game asks for, as on the Switch. ||| 낮은 각도로 보이는 땅, 길, 벽을 먼 곳까지 선명하게 유지합니다. 표면 텍스처만 높아지며 그림자와 화면 효과는 게임 설정을 유지합니다. 게임: Switch와 같이 게임이 요청하는 수준.
-Smooth gradients ||| 부드러운 그라데이션
-Removes the visible color steps (banding) in skies, fog and dark areas: the game's image keeps more precision until it reaches the screen and gets a fine dither there. Off: as on the Switch. ||| 하늘, 안개, 어두운 곳에 보이는 색 계단 (밴딩)을 없앱니다. 게임 이미지가 화면에 도달할 때까지 더 높은 정밀도를 유지하고 그곳에서 미세한 디더링을 받습니다. 끄기: Switch와 같음.
 Frame rate ||| 프레임 레이트
 90 and 120 FPS draw up to 90 or 120 frames per second while gameplay runs at its original 60 Hz. Use a display that refreshes at least that fast (90 Hz: Steam Deck OLED). 60 FPS matches the Switch and uses the least power. Changes at once. ||| 90 및 120 FPS는 게임플레이가 원래의 60 Hz로 진행되는 동안 초당 최대 90 또는 120 프레임을 그립니다. 그만큼 빠르게 갱신되는 디스플레이를 사용하세요 (90 Hz: Steam Deck OLED). 60 FPS는 Switch와 같으며 전력을 가장 적게 씁니다. 즉시 바뀝니다.
-120 FPS interpolation (experimental) ||| 120 FPS 보간 (실험적)
-Experimental: some players' games crashed with it on (NVIDIA and AMD) - turn it off if the game crashes. Available with Frame rate set to 60 FPS and DLSS off. Adds an image between game frames, targeting 120 FPS on a 120 Hz or faster display. Busy scenes can temporarily fall back to 60 FPS. ||| 실험적 기능: 일부 플레이어는 켠 상태에서 게임이 멈췄습니다 (NVIDIA 및 AMD) - 게임이 멈추면 끄세요. 프레임 레이트가 60 FPS이고 DLSS가 꺼져 있을 때 사용할 수 있습니다. 게임 프레임 사이에 이미지를 추가하여 120 Hz 이상의 디스플레이에서 120 FPS를 목표로 합니다. 복잡한 장면에서는 일시적으로 60 FPS로 돌아갈 수 있습니다.
 Power ||| 전원
 Battery saver ||| 배터리 절약
 Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, no SMAA, no 120 FPS or interpolation, 4x texture filtering. The game itself still runs at its normal speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) for the biggest savings. Some changes apply at the next start. ||| 배터리로 동작하는 휴대용 기기와 노트북에 맞게 가벼운 설정을 적용합니다: 내부 해상도 75%를 FSR 1로 업스케일, SMAA 없음, 120 FPS나 보간 없음, 4x 텍스처 필터링. 게임 자체는 정상 속도로 진행됩니다. Steam Deck에서는 빠른 접근 메뉴 (성능 > TDP 제한)에서 전력 제한도 낮추면 가장 많이 절약됩니다. 일부 변경은 다음 시작 시 적용됩니다.
@@ -242,7 +235,6 @@ Frame generation (AMD FSR) ||| 프레임 생성 (AMD FSR)
 A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother motion on a 120 Hz or faster display, a little more input delay. Works on any GPU, with any Upscale method above. Needs Frame rate 60 FPS and 120 FPS interpolation off (they make extra frames themselves). The HUD can shimmer slightly on the generated frames. ||| 게임이 렌더링하는 두 프레임 사이마다 프레임 하나를 생성합니다: 게임의 60 FPS에서 120 FPS로 표시 - 120Hz 이상 디스플레이에서 더 부드러운 움직임, 입력 지연이 약간 늘어납니다. 모든 GPU와 위의 모든 업스케일 방식에서 작동합니다. 프레임 레이트 60 FPS와 120 FPS 보간 끄기가 필요합니다 (그 기능들이 자체적으로 추가 프레임을 만듭니다). 생성된 프레임에서 HUD가 약간 흔들릴 수 있습니다.
 Frame generation status ||| 프레임 생성 상태
 Off: set Frame rate 60 FPS, 120 FPS interpolation off ||| 꺼짐: 프레임 레이트 60 FPS, 120 FPS 보간 끄기로 설정하세요
-Frame generation waits until the game renders 60 FPS without its own extra frames (Performance tab). ||| 게임이 자체 추가 프레임 없이 60 FPS로 렌더링할 때까지 프레임 생성은 대기합니다 (성능 탭).
 Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a stick (the usual follow camera; the other camera kinds take the mouse as a stick). ||| 마우스 축마다 따로 정하는 속도입니다. 카메라가 마우스를 움직인 만큼 즉시 돌아갑니다 - 스틱처럼 서서히 가감속하지 않습니다 (일반 추적 카메라; 다른 종류의 카메라는 마우스를 스틱처럼 받습니다).
 HUD position (wide) ||| HUD 위치 (와이드)
 Centered (16:9) ||| 가운데 (16:9)
@@ -303,3 +295,12 @@ Up to date ||| 최신 버전
 Checking... ||| 확인 중...
 Didn't work ||| 실패
 Not set up ||| 설정 안 됨
+On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 기본 수직 동기화 - 각 프레임이 화면의 다음 새로 고침을 기다리며 찢어짐이 없습니다(늦은 프레임은 새로 고침 한 번을 통째로 기다림, G-Sync / FreeSync에서는 화면이 게임을 따라감). 빠름(Mailbox): 찢어짐도 대기도 없음 - 화면이 새로 고침마다 가장 최근에 완성된 프레임을 보여줍니다. 적응형(Relaxed): 켜기와 같지만 늦은 프레임은 즉시 나갑니다(그때만 찢어짐). 끄기(기본값): 프레임이 완성되는 즉시 나갑니다 - 입력 지연이 가장 적고 찢어짐이 있습니다. GPU나 드라이버가 지원하지 않으면 가장 가까운 방식이 사용됩니다.
+Fast (Mailbox) ||| 빠름 (Mailbox)
+Adaptive (Relaxed) ||| 적응형 (Relaxed)
+Smooth color gradients ||| 부드러운 색상 그라데이션
+Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps (bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. Costs almost nothing. Off: the picture exactly as on the Switch. ||| 색상 띠(밴딩) 현상을 고칩니다: 밤하늘, 안개, 물, 어두운 방에서 게임의 색이 부드럽게 변하지 않고 눈에 보이는 계단(띠나 고리)으로 바뀝니다 - Switch에서도 마찬가지입니다. 켜기: 게임 화면이 화면에 도달할 때까지 더 정밀한 색으로 유지되고, 그곳에서 계단을 감추는 미세하고 보이지 않는 입자가 더해집니다. 부하는 거의 없습니다. 끄기: Switch와 똑같은 화면.
+Experimental ||| 실험적
+120 FPS interpolation (may crash) ||| 120 FPS 보간 (충돌 가능)
+Warning: this can crash the game - several players' games crashed with it on (NVIDIA and AMD), and it can make shadows flicker. Leave it off unless you want to try it; if the game crashes or shows glitches, turn it off first. For a higher frame rate use Performance > Frame rate instead (72-240 FPS, real frames). What it does: adds a made-up image between the game's frames, targeting 120 FPS on a 120 Hz or faster display. Needs Frame rate 60 FPS and Upscale method Off or AMD FSR 1. Busy scenes can fall back to 60 FPS. ||| 경고: 게임이 충돌할 수 있습니다 - 여러 플레이어가 이 기능을 켠 상태에서 충돌을 겪었고(NVIDIA와 AMD), 그림자가 깜빡일 수 있습니다. 시험해 보려는 경우가 아니면 꺼 두세요. 게임이 충돌하거나 오류가 보이면 먼저 이것을 끄세요. 더 높은 프레임 레이트는 대신 성능 > 프레임 레이트(72-240 FPS, 실제 프레임)를 사용하세요. 하는 일: 게임 프레임 사이에 만들어 낸 이미지를 추가해 120 Hz 이상 화면에서 120 FPS를 목표로 합니다. 프레임 레이트 60 FPS와 업스케일 방식 끄기 또는 AMD FSR 1이 필요합니다. 복잡한 장면에서는 60 FPS로 돌아갈 수 있습니다.
+Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > Frame rate, and Graphics > Experimental at the bottom of this tab). ||| 프레임 생성은 게임이 자체 추가 프레임 없이 60 FPS로 렌더링할 때까지 기다립니다(성능 > 프레임 레이트, 그리고 이 탭 맨 아래의 그래픽 > 실험적).

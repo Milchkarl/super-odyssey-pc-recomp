@@ -18,10 +18,12 @@ enum { DLSS_PRESET_DEFAULT, DLSS_PRESET_K, DLSS_PRESET_L, DLSS_PRESET_M, DLSS_PR
 enum { TEMPORAL_DLSS, TEMPORAL_FSR3, TEMPORAL_FSR4, TEMPORAL_XESS, TEMPORAL_FSR2, TEMPORAL_BACKEND_COUNT };
 enum { WINDOWED, BORDERLESS, EXCLUSIVE_FULLSCREEN, WINDOW_MODE_COUNT };
 enum { DISPLAY_AUTO, DISPLAY_1080, DISPLAY_1440, DISPLAY_2160, DISPLAY_MODE_COUNT };
-// VSync (Vulkan present modes): ON = mailbox (no tearing, the game paces itself - the default), OFF = immediate
-// (tearing, the lowest latency), STRICT = FIFO (each frame waits for its refresh), ADAPTIVE = FIFO relaxed (a late
-// frame goes out at once, tearing then)
-enum { VSYNC_ON, VSYNC_OFF, VSYNC_STRICT, VSYNC_ADAPTIVE, VSYNC_COUNT };
+// VSync (Vulkan present modes, named as in Savage Wind Recomp - owner 2026-11-16): ON = FIFO (classic vsync: each frame
+// waits for its refresh), FAST = mailbox (no tearing, the newest frame at each refresh, the game paces itself),
+// ADAPTIVE = FIFO relaxed (On, but a late frame goes out at once - tearing then), OFF = immediate (tearing, the lowest
+// latency; the default). The numbers are the settings file's older order (powermoon.ini "vsync": on = mailbox, strict
+// = FIFO); the file now says "vsync_mode" (settings.c).
+enum { VSYNC_FAST, VSYNC_OFF, VSYNC_ON, VSYNC_ADAPTIVE, VSYNC_COUNT };
 static inline int settings_display_height(int mode) {
     const int heights[DISPLAY_MODE_COUNT] = {0, 1080, 1440, 2160};
     return heights[mode];

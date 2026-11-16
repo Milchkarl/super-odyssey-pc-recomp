@@ -249,9 +249,14 @@ void settings_load(void) {
             else g_settings.display_w = g_settings.display_h = 0;
         }
         else if (!strcmp(key, "refresh_rate")) { int r = atoi(val); g_settings.refresh_rate = r >= 0 && r <= 1000 ? r : 0; }
-        else if (!strcmp(key, "vsync")) {
+        else if (!strcmp(key, "vsync")) {  // (before 2026-11-16: "on" was mailbox - now Fast - and "strict" FIFO - now On)
             static const char *const v[VSYNC_COUNT] = {"on", "off", "strict", "adaptive"};
-            g_settings.vsync = VSYNC_ON;
+            g_settings.vsync = VSYNC_OFF;
+            for (int i = 0; i < VSYNC_COUNT; i++) if (!strcmp(val, v[i])) g_settings.vsync = i;
+        }
+        else if (!strcmp(key, "vsync_mode")) {
+            static const char *const v[VSYNC_COUNT] = {"fast", "off", "on", "adaptive"};
+            g_settings.vsync = VSYNC_OFF;
             for (int i = 0; i < VSYNC_COUNT; i++) if (!strcmp(val, v[i])) g_settings.vsync = i;
         }
         else if (!strcmp(key, "monitor")) { int m = atoi(val); g_settings.monitor = m >= 0 && m <= 64 ? m : 0; }
@@ -419,8 +424,8 @@ void settings_save(void) {
     else fprintf(f, "display_size = auto\n");
     fprintf(f, "refresh_rate = %d\n", g_settings.refresh_rate);
     {
-        static const char *const v[VSYNC_COUNT] = {"on", "off", "strict", "adaptive"};
-        fprintf(f, "vsync = %s\n", v[g_settings.vsync >= 0 && g_settings.vsync < VSYNC_COUNT ? g_settings.vsync : 0]);
+        static const char *const v[VSYNC_COUNT] = {"fast", "off", "on", "adaptive"};
+        fprintf(f, "vsync_mode = %s\n", v[g_settings.vsync >= 0 && g_settings.vsync < VSYNC_COUNT ? g_settings.vsync : VSYNC_OFF]);
     }
     fprintf(f, "monitor = %d\n", g_settings.monitor);
     fprintf(f, "volume = %.2f\n", g_settings.volume);

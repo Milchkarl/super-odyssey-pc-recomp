@@ -409,7 +409,7 @@ static void refresh_modes(SDL_Window *w) {
 
 // Auto refresh rate (exclusive fullscreen): the highest rate this size offers that is a whole multiple of the frame
 // rate (60 FPS: 60 / 120 / 180 / 240 Hz; 90: 90 / 180), so every frame stays on screen equally long; the desktop's when
-// there is none. 60 FPS on the desktop's 144 Hz alternated 2 and 3 refreshes a frame, and with Strict / Adaptive VSync
+// there is none. 60 FPS on the desktop's 144 Hz alternated 2 and 3 refreshes a frame, and with On / Adaptive VSync (FIFO)
 // that judder held the game back (owner's PC, 2026-11-15: 102 images held in ~85 s at 144 Hz).
 static float smooth_rate(SDL_DisplayID d, int w, int h, float desktop_hz) {
     int fps = settings_game_hz();
@@ -807,12 +807,19 @@ static void tab_display(void) {
     }
 #ifndef __APPLE__
     {
-        static const char *vs[] = {"On", "Off (tearing)", "Strict", "Adaptive"};
-        if (opt_choice("VSync", &g_settings.vsync, vs, VSYNC_COUNT, VSYNC_OFF,  /* (the default: settings.c) */
-                       "On: no tearing, the game keeps its own steady pace. Off (the default): frames go out the moment "
-                       "they're done - the lowest latency, with tearing. Strict: each frame waits for the screen's next "
-                       "refresh (classic vsync; a late frame waits a whole refresh). Adaptive: as Strict, but a late frame "
-                       "goes out at once (tearing only then). Where the GPU or driver lacks one, the closest it has is used.")) {
+        // (Savage Wind Recomp's names and order - owner 2026-11-16; the setting keeps its numbers: settings.h VSYNC_*)
+        static const char *vs[] = {"On", "Fast (Mailbox)", "Adaptive (Relaxed)", "Off"};
+        static const int vs_mode[] = {VSYNC_ON, VSYNC_FAST, VSYNC_ADAPTIVE, VSYNC_OFF};
+        int vi = 3;
+        for (int i = 0; i < 4; i++) if (vs_mode[i] == g_settings.vsync) vi = i;
+        if (opt_choice("VSync", &vi, vs, 4, 3,  /* (the default, Off: settings.c) */
+                       "On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits "
+                       "a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no "
+                       "tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive "
+                       "(Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames "
+                       "go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver "
+                       "lacks one, the closest it has is used.")) {
+            g_settings.vsync = vs_mode[vi];
             vk_request_swapchain_remake();
         }
     }
@@ -969,7 +976,8 @@ static void tab_graphics(void) {
         if (g_settings.frame_gen && (settings_game_hz() != 60 || g_settings.frame_interp)) {
             opt_disable_next();
             opt_action("Frame generation status", "Off: set Frame rate 60 FPS, 120 FPS interpolation off",
-                       "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance tab).");
+                       "Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > "
+                       "Frame rate, and Graphics > Experimental at the bottom of this tab).");
         }
     }
     {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
@@ -1090,9 +1098,23 @@ static void tab_graphics(void) {
                    "stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the "
                    "Switch. Applies from the next area loaded.", false);
     }
-    opt_toggle("Smooth gradients", &g_settings.deband, true,
-               "Removes the visible color steps (banding) in skies, fog and dark areas: the game's image keeps more "
-               "precision until it reaches the screen and gets a fine dither there. Off: as on the Switch.");
+    opt_toggle("Smooth color gradients", &g_settings.deband, true,
+               "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
+               "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
+               "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
+               "Costs almost nothing. Off: the picture exactly as on the Switch.");
+#endif
+#ifndef __APPLE__  // (Vulkan: runtime/hle/odyssey_120.c, nvn/interp.c - at the bottom on purpose: owner 2026-11-16)
+    opt_section("Experimental");
+    if (settings_game_hz() != 60) opt_disable_next();
+    else if (vk_temporal_enabled()) opt_disable_next();
+    opt_toggle("120 FPS interpolation (may crash)", &g_settings.frame_interp, false,
+               "Warning: this can crash the game - several players' games crashed with it on (NVIDIA and AMD), and it "
+               "can make shadows flicker. Leave it off unless you want to try it; if the game crashes or shows "
+               "glitches, turn it off first. For a higher frame rate use Performance > Frame rate instead (72-240 FPS, "
+               "real frames). What it does: adds a made-up image between the game's frames, targeting 120 FPS on a "
+               "120 Hz or faster display. Needs Frame rate 60 FPS and Upscale method Off or AMD FSR 1. Busy scenes can "
+               "fall back to 60 FPS.");
 #endif
     opt_end();
 }
@@ -1122,14 +1144,6 @@ static void tab_performance(void) {
                    "60 FPS matches the Switch and uses the least power. Changes at once.", false);
         g_settings.frame_rate = order[pos];
     }
-    if (settings_game_hz() != 60) opt_disable_next();
-#ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
-    if (vk_temporal_enabled()) opt_disable_next();
-#endif
-    opt_toggle("120 FPS interpolation (experimental)", &g_settings.frame_interp, false,
-               "Experimental: some players' games crashed with it on (NVIDIA and AMD) - turn it off if the game crashes. "
-               "Available with Frame rate set to 60 FPS and DLSS off. Adds an image between game frames, targeting 120 FPS "
-               "on a 120 Hz or faster display. Busy scenes can temporarily fall back to 60 FPS.");
 #endif
     {
         int v = g_settings.early_fences + 1;  // (-1 Auto, 0 Off, 1 On)

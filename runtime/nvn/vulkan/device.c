@@ -726,30 +726,35 @@ static void device_wait_idle(void) {
     vkDeviceWaitIdle(g_vk.dev);
 }
 static VkPresentModeKHR present_mode(void) {
-    // MAILBOX by default: the game paces itself (vi.c's emulated 60 Hz vsync), and with FIFO every submission
-    // queued behind the one waiting for a window image, so the game's fence waits followed the presentation engine:
-    // a throttled / captured / busy compositor slowed the whole game (4-21 fps with the GPU mostly idle; mailbox:
-    // 60). No tearing. ODYSSEY_VK_PRESENT=fifo|immediate|mailbox to choose.
-    // (the menu's VSync, Display tab: settings.h VSYNC_*)
+    // The menu's VSync (Display tab: settings.h VSYNC_*, named as in Savage Wind Recomp): On FIFO, Fast MAILBOX,
+    // Adaptive FIFO_RELAXED, Off IMMEDIATE (the default). Fast and Off never make the game wait for the display: it
+    // paces itself (vi.c's emulated 60 Hz vsync). With FIFO every submission queues behind the one waiting for a
+    // window image, so a throttled / captured / busy compositor slows the whole game (4-21 fps with the GPU mostly
+    // idle; mailbox: 60). ODYSSEY_VK_PRESENT=fifo|mailbox|relaxed|immediate overrides it (tests).
     const char *e = getenv("ODYSSEY_VK_PRESENT");
     static const VkPresentModeKHR by_setting[VSYNC_COUNT] = {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR,
                                                              VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR};
     VkPresentModeKHR want = e ? (!strcmp(e, "mailbox") ? VK_PRESENT_MODE_MAILBOX_KHR
-                                 : !strcmp(e, "immediate") ? VK_PRESENT_MODE_IMMEDIATE_KHR : VK_PRESENT_MODE_FIFO_KHR)
-                              : by_setting[g_settings.vsync >= 0 && g_settings.vsync < VSYNC_COUNT ? g_settings.vsync : 0];
+                                 : !strcmp(e, "immediate") ? VK_PRESENT_MODE_IMMEDIATE_KHR
+                                 : !strcmp(e, "relaxed") ? VK_PRESENT_MODE_FIFO_RELAXED_KHR : VK_PRESENT_MODE_FIFO_KHR)
+                              : by_setting[g_settings.vsync >= 0 && g_settings.vsync < VSYNC_COUNT ? g_settings.vsync : VSYNC_OFF];
     uint32_t n = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &n, NULL);
     VkPresentModeKHR m[16];
     if (n > 16) n = 16;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &n, m);
-    // Without MAILBOX (AMD's Windows driver in exclusive fullscreen, issue #13: slow motion on a ROG Ally only there),
-    // FIFO_RELAXED before FIFO: a late image goes out at once instead of waiting another refresh, which FIFO adds to
-    // every frame the game is late with. Logged, with what the driver offers.
+    // The closest the driver has: Off -> Fast (neither waits for the display; gamescope / Wayland may lack immediate),
+    // otherwise FIFO_RELAXED before FIFO (AMD's Windows driver in exclusive fullscreen, issue #13: slow motion on a ROG
+    // Ally only there - a late image goes out at once instead of waiting another refresh); Fast with neither of those
+    // (Intel: fifo and immediate only) -> Off, since FIFO would make the game wait for the display. Logged, with what
+    // the driver offers.
     static const char *const names[] = {"immediate", "mailbox", "fifo", "fifo relaxed"};
-    VkPresentModeKHR order[3] = {want, VK_PRESENT_MODE_FIFO_RELAXED_KHR, VK_PRESENT_MODE_FIFO_KHR};
+    VkPresentModeKHR order[4] = {want, VK_PRESENT_MODE_FIFO_RELAXED_KHR, VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_FIFO_KHR};
+    if (want == VK_PRESENT_MODE_IMMEDIATE_KHR) order[1] = VK_PRESENT_MODE_MAILBOX_KHR, order[2] = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    if (want == VK_PRESENT_MODE_MAILBOX_KHR) order[2] = VK_PRESENT_MODE_IMMEDIATE_KHR;
     VkPresentModeKHR got = VK_PRESENT_MODE_FIFO_KHR;
     bool found = false;
-    for (int k = 0; k < 3 && !found; k++)
+    for (int k = 0; k < 4 && !found; k++)
         for (uint32_t i = 0; i < n; i++) if (m[i] == order[k]) { got = order[k]; found = true; break; }
     static VkPresentModeKHR logged = (VkPresentModeKHR)-1;
     if (got != logged) {
