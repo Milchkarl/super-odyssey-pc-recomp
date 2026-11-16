@@ -1130,6 +1130,21 @@ static void tab_performance(void) {
                "Available with Frame rate set to 60 FPS and DLSS off. Adds an image between game frames, targeting 120 FPS "
                "on a 120 Hz or faster display. Busy scenes can temporarily fall back to 60 FPS.");
 #endif
+    {
+        int v = g_settings.early_fences + 1;  // (-1 Auto, 0 Off, 1 On)
+        static const char *ef[] = {"Auto", "Off", "On"};
+#ifdef __linux__
+        const char *autod = "Auto: on (as the Steam Deck has always run).";
+#else
+        const char *autod = "Auto: off on Windows for now.";
+#endif
+        char d[600];
+        snprintf(d, sizeof d, "On: the game starts its next frame as soon as this one is handed to the graphics card, "
+                              "instead of waiting for the card to finish it - the game and the drawing run side by side. "
+                              "Busy places at high frame rates: about 10-15%% more FPS (132 -> 148 on average at 240 FPS). If you see "
+                              "flickering or broken geometry, set it to Off. %s", autod);
+        if (opt_choice("Early frame hand-off", &v, ef, 3, 0, d, false)) g_settings.early_fences = v - 1;
+    }
     opt_section("Power");
     if (opt_action("Battery saver", "",
                    "Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, "
