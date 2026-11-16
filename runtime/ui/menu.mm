@@ -1170,6 +1170,11 @@ static void tab_performance(void) {
                "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
                "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
                "Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on.");
+    opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
+               "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
+               "the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS "
+               "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
+               "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
     {
         bool async = !g_settings.shader_wait;
         if (opt_toggle("Asynchronous shader building", &async, true,

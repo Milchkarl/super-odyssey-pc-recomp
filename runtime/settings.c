@@ -346,6 +346,7 @@ void settings_load(void) {
             g_settings.aniso = n == 2 || n == 4 || n == 8 || n == 16 ? n : ANISO_GAME;  // ("game")
         }
         else if (!strcmp(key, "shader_preload")) g_settings.shader_preload = atoi(val) != 0;
+        else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -471,6 +472,7 @@ void settings_save(void) {
     if (g_settings.frame_rate == FPS_AUTO) fprintf(f, "frame_rate = display\n");
     else fprintf(f, "frame_rate = %d\n", settings_fps_hz(g_settings.frame_rate));
     fprintf(f, "shader_preload = %d\n", g_settings.shader_preload);
+    fprintf(f, "shader_known_only = %d\n", g_settings.shader_known_only);
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);

@@ -132,6 +132,8 @@ typedef struct {
                          // (nvn/vulkan/exec.c compile_program; more memory)
     bool shader_wait;    // a draw whose shader is still loading waits for it (a hitch) instead of being left out /
                          // its frame not being shown (exec.c builds_block)
+    bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
+                         // more first-draw builds (exec.c renderer_program_hint; ODYSSEY_PREWARM=3). Off by default.
     bool skip_intro;     // no Joy-Con tips screen timer before the title (runtime/hle/odyssey_120.c; read at start)
     int warmup;          // WARMUP_*: how long the start replays known pipelines (nvn/vulkan/exec.c vk_pipeline_prewarm)
     bool mute_unfocused; // no sound while the window isn't in front (services/audio.c)
