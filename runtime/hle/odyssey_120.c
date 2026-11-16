@@ -392,13 +392,18 @@ static void game_movement(Cpu *c) {
 // A second draw needs its own graphics preparation even when gameplay has not advanced: without it the dynamic
 // texture allocator still holds the last draw's allocations and the depth shadow map's alloc faults (a stage, and
 // the Odyssey's flight between kingdoms: DemoChangeWorldScene, DepthShadowMapDirector::drawToMask).
+// (The allocator is reset for every extra draw, whatever scene draws: proc_draw. The title screen's TitleMenuScene,
+// which draws the kingdom behind its menu, had no reset and faulted there - #72, 1.0.0 at 180 FPS. The scene hooks
+// add the scene's own preparation.)
+static void allocator_extra_draw(Cpu *c) {
+    uint64_t allocator = *(const uint64_t *)(uintptr_t)texture_allocator;
+    if (!allocator || !texture_calc) return;
+    Cpu graphics = *c;
+    graphics.x[0] = allocator;
+    guest_call(&graphics, texture_calc);
+}
 static void prepare_extra_draw(Cpu *c, const char *what, bool *logged) {
     Cpu graphics = *c;
-    uint64_t allocator = *(const uint64_t *)(uintptr_t)texture_allocator;
-    if (allocator && texture_calc) {
-        graphics.x[0] = allocator;
-        guest_call(&graphics, texture_calc);
-    }
     graphics.x[0] = c->x[0];
     guest_call(&graphics, prepare_graphics);
     if (trace && !*logged) {
@@ -428,6 +433,13 @@ static void flight_draw(Cpu *c) {
     original_flight_draw(c);
 }
 
+static GuestFn original_title_draw;
+static void title_draw(Cpu *c) {  // (the title screen's scene: the kingdom drawn behind the menu)
+    static bool logged;
+    if (enabled && extra_draw) prepare_extra_draw(c, "title screen", &logged);
+    original_title_draw(c);
+}
+
 static void demo_draw(Cpu *c) {
     static bool logged;
     // The new-game opening has its own Scene, rather than StageScene. Its extra
@@ -437,6 +449,7 @@ static void demo_draw(Cpu *c) {
 }
 
 static void proc_draw(Cpu *c) {
+    if (enabled && extra_draw) allocator_extra_draw(c);
     original_draw(c);
     draws++;
     if (!trace) return;
@@ -660,6 +673,7 @@ void odyssey_native_120_boot(void) {
     uint64_t stage = loader_find_symbol("_ZNK10StageScene8drawMainEv");
     uint64_t flight = loader_find_symbol("_ZNK20DemoChangeWorldScene8drawMainEv");
     uint64_t demo = loader_find_symbol("_ZNK9DemoScene8drawMainEv");
+    uint64_t title = loader_find_symbol("_ZNK14TitleMenuScene8drawMainEv");
     uint64_t calc = loader_find_symbol("_ZN4sead15GameFrameworkNx9procCalc_Ev");
     uint64_t controller = loader_find_symbol("_ZN4sead13ControllerMgr4calcEv");
     texture_allocator = loader_find_symbol("_ZN3agl3utl23DynamicTextureAllocator9sInstanceE");
@@ -673,6 +687,7 @@ void odyssey_native_120_boot(void) {
     original_stage_draw = dispatch_lookup(stage);
     original_flight_draw = flight ? dispatch_lookup(flight) : NULL;
     original_demo_draw = demo ? dispatch_lookup(demo) : NULL;
+    original_title_draw = title ? dispatch_lookup(title) : NULL;
     original_framework_calc = dispatch_lookup(calc);
     original_controller_calc = dispatch_lookup(controller);
     // (1.4.1 has no DynamicTextureAllocator::calc - the game never called it and the build dropped it: the extra draws
@@ -695,8 +710,10 @@ void odyssey_native_120_boot(void) {
         hle_override(stage, stage_draw, "Odyssey extra draw graphics preparation");
         if (original_flight_draw) hle_override(flight, flight_draw, "Odyssey extra flight draw graphics preparation");
         else LOG("[native-120] kingdom flight draw hook unavailable\n");
+        if (original_title_draw) hle_override(title, title_draw, "Odyssey extra title screen draw graphics preparation");
+        else LOG("[native-120] title screen draw hook unavailable\n");
     }
-    if (trace) hle_override(draw, proc_draw, "Odyssey native draw trace");
+    hle_override(draw, proc_draw, "Odyssey extra draws: the texture allocator reset (and the native draw trace)");
     // (always: the performance overlay shows Mario's position)
     if (original_movement) hle_override(movement, player_movement, "Odyssey player movement observation");
     installed = true;
