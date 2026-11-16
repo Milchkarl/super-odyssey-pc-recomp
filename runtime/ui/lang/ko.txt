@@ -249,3 +249,57 @@ Centered (16:9) ||| 가운데 (16:9)
 Edges ||| 가장자리
 In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, the life gauge, the button guides and the mini map go to the picture's corners, as on a 16:9 screen. Centered: the whole HUD in a 16:9 box in the middle. Menus and messages stay in the middle either way. ||| 16:9보다 넓은 화면 (21:9, 32:9, 울트라와이드에서 창 채우기)에서. 가장자리: 코인과 문 카운터, 체력 게이지, 버튼 안내, 미니맵이 16:9 화면처럼 그림의 모서리로 갑니다. 가운데: HUD 전체가 가운데 16:9 상자 안에 있습니다. 메뉴와 메시지는 어느 쪽이든 가운데에 남습니다.
 Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and the world where they are at that moment (no generated in-between images); gameplay itself - physics, enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast. 60 FPS matches the Switch and uses the least power. Changes at once. ||| 60을 넘으면 게임이 초당 그만큼의 프레임을 그립니다. 각 프레임은 그 순간의 마리오, 카메라, 세계를 보여 주는 실제 프레임입니다 (생성된 중간 이미지 없음). 게임 플레이 자체 - 물리, 적, 타이머 - 는 게임 본래의 초당 60단계를 유지합니다. 디스플레이 주사율이나 그 약수를 고르세요 (144 Hz 화면: 72 또는 144). 그만큼 빠르게 그릴 수 있는 PC가 필요합니다. 60 FPS는 Switch와 같고 전력을 가장 적게 씁니다. 바로 바뀝니다.
+# 0.3.2 / 1.0 additions (#63)
+How sharp the 3D image is - each choice shows the size it renders at in this window and picture shape. The default, shown as your screen's resolution: that resolution (at least the Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of the display, for slower machines; the fixed sizes render at exactly that, above the screen's for a sharper picture (supersampling). ||| 3D 화면이 얼마나 선명한지 정합니다. 각 항목에는 이 창과 화면 비율에서 렌더링되는 크기가 표시됩니다. 기본값(화면 해상도로 표시): 그 해상도로 렌더링합니다(최소 Switch의 1600 x 900). 100%: 화면의 픽셀 수 그대로(Steam Deck: 1280 x 800). 다이내믹: GPU가 최대 속도를 유지할 수 있는 만큼 선명하게. 75% / 50% / 25%: 느린 PC를 위한 화면 대비 비율. 고정 크기는 정확히 그 크기로 렌더링하며, 화면보다 크면 더 선명한 화면(슈퍼샘플링)이 됩니다.
+Rendering at %.0f x %.0f. ||| %.0f x %.0f로 렌더링 중입니다.
+ Dynamic: %.0f%% of the display right now. |||  다이내믹: 지금 화면의 %.0f%%.
+Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes. ||| 화면 해상도(기본값)에서는 시간적 업스케일러가 평소 입력 크기를 고릅니다. 고정 해상도는 그 크기를 대신합니다. 화면 해상도 이상에서는 업스케일링을 건너뜁니다. 같은 크기에서는 Native AA/DLAA가 적용됩니다.
+Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. (MSAA isn't offered: the game lights its scene in several full-screen passes after the geometry, where MSAA has nothing to work on - a higher internal resolution, 2x and up, is the supersampling that works.) ||| 게임 화면을 창 크기에 맞추기 전에 계단 현상을 부드럽게 합니다. SMAA: 가장자리를 찾아 그 부분만 섞어 텍스처는 선명하게 유지합니다(더 좋은 화질). FXAA: 대비가 큰 모든 가장자리를 한 번에 부드럽게 하는 빠른 방식으로, GPU 부담이 가장 적고 약간 더 부드럽습니다. 내부 해상도가 낮을 때 가장 유용합니다. (MSAA는 제공하지 않습니다: 게임이 지오메트리 다음에 여러 전체 화면 패스로 장면에 조명을 입히기 때문에 MSAA가 작동할 부분이 없습니다 - 2x 이상의 높은 내부 해상도가 효과가 있는 슈퍼샘플링입니다.)
+How the picture is upscaled to the window. Off: the game renders plainly at the internal resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and sharpening of each frame - set Internal resolution below your screen's (75% for example); at your screen's resolution there is nothing to scale. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4 and Intel XeSS: temporal upscaling and anti-aliasing from several frames - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 화면을 창 크기로 업스케일하는 방식입니다. 끄기: 게임이 내부 해상도로 그대로 렌더링하고 일반 쌍선형 필터로 크기를 맞춥니다. AMD FSR 1: 프레임마다 가장자리를 고려한 업스케일링과 샤프닝 - 내부 해상도를 화면보다 낮게(예: 75%) 설정하세요. 화면 해상도에서는 업스케일할 것이 없습니다. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4, Intel XeSS: 여러 프레임을 이용한 시간적 업스케일링과 안티앨리어싱 - 낮은 내부 해상도에서 더 선명하며, 이를 지원하는 GPU와 드라이버가 필요합니다. 각 방식은 자체 모드와 샤프닝 설정을 유지합니다. 플레이 중에 바뀝니다.
+AMD FSR 4 (Beta) ||| AMD FSR 4 (베타)
+Not available on this PC (greyed out): ||| 이 PC에서 사용할 수 없음(회색 표시):
+Low latency (NVIDIA Reflex) ||| 저지연 (NVIDIA Reflex)
+Less delay between your input and the picture: the game starts each frame as late as it can instead of queuing frames ahead. Boost also keeps the GPU clocks up. NVIDIA GPUs; always on with DLSS frame generation. Applies the next time the game starts. ||| 입력과 화면 사이의 지연을 줄입니다: 게임이 프레임을 미리 쌓아 두는 대신 가능한 늦게 각 프레임을 시작합니다. 부스트는 GPU 클럭도 높게 유지합니다. NVIDIA GPU 전용이며, DLSS 프레임 생성 시에는 항상 켜집니다. 다음에 게임을 시작할 때 적용됩니다.
+Texture detail ||| 텍스처 디테일
+Surface textures use a sharper level of detail: crisper ground, walls and clothing at a distance and at high resolutions. High: half a level sharper, Ultra: a full level. Fine patterns can shimmer a little more without anti-aliasing. Switch: as on the Switch. ||| 표면 텍스처에 더 선명한 디테일 단계를 사용합니다: 멀리 있는 땅, 벽, 옷이 고해상도에서 더 선명해집니다. 높음: 반 단계 더 선명, 울트라: 한 단계 더 선명. 안티앨리어싱이 없으면 촘촘한 무늬가 조금 더 깜빡일 수 있습니다. Switch: Switch와 같음.
+Switch ||| Switch
+High ||| 높음
+Ultra ||| 울트라
+High (2x) ||| 높음 (2x)
+Ultra (4x) ||| 울트라 (4x)
+Shadow quality ||| 그림자 품질
+Draws the game's shadow maps at 2x or 4x their size: sharper, steadier shadow edges without the stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the Switch. Applies from the next area loaded. ||| 게임의 그림자 맵을 2배 또는 4배 크기로 그립니다: 계단 현상 없이 더 선명하고 안정적인 그림자 가장자리. GPU 시간과 비디오 메모리를 조금 더 씁니다(울트라: 약 300 MB 추가). Switch: Switch와 같음. 다음에 불러오는 지역부터 적용됩니다.
+Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and the world where they are at that moment (no generated in-between images); gameplay itself - physics, enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast - 60 FPS on a 144 Hz screen can't be smooth: frames alternate 2 and 3 refreshes (a judder no VSync setting removes; G-Sync / FreeSync does). Match display picks that rate for you. 60 FPS matches the Switch and uses the least power. Changes at once. ||| 60을 넘으면 게임이 초당 그만큼의 프레임을 그립니다. 각 프레임은 그 순간의 마리오, 카메라, 세계를 보여 주는 실제 프레임입니다(생성된 중간 이미지 없음). 물리, 적, 타이머 등 게임 진행 자체는 원래대로 초당 60단계를 유지합니다. 화면 주사율이나 그 약수(144Hz 화면: 72 또는 144)를 고르고, 그만큼 빠르게 그릴 수 있는 PC가 필요합니다 - 144Hz 화면에서 60 FPS는 부드러울 수 없습니다: 프레임이 2번과 3번 주사를 번갈아 차지합니다(VSync로는 없앨 수 없는 끊김, G-Sync / FreeSync로는 없어짐). '디스플레이에 맞춤'이 그 값을 골라 줍니다. 60 FPS는 Switch와 같고 전력을 가장 적게 씁니다. 바로 바뀝니다.
+Early frame hand-off ||| 빠른 프레임 전달
+On: the game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places at high frame rates: about 10-15% more FPS (132 -> 148 on average at 240 FPS). If you see flickering or broken geometry, set it to Off. Auto: off on Windows for now. ||| 켜기: 그래픽 카드가 이번 프레임을 끝낼 때까지 기다리지 않고, 프레임을 넘기자마자 게임이 다음 프레임을 시작합니다 - 게임과 그리기가 나란히 진행됩니다. 높은 프레임 레이트의 복잡한 장소: FPS가 약 10-15% 올라갑니다(240 FPS 설정에서 평균 132 -> 148). 깜빡임이나 깨진 지오메트리가 보이면 끄기로 하세요. 자동: 지금은 Windows에서 꺼짐.
+On: the game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places at high frame rates: about 10-15% more FPS (132 -> 148 on average at 240 FPS). If you see flickering or broken geometry, set it to Off. Auto: on (as the Steam Deck has always run). ||| 켜기: 그래픽 카드가 이번 프레임을 끝낼 때까지 기다리지 않고, 프레임을 넘기자마자 게임이 다음 프레임을 시작합니다 - 게임과 그리기가 나란히 진행됩니다. 높은 프레임 레이트의 복잡한 장소: FPS가 약 10-15% 올라갑니다(240 FPS 설정에서 평균 132 -> 148). 깜빡임이나 깨진 지오메트리가 보이면 끄기로 하세요. 자동: 켜짐(Steam Deck이 늘 쓰던 방식).
+Multithreaded rendering ||| 멀티스레드 렌더링
+A second CPU thread hands the drawing commands to the graphics driver while the first prepares the next ones. Busy places at high frame rates: about 25-30% more FPS on a fast PC (139 -> 179 at 240 FPS). Uses one more CPU core. If you see flickering, missing objects or crashes, turn it off. ||| 첫 번째 스레드가 다음 그리기 명령을 준비하는 동안 두 번째 CPU 스레드가 그리기 명령을 그래픽 드라이버에 넘깁니다. 높은 프레임 레이트의 복잡한 장소: 빠른 PC에서 FPS가 약 25-30% 올라갑니다(240 FPS 설정에서 139 -> 179). CPU 코어를 하나 더 씁니다. 깜빡임, 사라지는 물체, 충돌이 생기면 끄세요.
+Only set up shaders seen before ||| 이전에 본 셰이더만 미리 준비
+On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS more in busy places), but a new area can stutter a little the first time things appear. Off (default): everything an area loads is prepared ahead. Applies to areas loaded from now on. ||| 켜기: 지역을 불러올 때 게임이 전에(어느 세션에서든) 그린 셰이더만 미리 준비하고, 나머지는 처음 그려질 때까지 기다립니다. 왕국을 불러온 뒤 CPU 여유가 생기지만(Steam Deck: 복잡한 장소에서 약 5 FPS 증가), 새 지역에서는 처음 무언가 나타날 때 약간 끊길 수 있습니다. 끄기(기본값): 지역이 불러오는 모든 것을 미리 준비합니다. 지금부터 불러오는 지역에 적용됩니다.
+Controller: %s  (%s button names) ||| 컨트롤러: %s  (%s 버튼 이름)
+connected ||| 연결됨
+No controller connected  (%s button names shown) ||| 연결된 컨트롤러 없음  (%s 버튼 이름 표시)
+Cappy controller ||| 캐피 컨트롤러
+Not assigned ||| 지정 안 함
+Assign a second controller here, then choose Two Players in the game's pause menu. Mario keeps the current controller and keyboard. Cappy uses this controller's buttons and sticks; secondary motion controls are not available yet. Assignment lasts for this session. ||| 여기에서 두 번째 컨트롤러를 지정한 다음, 게임의 일시 정지 메뉴에서 2인 플레이를 고르세요. 마리오는 지금 컨트롤러와 키보드를 그대로 씁니다. 캐피는 이 컨트롤러의 버튼과 스틱을 씁니다. 두 번째 컨트롤러의 모션 조작은 아직 지원하지 않습니다. 지정은 이번 세션 동안 유지됩니다.
+Select a binding, then press the new button, key, mouse button or wheel. Esc (or 5 seconds) cancels. A button that's already in use swaps with the old one. ||| 바꿀 항목을 고른 다음 새 버튼, 키, 마우스 버튼 또는 휠을 누르세요. Esc(또는 5초)로 취소합니다. 이미 쓰는 버튼은 기존 것과 서로 바뀝니다.
+Controller bindings reset to the defaults. ||| 컨트롤러 설정을 기본값으로 되돌렸습니다.
+Keyboard bindings reset to the defaults. ||| 키보드 설정을 기본값으로 되돌렸습니다.
+%s is now %s. ||| %s: 이제 %s입니다.
+%s is now %s; %s moved to %s (swapped). ||| %s: 이제 %s입니다. %s은(는) %s(으)로 옮겨졌습니다(서로 바꿈).
+Cancelled: %s unchanged. ||| 취소됨: %s은(는) 그대로입니다.
+Nothing pressed: %s unchanged. ||| 아무것도 누르지 않음: %s은(는) 그대로입니다.
+%s available ||| %s 사용 가능
+Downloading %.0f%% ||| 다운로드 중 %.0f%%
+%s installed ||| %s 설치됨
+Downloads %s from GitHub and puts it over this install's program files. Your game files, saves, settings and mods stay. After the restart the game code is rebuilt for the new version if it needs to be (a few minutes, once). ||| GitHub에서 %s을(를) 내려받아 이 설치의 프로그램 파일 위에 덮어씁니다. 게임 파일, 세이브, 설정, 모드는 그대로 남습니다. 다시 시작하면 필요한 경우 새 버전에 맞게 게임 코드를 다시 빌드합니다(한 번, 몇 분).
+Download and install ||| 다운로드 및 설치
+What's new ||| 새로운 점
+Opens the release's page on GitHub in your browser. ||| 브라우저에서 GitHub의 릴리스 페이지를 엽니다.
+Restart now ||| 지금 다시 시작
+Starts the new version. Progress since your last save is lost. ||| 새 버전을 시작합니다. 마지막 저장 이후의 진행은 사라집니다.
+Up to date ||| 최신 버전
+Checking... ||| 확인 중...
+Didn't work ||| 실패
+Not set up ||| 설정 안 됨

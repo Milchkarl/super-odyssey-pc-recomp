@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 #include "theme.h"
+#include "i18n.h"
 
 extern "C" {
 #include "../input_bind.h"
@@ -46,8 +47,8 @@ extern "C" void controls_bindings_draw(float scale) {
     SDL_JoystickID *ids = SDL_GetGamepads(&n);
     const char *pad_name = SDL_GetGamepadNameForID(input_primary_id());
     char line[200];
-    if (n > 0) snprintf(line, sizeof line, "Controller: %s  (%s button names)", pad_name ? pad_name : "connected", fam_name[fam % 3]);
-    else snprintf(line, sizeof line, "No controller connected  (%s button names shown)", fam_name[fam % 3]);
+    if (n > 0) snprintf(line, sizeof line, tr("Controller: %s  (%s button names)"), pad_name ? pad_name : tr("connected"), fam_name[fam % 3]);
+    else snprintf(line, sizeof line, tr("No controller connected  (%s button names shown)"), fam_name[fam % 3]);
     SDL_free(ids);
     ImGui::TextUnformatted(line);
     {
@@ -55,11 +56,11 @@ extern "C" void controls_bindings_draw(float scale) {
         const char *name = selected ? SDL_GetGamepadNameForID(selected) : NULL;
         ImGui::BeginDisabled(!input_primary_id());
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Cappy controller");
+        ImGui::TextUnformatted(tr("Cappy controller"));
         ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##cappy_controller", name ? name : "Not assigned")) {
-            if (ImGui::Selectable("Not assigned", !selected)) input_cappy_assign(0);
+        if (ImGui::BeginCombo("##cappy_controller", name ? name : tr("Not assigned"))) {
+            if (ImGui::Selectable(tr("Not assigned"), !selected)) input_cappy_assign(0);
             int count = 0;
             SDL_JoystickID *pads = SDL_GetGamepads(&count);
             for (int i = 0; i < count; i++) {
@@ -73,13 +74,13 @@ extern "C" void controls_bindings_draw(float scale) {
             ImGui::EndCombo();
         }
         ImGui::EndDisabled();
-        ImGui::TextWrapped("Assign a second controller here, then choose Two Players in the game's pause menu. "
-                          "Mario keeps the current controller and keyboard. Cappy uses this controller's buttons "
-                          "and sticks; secondary motion controls are not available yet. Assignment lasts for this session.");
+        ImGui::TextWrapped("%s", tr("Assign a second controller here, then choose Two Players in the game's pause menu. "
+                                   "Mario keeps the current controller and keyboard. Cappy uses this controller's buttons "
+                                   "and sticks; secondary motion controls are not available yet. Assignment lasts for this session."));
     }
     ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("Select a binding, then press the new button, key, mouse button or wheel. Esc (or 5 seconds) cancels. A button "
-                        "that's already in use swaps with the old one.");
+    ImGui::TextDisabled("%s", tr("Select a binding, then press the new button, key, mouse button or wheel. Esc (or 5 seconds) cancels. A button "
+                                 "that's already in use swaps with the old one."));
     ImGui::PopTextWrapPos();
 
     int cd, cs, ms;
@@ -93,21 +94,21 @@ extern "C" void controls_bindings_draw(float scale) {
     if (serial != seen_serial) {
         seen_serial = serial;
         const char *now = rslot < 0 ? "" : rdev == BIND_DEV_PAD ? bind_pad_label(g_bind_pad[rslot], fam) : bind_key_label(g_bind_key[rslot]);
-        if (kind == 5) snprintf(msg, sizeof msg, "%s bindings reset to the defaults.", rdev == BIND_DEV_PAD ? "Controller" : "Keyboard");
-        else if (kind == 1) snprintf(msg, sizeof msg, "%s is now %s.", bind_input_name(rslot), now);
+        if (kind == 5) snprintf(msg, sizeof msg, "%s", tr(rdev == BIND_DEV_PAD ? "Controller bindings reset to the defaults." : "Keyboard bindings reset to the defaults."));
+        else if (kind == 1) snprintf(msg, sizeof msg, tr("%s is now %s."), bind_input_name(rslot), now);
         else if (kind == 2)
-            snprintf(msg, sizeof msg, "%s is now %s; %s moved to %s (swapped).", bind_input_name(rslot), now,
+            snprintf(msg, sizeof msg, tr("%s is now %s; %s moved to %s (swapped)."), bind_input_name(rslot), now,
                      bind_input_name(rother), rdev == BIND_DEV_PAD ? bind_pad_label(g_bind_pad[rother], fam) : bind_key_label(g_bind_key[rother]));
-        else if (kind == 3) snprintf(msg, sizeof msg, "Cancelled: %s unchanged.", bind_input_name(rslot));
-        else if (kind == 4) snprintf(msg, sizeof msg, "Nothing pressed: %s unchanged.", bind_input_name(rslot));
+        else if (kind == 3) snprintf(msg, sizeof msg, tr("Cancelled: %s unchanged."), bind_input_name(rslot));
+        else if (kind == 4) snprintf(msg, sizeof msg, tr("Nothing pressed: %s unchanged."), bind_input_name(rslot));
         if (kind == 1 || kind == 2 || kind == 5) settings_save();
     }
     if (msg[0]) ImGui::TextColored(kAccentSoftV, "%s", msg);
 
     if (ImGui::BeginTable("##binds", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) {
-        ImGui::TableSetupColumn("Switch", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("Controller", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-        ImGui::TableSetupColumn("Keyboard", ImGuiTableColumnFlags_WidthStretch, 1.3f);
+        ImGui::TableSetupColumn(tr("Switch"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn(tr("Controller"), ImGuiTableColumnFlags_WidthStretch, 1.3f);
+        ImGui::TableSetupColumn(tr("Keyboard"), ImGuiTableColumnFlags_WidthStretch, 1.3f);
         ImGui::TableHeadersRow();
         // in the order a player thinks of them: face buttons, shoulders, Plus / Minus, d-pad, sticks
         static const int order[] = {BIND_A, BIND_B, BIND_X, BIND_Y, BIND_L, BIND_R, BIND_ZL, BIND_ZR, BIND_PLUS,

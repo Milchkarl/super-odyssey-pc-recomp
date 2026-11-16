@@ -890,20 +890,21 @@ static void tab_graphics(void) {
         float sx, sy;
         renderer_get_scale(&sx, &sy);
         char d[1024];  // (400 cut the text off mid-sentence - and the Dynamic line below then wrote past the end)
-        int n = snprintf(d, sizeof d, "How sharp the 3D image is - each choice shows the size it renders at in this window "
+        // (translated in parts - the text, then the size it renders at: tr() finds whole texts only)
+        char at[160];
+        snprintf(at, sizeof at, tr("Rendering at %.0f x %.0f."), 1600.0 * sx, 900.0 * sy);
+        int n = snprintf(d, sizeof d, "%s\n\n%s", tr("How sharp the 3D image is - each choice shows the size it renders at in this window "
                                       "and picture shape. The default, shown as your screen's resolution: that resolution (at least the "
-                                      "Switch's 1600 x 900). 100%%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
-                                      "Dynamic: as sharp as your GPU keeps at full speed. 75%% / 50%% / 25%%: a share of "
+                                      "Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
+                                      "Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of "
                                       "the display, for slower machines; the fixed sizes render at exactly that, above the "
-                                      "screen's for a sharper picture (supersampling).\n\nRendering at %.0f x %.0f.",
-                         1600.0 * sx, 900.0 * sy);
+                                      "screen's for a sharper picture (supersampling)."), at);
         if (g_settings.res_mode == RES_DYNAMIC && n >= 0 && (size_t)n < sizeof d)
-            snprintf(d + n, sizeof d - n, " Dynamic: %.0f%% of the display right now.", output_scale_dynamic_factor() * 100);
+            snprintf(d + n, sizeof d - n, tr(" Dynamic: %.0f%% of the display right now."), output_scale_dynamic_factor() * 100);
 #ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
         if (vk_temporal_enabled()) {
-            snprintf(d, sizeof d, "Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
-                     "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes.\n\n"
-                     "Rendering at %.0f x %.0f.", 1600.0 * sx, 900.0 * sy);
+            snprintf(d, sizeof d, "%s\n\n%s", tr("Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
+                     "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes."), at);
         }
 #endif
         if (opt_choice("Internal resolution", &ri, res, NRES, RES_MATCH_AT, d, false)) g_settings.res_mode = res_mode[ri];
@@ -1337,18 +1338,18 @@ static void tab_updates(float scale) {
     case UPD_IDLE: what = "Check now"; break;
     case UPD_CHECKING: what = "Checking..."; break;
     case UPD_LATEST: what = "Up to date"; break;
-    case UPD_AVAILABLE: snprintf(value, sizeof value, "%s available", s.latest); what = value; break;
-    case UPD_DOWNLOADING: snprintf(value, sizeof value, "Downloading %.0f%%", s.progress * 100); what = value; break;
-    case UPD_READY: snprintf(value, sizeof value, "%s installed", s.latest); what = value; break;
+    case UPD_AVAILABLE: snprintf(value, sizeof value, tr("%s available"), s.latest); what = value; break;
+    case UPD_DOWNLOADING: snprintf(value, sizeof value, tr("Downloading %.0f%%"), s.progress * 100); what = value; break;
+    case UPD_READY: snprintf(value, sizeof value, tr("%s installed"), s.latest); what = value; break;
     case UPD_FAILED: what = "Didn't work"; snprintf(desc, sizeof desc, "%s", s.error); break;
     }
     if (s.state == UPD_UNCONFIGURED || s.state == UPD_CHECKING || s.state == UPD_DOWNLOADING) opt_disable_next();
     if (opt_action("Check for updates", what, desc) && (s.state == UPD_IDLE || s.state == UPD_LATEST || s.state == UPD_FAILED))
         updater_check();
     if (s.can_install && (s.state == UPD_AVAILABLE || s.state == UPD_FAILED)) {
-        snprintf(desc, sizeof desc, "Downloads %s from GitHub and puts it over this install's program files. Your game "
-                                    "files, saves, settings and mods stay. After the restart the game code is rebuilt "
-                                    "for the new version if it needs to be (a few minutes, once).", s.latest);
+        snprintf(desc, sizeof desc, tr("Downloads %s from GitHub and puts it over this install's program files. Your game "
+                                       "files, saves, settings and mods stay. After the restart the game code is rebuilt "
+                                       "for the new version if it needs to be (a few minutes, once)."), s.latest);
         if (opt_action("Download and install", "", desc)) updater_install();
     }
     if (s.state == UPD_READY && opt_action("Restart now", "", "Starts the new version. Progress since your last save is lost."))
