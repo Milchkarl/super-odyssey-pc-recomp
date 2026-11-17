@@ -896,7 +896,10 @@ static void *renderer_tick(void *arg) {
     // clear gain; the gaps come at loads whatever the depth (a long stall, not a short queue).
     int periods = getenv("ODYSSEY_AUDIO_QUEUE") ? atoi(getenv("ODYSSEY_AUDIO_QUEUE")) : 2;
     if (periods < 1 || periods > 8) periods = 2;
-    if (getenv("ODYSSEY_AUDIO_PRIO") && atoi(getenv("ODYSSEY_AUDIO_PRIO"))) plat_thread_realtime((uint64_t)N * 1000000000ull / r->sample_rate);
+    // The mixer at the vsync timer's priority (it sleeps most of the time): during a heavy load the thread itself
+    // went unscheduled for 17 - 49 ms now and then. With the clock-bounded wait below, three runs each: gaps 0 / 0 / 0
+    // at this priority, 2 / 1 without (2026-11-17). ODYSSEY_AUDIO_PRIO=0: the normal priority.
+    if (!getenv("ODYSSEY_AUDIO_PRIO") || atoi(getenv("ODYSSEY_AUDIO_PRIO"))) plat_thread_realtime((uint64_t)N * 1000000000ull / r->sample_rate);
     uint64_t dry = 0, dry_total = 0, dry_t0 = 0, blocks = 0;
     uint64_t w_sync = 0, w_lock = 0, w_mix = 0, w_gap = 0, last_put = 0, w_klock = 0;  // (the window's longest waits, ns)
     if (r->stream) {

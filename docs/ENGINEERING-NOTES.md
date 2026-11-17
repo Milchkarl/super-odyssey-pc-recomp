@@ -134,11 +134,12 @@ That wait was written as 16 sleeps of 0.25 ms. Linux sleeps that accurately. Win
 far longer when the PC is busy, so whenever the game's audio thread was late (a load), the mixer waited 17, 29 and
 90 ms in three measured runs, and the 25 ms device queue ran dry.
 
-What didn't help, measured three runs each: a deeper queue, a higher thread priority, catching up after a stall. They
-treated the symptom. The fix bounds the wait by the clock (4 ms, with a precise sleep) and ends it early when the
+What didn't help on its own, measured three runs each: a deeper queue, a higher thread priority, catching up after a
+stall. With the faulty wait still there they treated the symptom. The fix bounds the wait by the clock (4 ms, with a precise sleep) and ends it early when the
 queue is getting low. Old and new alternating, four runs each (game 1.0.0, a title minute at 120 FPS and a
 load): gaps per run 5, 5, 8, 1 with the old wait and 1, 0, 2, 0 with the new one. The gaps that remain come from the
-mixer thread itself not being scheduled for a moment during a heavy load (its 4 ms wait measured 16.8 ms once).
+mixer thread itself not being scheduled for a moment during a heavy load (its 4 ms wait measured 16.8 ms once). Running
+the mixer at a raised priority on top of the fix removed those too: 0, 0, 0 gaps in three runs, against 2 and 1 without.
 
 *For other projects: never count sleeps to measure time, and log the longest wait of every stage of a real-time loop
 before guessing which one stalls.*
