@@ -252,7 +252,7 @@ bool diagnostics_write_report(char *path, size_t capacity) {
                  "=== Summary ===\n"
                  "What happened: %s\n"
                  "Where: %s (%s+%#llx)\n"
-                 "Stage: %s, frame %llu, %llu min %llu s into the session\n"
+                 "Last stage: %s, frame %llu, %llu min %llu s into the session\n"
                  "Frame rate: setting %d, drawing %d a second; upscaler %s; frame generation %s\n"
                  "Memory: %llu MB in RAM, %llu MB committed, of %llu MB RAM\n"
                  "Game: Super Mario Odyssey %s (build %s); started by %s\n"
