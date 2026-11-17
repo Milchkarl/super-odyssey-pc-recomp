@@ -27,6 +27,7 @@ uint64_t renderer_present_count(void);
 
 typedef struct {
     bool world;  // (world: "world:<stage>", another kingdom)
+    bool hole;   // ("hole:<label>": this kingdom's painting, as entering it does - tests of the painting warp, #72 / #85)
     char stage[128], entrance[128];
     int scenario;
     uint64_t at;
@@ -44,7 +45,8 @@ static void warp_now(Cpu *c, uint64_t scene) {
     uint64_t world = loader_find_symbol("_ZN16GameDataFunction35tryChangeNextStageWithDemoWorldWarpE20GameDataHolderWriterPKc");
     uint64_t ctor = loader_find_symbol("_ZN15ChangeStageInfoC1EPK14GameDataHolderPKcS4_biNS_15SubScenarioTypeE");
     uint64_t change = loader_find_symbol("_ZN16GameDataFunction18tryChangeNextStageE20GameDataHolderWriterPK15ChangeStageInfo");
-    if (g_warps[g_next].world ? !world : (!ctor || !change)) {
+    uint64_t hole = loader_find_symbol("_ZN16GameDataFunction35tryChangeNextStageWithWorldWarpHoleE20GameDataHolderWriterPKc");
+    if (g_warps[g_next].hole ? !hole : g_warps[g_next].world ? !world : (!ctor || !change)) {
         LOG("[warp] required helpers unavailable for this game build: warps off\n");
         g_nwarps = g_next;
         return;
@@ -58,7 +60,12 @@ static void warp_now(Cpu *c, uint64_t scene) {
     memcpy((void *)(uintptr_t)entrance, g_warp.entrance, strlen(g_warp.entrance) + 1);
     memcpy((void *)(uintptr_t)stage, g_warp.stage, strlen(g_warp.stage) + 1);
     c->sp = base;
-    if (g_warp.world) {
+    if (g_warp.hole) {
+        // the painting: GameDataHolder::tryChangeNextStageWithWorldWarpHole picks the other end from the save's world
+        // and sets the stage-change flag itself; the game then plays WorldWarpHoleScene
+        c->x[0] = holder, c->x[1] = stage;
+        guest_call(c, hole);
+    } else if (g_warp.world) {
         // another kingdom: what the Odyssey's takeoff does (next stage with the world warp demo), then the stage-change
         // flag (GameDataHolder+0x49), so rs::tryChangeNextStage ends the scene and HakoniwaSequence flies there
         c->x[0] = holder, c->x[1] = stage;
@@ -154,6 +161,8 @@ static void complete_save(Cpu *c, uint64_t scene) {
 static _Atomic uint64_t g_scene_start, g_last_control;  // (frames + 1, 0 = never)
 static _Atomic uint64_t g_first_scene_start;
 static _Atomic bool g_scene_new;  // StageScene::init ran: the next control call starts a scene (often at the old address)
+static char g_stage_name[128];     // the latest stage's name (crash reports: diagnostics.c)
+const char *odyssey_stage_name(void) { return g_stage_name[0] ? g_stage_name : "none yet"; }
 static GuestFn g_init;
 extern void input_motion_settle(void);
 
@@ -191,7 +200,7 @@ static void stage_scene_control(Cpu *c) {
         g_scene_new = false;
         g_scene_start = now;
         input_motion_settle(); // the first playable update after loading a save/stage
-        if (g_log || g_settings.discord_presence) {  // (the stage's name: the log, and the Discord activity's kingdom)
+        {  // (the stage's name: crash reports, the log, and the Discord activity's kingdom)
             uint64_t current = loader_find_symbol("_ZN16GameDataFunction19getCurrentStageNameE22GameDataHolderAccessor");
             char name[128] = "unknown";
             if (current) {
@@ -204,6 +213,7 @@ static void stage_scene_control(Cpu *c) {
                     snprintf(name, sizeof name, "%.*s", (int)sizeof name - 1, (const char *)(uintptr_t)ptr);
                 *c = saved;
             }
+            snprintf(g_stage_name, sizeof g_stage_name, "%s", name);
             if (current) discord_set_stage(name);
             if (g_log)
                 LOG("[warp] stage scene %llx running at frame %llu stage \"%s\"\n",
@@ -346,6 +356,8 @@ void odyssey_boot(void) {
         memset(w, 0, sizeof *w);
         w->world = !strncmp(spec, "world:", 6);
         if (w->world) memmove(spec, spec + 6, strlen(spec + 6) + 1);
+        w->hole = !strncmp(spec, "hole:", 5);  // ("hole:Go": into this kingdom's painting, the label as the game's own)
+        if (w->hole) memmove(spec, spec + 5, strlen(spec + 5) + 1);
         char *at = strchr(spec, '@');
         w->at = at ? strtoull(at + 1, NULL, 10) : 0;
         if (at) *at = 0;
@@ -356,7 +368,7 @@ void odyssey_boot(void) {
         if (ent) *ent = 0;
         snprintf(w->stage, sizeof w->stage, "%s", spec);
         if (!w->stage[0]) continue;
-        LOG("[warp] armed: %s%s (entrance \"%s\", scenario %d) from frame %llu\n", w->world ? "world " : "", w->stage,
+        LOG("[warp] armed: %s%s (entrance \"%s\", scenario %d) from frame %llu\n", w->world ? "world " : w->hole ? "painting " : "", w->stage,
             w->entrance, w->scenario, (unsigned long long)w->at);
         g_nwarps++;
     }

@@ -40,6 +40,9 @@ static const OdysseyV141Sym ODYSSEY_V141_SYMS[] = {
     {"_ZN15ChangeStageInfoC1EPK14GameDataHolderPKcS4_biNS_15SubScenarioTypeE", 0x700021c040ull},
     {"_ZN16GameDataFunction18tryChangeNextStageE20GameDataHolderWriterPK15ChangeStageInfo", 0x70004d2c50ull},
     {"_ZN16GameDataFunction35tryChangeNextStageWithDemoWorldWarpE20GameDataHolderWriterPKc", 0x70004d2d30ull},
+    // (the painting warp, for the warp tests: 0x20 after the one above as in 1.0.0, a branch to GameDataHolder's at
+    // 0x70004db0f0 - the same code: the +0x49 flag, GameDataFile at +0x20, changeNextStageWithWorldWarpHole, reset)
+    {"_ZN16GameDataFunction35tryChangeNextStageWithWorldWarpHoleE20GameDataHolderWriterPKc", 0x70004d2d50ull},
     {"_ZN16GameDataFunction19getCurrentStageNameE22GameDataHolderAccessor", 0x70004d2df0ull},
     // The menu's Language over the save's (runtime/hle/odyssey_language.c): matched by code shape (tools/match141.py
     // and the disassembly: the 0x38-byte RamReadStream read, then format "%s" into +0x50)
