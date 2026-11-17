@@ -1,21 +1,26 @@
-// Super Odyssey PC Recomp's look (runtime/ui): one palette for the installer, the menu, its option rows, the Controls
-// page, the on-screen keyboard: see-through black panels, white text, and red only as an outline - the selection, the
-// focused button, the shown tab's line. (The icon keeps its pipe green: tools/make_icon.py.)
+// Super Odyssey PC Recomp's look (runtime/ui): one palette for the start page, the menu, its option rows, the Controls
+// page, the on-screen keyboard. Since 0.4.1 (owner 2026-11-17: "same black and red, just more modern and easy to use"):
+// solid charcoal panels and surfaces, white text with a calm grey for the secondary, and red as the colour of action -
+// the primary button filled red, the selected row and sidebar entry tinted red with a red bar on their left.
+// (The icon keeps its pipe green: tools/make_icon.py.)
 #pragma once
 #include "imgui.h"
 
 #define THEME_RGB(r, g, b, a) ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a))
 // the palette
-static const ImVec4 kPanelV = THEME_RGB(0, 0, 0, 0.78f);            // the menu window, the installer's card
-static const ImVec4 kSurfaceV = THEME_RGB(255, 255, 255, 0.05f);    // fields, buttons, rows
-static const ImVec4 kSurfaceHoverV = THEME_RGB(255, 255, 255, 0.09f);  // ... under the mouse / the cursor
-static const ImVec4 kAccentV = THEME_RGB(230, 40, 40, 1);           // red: outlines only (the selection, the shown tab)
-static const ImVec4 kAccentDeepV = THEME_RGB(255, 255, 255, 0.16f); // pressed / active fields
-static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white too)
+static const ImVec4 kPanelV = THEME_RGB(14, 14, 17, 0.97f);         // the menu window, the start page's card
+static const ImVec4 kSidebarV = THEME_RGB(23, 23, 28, 1);           // the menu's sidebar (categories), info boxes
+static const ImVec4 kSurfaceV = THEME_RGB(29, 29, 34, 1);           // fields, buttons, rows
+static const ImVec4 kSurfaceHoverV = THEME_RGB(40, 40, 47, 1);      // ... under the mouse
+static const ImVec4 kAccentV = THEME_RGB(229, 37, 33, 1);           // red: the primary button, the selection's bar
+static const ImVec4 kAccentHotV = THEME_RGB(244, 62, 56, 1);        // ... the primary button under the mouse / cursor
+static const ImVec4 kAccentTintV = THEME_RGB(229, 37, 33, 0.17f);   // the selected row / sidebar entry
+static const ImVec4 kAccentDeepV = THEME_RGB(176, 24, 22, 1);       // pressed
+static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white)
 static const ImVec4 kTextV = THEME_RGB(255, 255, 255, 1);
-static const ImVec4 kTextDimV = THEME_RGB(200, 200, 200, 1);        // secondary text, tabs not shown
-static const ImVec4 kTextOffV = THEME_RGB(115, 115, 115, 1);        // greyed out
-static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.14f);       // separators
+static const ImVec4 kTextDimV = THEME_RGB(168, 168, 178, 1);        // secondary text, categories not shown
+static const ImVec4 kTextOffV = THEME_RGB(98, 98, 108, 1);          // greyed out
+static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.08f);       // separators
 static const ImVec4 kWarnV = THEME_RGB(224, 154, 43, 1);            // a conflict (one key bound twice)
 
 static inline ImU32 theme_u32(ImVec4 c, float alpha = -1) {

@@ -515,6 +515,8 @@ static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Roboto Medium
 static int g_tab, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
 static int g_focus_frames;
+static bool g_sidebar_focused;  // the controller / keyboard cursor is on the sidebar (B there closes the menu)
+static bool g_sidebar_was;      // ... the frame before (B / Esc: ImGui's own cancel drops the focus before the menu looks)
 
 // The menu opening: the controller's cursor starts on the first tab the first time in a session,
 // later on the tab that's selected
@@ -526,14 +528,14 @@ int g_tab_request_ext = -1;
 static void style_init(void) {
     ImGuiStyle &s = ImGui::GetStyle();
     ImGui::StyleColorsDark();
-    s.WindowRounding = 14; s.FrameRounding = 7; s.GrabRounding = 7; s.TabRounding = 0; s.ChildRounding = 8;
-    s.PopupRounding = 10; s.ScrollbarRounding = 7;
-    s.WindowPadding = ImVec2(32, 26); s.FramePadding = ImVec2(14, 8); s.ItemSpacing = ImVec2(14, 12);
-    s.WindowBorderSize = 0; s.ScrollbarSize = 14; s.TabBarBorderSize = 0;
+    s.WindowRounding = 16; s.FrameRounding = 8; s.GrabRounding = 8; s.TabRounding = 0; s.ChildRounding = 10;
+    s.PopupRounding = 12; s.ScrollbarRounding = 8;
+    s.WindowPadding = ImVec2(28, 24); s.FramePadding = ImVec2(16, 9); s.ItemSpacing = ImVec2(14, 12);
+    s.WindowBorderSize = 1; s.ScrollbarSize = 12; s.TabBarBorderSize = 0;
     ImVec4 *c = s.Colors, none(0, 0, 0, 0);
-    // (the menu window: nearly opaque - at the theme's 0.78 the game's own menu showed through behind the rows, its
+    // (the menu window: nearly opaque charcoal - see-through, the game's own menu showed through behind the rows, its
     // white plates reading as text running into them)
-    c[ImGuiCol_WindowBg] = ImVec4(kPanelV.x, kPanelV.y, kPanelV.z, 0.93f);
+    c[ImGuiCol_WindowBg] = kPanelV;
     c[ImGuiCol_ChildBg] = none;
     c[ImGuiCol_PopupBg] = ImVec4(kPanelV.x, kPanelV.y, kPanelV.z, 0.99f);
     c[ImGuiCol_Border] = kLineV;
@@ -542,6 +544,7 @@ static void style_init(void) {
     c[ImGuiCol_FrameBg] = c[ImGuiCol_Button] = c[ImGuiCol_Header] = c[ImGuiCol_TableHeaderBg] = kSurfaceV;
     c[ImGuiCol_FrameBgHovered] = c[ImGuiCol_ButtonHovered] = c[ImGuiCol_HeaderHovered] = kSurfaceHoverV;
     c[ImGuiCol_FrameBgActive] = c[ImGuiCol_ButtonActive] = c[ImGuiCol_HeaderActive] = kAccentDeepV;
+    c[ImGuiCol_PlotHistogram] = kAccentV;  // (progress bars)
     c[ImGuiCol_Tab] = c[ImGuiCol_TabSelected] = c[ImGuiCol_TabSelectedOverline] = none;
     c[ImGuiCol_TabDimmed] = c[ImGuiCol_TabDimmedSelected] = c[ImGuiCol_TabDimmedSelectedOverline] = none;
     c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.06f);
@@ -1881,108 +1884,163 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             if (focused_tab != -99) g_focus_tab = tabs[i].id, g_focus_frames = 0;
         }
     }
-    // Down with the cursor on the tab bar: the page's first row (option rows; other pages keep ImGui's own pick)
-    bool down_from_tab = focused_tab != -99 && ImGui::GetCurrentContext()->NavCursorVisible && !any_popup &&
-                         (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false) ||
-                          ImGui::IsKeyPressed(ImGuiKey_DownArrow, false));
-    opt_focus_first(down_from_tab);
-    // The tabs' side padding, narrower where all names wouldn't fit at the usual one (the Steam Deck's 1280 x 800 cut
-    // "Graphics", "Performance" and "Language" short): each name keeps its full width, the gaps give way
-    float tab_pad = ImGui::GetStyle().FramePadding.x;
+    bool down_from_tab = false;  // (the sidebar: Down moves between categories; Right / A goes into the page)
+    // ---- The sidebar (0.4.1, owner 2026-11-17: "modern, more controller and mouse and keyboard friendly"): the
+    // categories in a column on the left, the page on the right. The controller's cursor on a category shows its page
+    // at once; A / Enter / a click (or Right) goes into the page; B / Esc in a page comes back here (the menu window:
+    // menu_sidebar_focused), B / Esc here closes. L / R (Q / E) switch categories from anywhere.
+    float side_w = 0;
     {
-        float text = 0, inner = ImGui::GetStyle().ItemInnerSpacing.x;
-        for (int k = 0; k < ntabs; k++) {
-            char l[64];
-            snprintf(l, sizeof l, " %s ", tr(tabs[k].name));
-            text += ImGui::CalcTextSize(l).x;
-        }
-        float avail = ImGui::GetContentRegionAvail().x - (ntabs - 1) * inner - 2;
-        // (a few pixels a tab to spare: ImGui rounds each tab's width, and the last one was still cut by a letter)
-        avail -= ntabs * 3 * ImGui::GetFontSize() / 34;
-        if (text + ntabs * 2 * tab_pad > avail) tab_pad = fmaxf(1.0f, (avail - text) / (2 * ntabs));
+        float pad = 22 * scale;
+        for (int k = 0; k < ntabs; k++) side_w = fmaxf(side_w, ImGui::CalcTextSize(tr(tabs[k].name)).x);
+        side_w = fmaxf(side_w + 2 * pad + 8 * scale, 190 * scale);
     }
-    // (the bar lays its tabs out in BeginTabBar, from their widths and the padding then: the same padding there)
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(tab_pad, ImGui::GetStyle().FramePadding.y));
-    bool tab_bar = ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons);
-    ImGui::PopStyleVar();
-    if (tab_bar) {
-        for (int k = 0; k < ntabs; k++) {
-            const Tab &t = tabs[k];
-            ImGuiTabItemFlags f = g_tab_request == t.id && t.on ? ImGuiTabItemFlags_SetSelected : 0;
-            char lbl[64];
-            // (one space each side: with two, nine tabs didn't fit and ImGui cut "Performance" / "Language" short)
-            snprintf(lbl, sizeof lbl, " %s ###tab%d", tr(t.name), t.id);
-            ImGui::BeginDisabled(!t.on);
-            // The tabs are their names (the shown one white, the others dim) with a red line under the shown one.
-            // Focus (controller / keyboard): the tab lights up a little and gets a dim line, instead of ImGui's
-            // outline (it sits 4 px outside the tab and the tab bar's clipping could cut its top off on macOS)
-            // (focused_tab: from the frame before - colours go in before the tab is drawn)
-            bool lit = focused_tab == t.id && ImGui::GetCurrentContext()->NavCursorVisible;
-            ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_Text, k == cur || lit ? kTextV : kTextDimV);
-            int pushed = 2;
-            if (lit) {
-                for (ImGuiCol c : {ImGuiCol_Tab, ImGuiCol_TabHovered, ImGuiCol_TabSelected}) ImGui::PushStyleColor(c, ImVec4(1, 1, 1, 0.07f));
-                pushed += 3;
-            }
-            // (no Prelaunch in game: the cursor starts on the tab that is shown - on Display, the first, it stayed lit
-            // next to the page the menu reopened on: two tabs looked selected)
-            if (g_focus_tab == -1 && !prelaunch) g_focus_tab = -100;
-            // (-100: the shown tab - the one being switched to, when a switch is asked for this frame)
-            bool focus_here = g_focus_tab == t.id || (g_focus_tab == -100 && t.id == (g_tab_request >= 0 ? g_tab_request : g_tab));
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(tab_pad, ImGui::GetStyle().FramePadding.y));
-            bool open = ImGui::BeginTabItem(lbl, NULL, f);
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor(pushed);
-            if (focus_here && !any_popup) {  // the controller's cursor starts on this tab (SetKeyboardFocusHere skips tabs: no tab stop)
-                ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
-                ImGui::SetNavCursorVisible(true);
-                // a few frames: the page's child window appearing makes ImGui pick its first widget once it's laid out
-                if (++g_focus_frames >= 4) g_focus_tab = -99, g_focus_frames = 0;
-                else g_focus_tab = t.id;
-            }
-            if (open || lit) {
-                ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-                float h = 3 * scale > 2 ? 3 * scale : 2, m = 10 * scale;
-                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + m, b.y - h), ImVec2(b.x - m, b.y), open ? kAccent : kAccentDim);
-            }
-            if (ImGui::IsItemFocused()) focused_tab = t.id;
-            else if (focused_tab == t.id) focused_tab = -99;
-            ImGui::EndDisabled();
-            if (open) {
-                g_tab = t.id;
-                ImGui::Spacing();
-                ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None,  // (the rest of the window: no hint line)
-                                  ImGuiWindowFlags_NavFlattened);
-                // Down from the tab bar, pages that aren't option rows (Controls): their first control
-                // (option-row pages: opt_focus_first)
-                if (down_from_tab && (t.id == -1 || t.id == 8)) {
-                    opt_focus_first(false);
-                    ImGui::SetKeyboardFocusHere();
-                    ImGui::SetNavCursorVisible(true);
-                }
-                switch (t.id) {
-                case -1: prelaunch(scale); break;
-                case 0: tab_display(); break;
-                case 3: tab_graphics(); break;
-                case 4: tab_performance(); break;
-                case 1: tab_audio(); break;
-                case 2: tab_mods(scale); break;
-                case 8: tab_about(); break;
-                case 9: tab_quit(scale); break;
-                case 10: tab_updates(scale); break;
-                case 11: tab_language(); break;
-                }
-                static const char *scroll_test = getenv("ODYSSEY_MENU_SCROLL");  // test hook: page scroll, 0..1
-                if (scroll_test) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(scroll_test));
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
+    g_sidebar_was = g_sidebar_focused;
+    float item_h = ImGui::GetFontSize() * 2.05f;
+    int show = g_tab_request >= 0 || g_tab_request == -1 ? g_tab_request : tabs[cur].id;  // (the page drawn this frame)
+    bool enter_page = down_from_tab;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kSidebarV);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8 * scale, 8 * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4 * scale));
+    ImGui::BeginChild("##nav", ImVec2(side_w, 0), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar);
+    for (int k = 0; k < ntabs; k++) {
+        const Tab &t = tabs[k];
+        ImGui::PushID(t.id + 1000);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float w = ImGui::GetContentRegionAvail().x;
+        ImGui::BeginDisabled(!t.on);
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the tint and the bar)
+        bool clicked = ImGui::InvisibleButton("##cat", ImVec2(w, item_h), ImGuiButtonFlags_EnableNav);
+        ImGui::PopStyleColor();
+        // (no Prelaunch in game: the cursor starts on the category that is shown)
+        if (g_focus_tab == -1 && !prelaunch) g_focus_tab = -100;
+        bool focus_here = g_focus_tab == t.id || (g_focus_tab == -100 && t.id == show);
+        if (focus_here && !any_popup) {  // the controller's cursor starts on this category
+            ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+            ImGui::SetNavCursorVisible(true);
+            if (++g_focus_frames >= 4) g_focus_tab = -99, g_focus_frames = 0;
+            else g_focus_tab = t.id;
         }
-        g_tab_request = -2;
-        opt_focus_first(false);  // (a page without option rows: nothing took it)
-        ImGui::EndTabBar();
+        bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
+        if (ImGui::IsItemFocused()) focused_tab = t.id;
+        else if (focused_tab == t.id) focused_tab = -99;
+        // the cursor arriving on a category shows its page (not the mouse passing over: that only lights it)
+        if (foc && t.on && t.id != show && g_focus_tab == -99) g_tab_request = show = t.id;
+        if (clicked && t.on) {
+            g_tab_request = show = t.id;
+            if (ImGui::GetCurrentContext()->NavCursorVisible) enter_page = true;  // (A / Enter: into the page)
+        }
+        if (foc && t.on && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)))
+            enter_page = true;
+        bool sel = t.id == show;
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        float r = 8 * scale, bar = fmaxf(2, 4 * scale), fs = ImGui::GetFontSize();
+        if (sel) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kAccentTintV), r);
+        else if (hov || foc) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kSurfaceHoverV), r);
+        if (sel || foc) dl->AddRectFilled(ImVec2(p.x, p.y + item_h * 0.22f), ImVec2(p.x + bar, p.y + item_h * 0.78f),
+                                          sel ? kAccent : kAccentDim, bar * 0.5f);
+        if (foc) dl->AddRect(p, ImVec2(p.x + w, p.y + item_h), sel ? theme_u32(kTextV, 0.55f) : kAccentDim, r, 0, fmaxf(1, 1.5f * scale));
+        dl->AddText(ImVec2(p.x + 18 * scale, p.y + (item_h - fs) * 0.5f), !t.on ? kTextOff : sel || foc || hov ? kText : kTextDim,
+                    tr(t.name));
+        ImGui::EndDisabled();
+        ImGui::PopID();
     }
+    ImGui::EndChild();
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor();
+    g_sidebar_focused = focused_tab != -99;
+    ImGui::SameLine(0, 20 * scale);
+
+    // ---- the page
+    for (int k = 0; k < ntabs; k++) if (tabs[k].id == show) cur = k;
+    g_tab = tabs[cur].id;
+    opt_focus_first(enter_page);
+    ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+    {   // the page's title: the category, large
+        ImGui::PushFont(g_font_big);
+        ImGui::TextUnformatted(tr(tabs[cur].name));
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0, 2 * scale));
+    }
+    // pages that aren't option rows (Controls, Prelaunch): their first control
+    if (enter_page && (g_tab == -1 || g_tab == 8)) {
+        opt_focus_first(false);
+        ImGui::SetKeyboardFocusHere();
+        ImGui::SetNavCursorVisible(true);
+    }
+    switch (g_tab) {
+    case -1: prelaunch(scale); break;
+    case 0: tab_display(); break;
+    case 3: tab_graphics(); break;
+    case 4: tab_performance(); break;
+    case 1: tab_audio(); break;
+    case 2: tab_mods(scale); break;
+    case 8: tab_about(); break;
+    case 9: tab_quit(scale); break;
+    case 10: tab_updates(scale); break;
+    case 11: tab_language(); break;
+    }
+    static const char *scroll_test = getenv("ODYSSEY_MENU_SCROLL");  // test hook: page scroll, 0..1
+    if (scroll_test) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(scroll_test));
+    ImGui::EndChild();
+    g_tab_request = -2;
+    opt_focus_first(false);  // (a page without option rows: nothing took it)
+}
+
+// ---- The hint bar (0.4.1): at the bottom of the menu, what each button does right now, with the player's own
+// buttons - the controller's names when it was used last (Xbox A / B / LB / RB, PlayStation Cross / Circle / L1 / R1,
+// Nintendo A / B / L / R), else the keyboard's - as small key caps.
+extern "C" int input_pad_family(void);  // runtime/hle/input.c: 1 Xbox, 2 PlayStation, 0 Nintendo / other
+// (the start page, setup.mm: its Settings view uses the sidebar too, with its own B / Esc and hint bar)
+bool menu_sidebar_focused(void) { return g_sidebar_was; }
+void menu_focus_sidebar(void) { g_focus_tab = -100, g_focus_frames = 0; }
+float menu_hint_bar_height(float scale) { return ImGui::GetFontSize() * 0.8f + 30 * scale; }
+static float hint_bar_height(float scale) { return menu_hint_bar_height(scale); }
+static void key_cap(ImDrawList *dl, ImVec2 &at, const char *key, const char *what, float scale) {
+    ImFont *f = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.8f, padx = 9 * scale, h = fs + 10 * scale;
+    ImVec2 ks = f->CalcTextSizeA(fs, FLT_MAX, 0, key), ws = f->CalcTextSizeA(fs, FLT_MAX, 0, tr(what));
+    float kw = fmaxf(ks.x + 2 * padx, h);
+    dl->AddRectFilled(at, ImVec2(at.x + kw, at.y + h), theme_u32(kSurfaceHoverV), 6 * scale);
+    dl->AddRect(at, ImVec2(at.x + kw, at.y + h), theme_u32(kTextV, 0.25f), 6 * scale, 0, fmaxf(1, scale));
+    dl->AddText(f, fs, ImVec2(at.x + (kw - ks.x) * 0.5f, at.y + (h - fs) * 0.5f), kText, key);
+    dl->AddText(f, fs, ImVec2(at.x + kw + 8 * scale, at.y + (h - fs) * 0.5f), kTextDim, tr(what));
+    at.x += kw + 8 * scale + ws.x + 26 * scale;
+}
+// mode: 0 the menu in game, 1 the start page's settings, 2 the start page's home (Play / Settings / Exit)
+void menu_hint_bar(float scale, int mode);
+static void hint_bar(float scale, bool in_game) { menu_hint_bar(scale, in_game ? 0 : 1); }
+void menu_hint_bar(float scale, int mode) {
+    ImGuiContext *g = ImGui::GetCurrentContext();
+    bool pad = g->NavInputSource == ImGuiInputSource_Gamepad;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 at = ImGui::GetCursorScreenPos();
+    float w = ImGui::GetContentRegionAvail().x;
+    dl->AddLine(ImVec2(at.x, at.y + 4 * scale), ImVec2(at.x + w, at.y + 4 * scale), theme_u32(kLineV), fmaxf(1, scale));
+    at.y += 14 * scale;
+    const char *back = g_sidebar_focused || !g->NavCursorVisible ? (mode == 0 ? "Close" : "Back") : "Back";
+    if (mode == 2) {  // (home: the buttons only)
+        int fam = input_pad_family();
+        if (pad) key_cap(dl, at, fam == 2 ? "Cross" : "A", "Select", scale), key_cap(dl, at, fam == 2 ? "Options" : fam == 1 ? "Menu" : "Plus", "Play", scale);
+        else key_cap(dl, at, "Up / Down", "Move", scale), key_cap(dl, at, "Enter", "Select", scale);
+    } else if (pad) {
+        int fam = input_pad_family();
+        const char *ok = fam == 2 ? "Cross" : "A", *no = fam == 2 ? "Circle" : "B";
+        const char *lr = fam == 2 ? "L1 / R1" : fam == 1 ? "LB / RB" : "L / R";
+        key_cap(dl, at, lr, "Category", scale);
+        key_cap(dl, at, ok, "Select", scale);
+        key_cap(dl, at, no, back, scale);
+    } else {
+        key_cap(dl, at, "Q / E", "Category", scale);
+        key_cap(dl, at, "Enter", "Select", scale);
+        key_cap(dl, at, "Left / Right", "Change", scale);
+        key_cap(dl, at, "Esc", back, scale);
+    }
+    ImGui::Dummy(ImVec2(w, hint_bar_height(scale)));
 }
 
 void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*prelaunch)(float)) {
@@ -2248,8 +2306,11 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     if (open) {
         // dim the game behind the menu
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130));
-        // a window in the middle with the game around it: about 55% x 70% of the picture (40% of it)
-        float w = fminf(io.DisplaySize.x * 0.55f, 1560 * scale), h = fminf(io.DisplaySize.y * 0.72f, 1100 * scale);
+        // a window in the middle with the game around it: about 68% x 80% of the picture; on small screens (the Steam
+        // Deck's 1280 x 800) nearly all of it, so the sidebar leaves the rows room (0.4.1)
+        bool small = io.DisplaySize.x <= 1600;
+        float w = small ? io.DisplaySize.x * 0.94f : fminf(io.DisplaySize.x * 0.68f, 1800 * scale);
+        float h = small ? io.DisplaySize.y * 0.92f : fminf(io.DisplaySize.y * 0.80f, 1200 * scale);
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
@@ -2287,14 +2348,20 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         ImGui::Separator();
 
         bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
+        float hint_h = hint_bar_height(scale);
+        ImGui::BeginChild("##body", ImVec2(0, -hint_h), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
         tabs_body(scale, NULL);
+        ImGui::EndChild();
+        hint_bar(scale, true);
         ptbr_dialog(scale);
         quit_dialog(scale);
-        // B with nothing focused-deeper closes the menu (not the Esc / B that ends typing: typing is from the frame
-        // before, so it's still true the frame a field lets go)
+        // B / Esc (not the one that ends typing: typing is from the frame before, so it's still true the frame a field
+        // lets go): in a page, back to the sidebar; on the sidebar (or with the mouse), the menu closes
         if (!any_popup && !typing && !ui_text_busy() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-            (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
-            set_open(false);
+            (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+            if (!g_sidebar_was && ImGui::GetCurrentContext()->NavCursorVisible) g_focus_tab = -100, g_focus_frames = 0;
+            else set_open(false);
+        }
         ImGui::PopFont();
         g_font_big = keep_big;
         ImGui::End();

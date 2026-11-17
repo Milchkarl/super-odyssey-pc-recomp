@@ -27,6 +27,7 @@
 #endif
 
 #include "imgui.h"
+#include "imgui_internal.h"  // (SetFocusID, NavCursorVisible: the start page's cursor)
 #include "theme.h"
 #include "i18n.h"
 #include "backdrop.h"
@@ -48,6 +49,7 @@ extern "C" {
 #include "../romfs_build.h"
 #include "../rt.h"
 #include "../settings.h"
+#include "../version.h"
 #ifdef __APPLE__
 void *ui_metal_layer(void);
 void *ui_metal_device(void);
@@ -448,22 +450,36 @@ enum { DLG_NONE, DLG_GAME_FILE, DLG_GAME_FOLDER, DLG_KEYS, DLG_DEST, DLG_UPDATE 
 static std::atomic<int> g_want_dialog{DLG_NONE};  // (dialogs open on the main thread)
 static std::atomic<bool> g_want_install{false}, g_want_play{false};
 
-static bool accent_button(const char *label, float scale, bool enabled = true) {
+// The primary button (0.4.1): filled red, white text; size.x > 0: that width. The controller / keyboard cursor on it:
+// a white outline (red on red wouldn't show).
+static bool accent_button(const char *label, float scale, bool enabled = true, ImVec2 size = ImVec2(0, 0)) {
     ImGui::BeginDisabled(!enabled);
-    // (black inside, a red outline, white text)
-    ImGui::PushStyleColor(ImGuiCol_Button, kSurfaceV);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kSurfaceHoverV);
+    ImGui::PushStyleColor(ImGuiCol_Button, kAccentV);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccentHotV);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccentDeepV);
-    ImGui::PushStyleColor(ImGuiCol_NavCursor, kAccentV);
-    ImGui::PushStyleColor(ImGuiCol_Border, kAccentV);
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, kTextV);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextV);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(34 * scale, 14 * scale));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6 * scale);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2 * scale);
-    bool r = ImGui::Button(tr(label));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0);
+    bool r = ImGui::Button(tr(label), size);
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(5);
     ImGui::EndDisabled();
     return r && enabled;
+}
+// The secondary button: a charcoal surface, lighter under the mouse; the cursor on it: a red outline
+static bool plain_button(const char *label, float scale, ImVec2 size = ImVec2(0, 0)) {
+    ImGui::PushStyleColor(ImGuiCol_Button, kSurfaceV);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kSurfaceHoverV);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccentDeepV);
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, kAccentV);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(34 * scale, 14 * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10 * scale);
+    bool r = ImGui::Button(tr(label), size);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(4);
+    return r;
 }
 static bool small_button(const char *label, float scale) {
     ImGui::PushStyleColor(ImGuiCol_Button, kSurfaceHoverV);
@@ -648,6 +664,99 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
 }
 #endif
 
+// The start page (0.4.1, owner 2026-11-17: the start option "awkward to use and to start the game"; "modern, more
+// controller and mouse and keyboard friendly"). Home first: the name, a large red Play with the cursor on it, Settings
+// and Exit under it, whether this page shows at start, and the settings that matter most at a glance. Settings: the
+// menu's own sidebar and pages, with Play and Back at the bottom. Start (or Enter on Home) plays from either view.
+bool menu_sidebar_focused(void);
+void menu_focus_sidebar(void);
+void menu_hint_bar(float scale, int mode);
+float menu_hint_bar_height(float scale);
+static bool g_cfg_settings;      // the Settings view (else Home)
+static int g_cfg_focus = 1;      // put the cursor on Play (1) / Settings (2) next frame; 0: leave it
+static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float cardh, float pad) {
+    float hint_h = menu_hint_bar_height(scale);
+    float colw = fminf(560 * scale, cardw * 0.42f), bw = colw;
+    float bh = ImGui::GetFontSize() + 2 * 14 * scale;
+    // the left column: the buttons, centred in the card's height
+    float stack = bh * 1.35f + 2 * (bh + 14 * scale) + 70 * scale;
+    float y0 = c0.y + fmaxf(pad * 3.2f, (cardh - stack) * 0.5f);
+    ImGui::SetCursorScreenPos(ImVec2(c0.x + pad * 1.6f, y0));
+    ImGui::BeginGroup();
+    ImGui::PushFont(big);
+    if (accent_button("Play", scale, true, ImVec2(bw, bh * 1.35f))) g_config_result = 1;
+    ImGui::PopFont();
+    if (g_cfg_focus == 1) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
+    ImGui::Dummy(ImVec2(0, 6 * scale));
+    if (plain_button("Settings", scale, ImVec2(bw, bh))) { g_cfg_settings = true; menu_focus_sidebar(); }
+    if (g_cfg_focus == 2) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
+    if (plain_button("Exit", scale, ImVec2(bw, bh))) g_config_result = 2;
+    ImGui::Dummy(ImVec2(0, 10 * scale));
+    ImGui::PushStyleColor(ImGuiCol_CheckMark, kTextV);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, kSurfaceV);
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, kAccentV);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+    if (ImGui::Checkbox(tr("Show this screen at every start"), &g_settings.config_at_start)) settings_save();
+    ImGui::PopStyleColor(4);
+    ImGui::EndGroup();
+
+    // the right column: the settings that matter most, at a glance (Settings changes them)
+    float rx = c0.x + pad * 1.6f + colw + pad * 2.2f, rw = c0.x + cardw - pad * 1.6f - rx;
+    if (rw > 260 * scale) {
+        ImGui::SetCursorScreenPos(ImVec2(rx, y0));
+        ImGui::BeginGroup();
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        ImVec2 b0 = ImGui::GetCursorScreenPos();
+        float lh = ImGui::GetFontSize() * 1.75f;
+        static const char *const modes[] = {"Windowed", "Borderless", "Exclusive fullscreen"};
+        static const char *const aas[] = {"Off", "SMAA", "FXAA"};
+        static const char *const warm[] = {"Auto", "Normal", "Long"};
+        char fps[32], up[64];
+        snprintf(fps, sizeof fps, "%d FPS", settings_game_hz());
+        static const char *const tech[TEMPORAL_BACKEND_COUNT] = {"NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4", "Intel XeSS", "AMD FSR 2"};
+        int tb = g_settings.temporal_backend;
+        snprintf(up, sizeof up, "%s", g_settings.temporal_off || tb < 0 || tb >= TEMPORAL_BACKEND_COUNT ? tr("Off") : tech[tb]);
+        struct { const char *k; const char *v; } rows[] = {
+            {"Display mode", tr(modes[g_settings.window_mode >= 0 && g_settings.window_mode < 3 ? g_settings.window_mode : 1])},
+            {"Frame rate", fps},
+            {"Upscale method", up},
+            {"Anti-aliasing", tr(aas[g_settings.antialias >= 0 && g_settings.antialias < 3 ? g_settings.antialias : 0])},
+            {"Warm-up at start", tr(warm[g_settings.warmup >= 0 && g_settings.warmup < 3 ? g_settings.warmup : 0])},
+        };
+        int n = (int)(sizeof rows / sizeof *rows);
+        float boxh = 30 * scale + ImGui::GetFontSize() * 1.6f + n * lh + lh * 0.6f + 20 * scale;
+        dl->AddRectFilled(b0, ImVec2(b0.x + rw, b0.y + boxh), theme_u32(kSidebarV), 14 * scale);
+        dl->AddRect(b0, ImVec2(b0.x + rw, b0.y + boxh), theme_u32(kLineV), 14 * scale, 0, fmaxf(1, scale));
+        ImGui::SetCursorScreenPos(ImVec2(b0.x + 24 * scale, b0.y + 20 * scale));
+        ImGui::TextColored(kTextDimV, "%s", tr("YOUR SETTINGS"));
+        ImGui::Dummy(ImVec2(0, 4 * scale));
+        for (int i = 0; i < n; i++) {
+            ImGui::SetCursorScreenPos(ImVec2(b0.x + 24 * scale, ImGui::GetCursorScreenPos().y));
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            dl->AddText(p, kTextDim, tr(rows[i].k));
+            ImVec2 vs = ImGui::CalcTextSize(rows[i].v);
+            dl->AddText(ImVec2(b0.x + rw - 24 * scale - vs.x, p.y), kText, rows[i].v);
+            ImGui::Dummy(ImVec2(rw - 48 * scale, lh));
+        }
+        ImGui::SetCursorScreenPos(ImVec2(b0.x, b0.y + boxh + 14 * scale));
+        if (plat_is_steam_deck()) {  // (the owner's finding, 2026-11-15: at a low power limit the GPU clock decides the frame rate)
+            ImGui::PushTextWrapPos(b0.x + rw);
+            ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+            ImGui::TextWrapped("%s", tr("Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set "
+                               "it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS."));
+            ImGui::PopStyleColor();
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::EndGroup();
+    }
+    ImGui::SetCursorScreenPos(ImVec2(c0.x + pad, c0.y + cardh - hint_h - pad * 0.6f));
+    ImGui::BeginGroup();
+    ImGui::PushItemWidth(cardw - 2 * pad);
+    menu_hint_bar(scale, 2);
+    ImGui::PopItemWidth();
+    ImGui::EndGroup();
+}
+
 static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -657,34 +766,28 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGui::PushFont(font);
     backdrop_draw(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, ImGui::GetTime());
     float margin = 22 * scale, pad = 28 * scale;
-    float cardw = fminf(io.DisplaySize.x - 2 * margin, fmaxf(1240 * scale, io.DisplaySize.x * 0.82f)), cardh = io.DisplaySize.y - 2 * margin;
+    float cardw = fminf(io.DisplaySize.x - 2 * margin, fmaxf(1240 * scale, io.DisplaySize.x * 0.84f)), cardh = io.DisplaySize.y - 2 * margin;
     ImVec2 c0((io.DisplaySize.x - cardw) * 0.5f, margin);
     ImDrawList *bg = ImGui::GetWindowDrawList();
-    bg->AddRectFilled(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kPanelV, 0.86f), 14 * scale);  // (over a bright backdrop)
-    bg->AddRect(c0, ImVec2(c0.x + cardw, c0.y + cardh), IM_COL32(255, 255, 255, 28), 14 * scale, 0, 2 * scale);
-    float colw = cardw - 2 * pad;
-    ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + pad * 0.7f));
+    bg->AddRectFilled(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kPanelV), 18 * scale);
+    bg->AddRect(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kLineV), 18 * scale, 0, fmaxf(1, scale));
+    // the header: the pipe, the name and the version; in Settings, "Settings" after it
+    ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + pad * 0.8f));
     ImGui::BeginGroup();
     ImGui::PushFont(big);
     {
-        float lh = ImGui::GetFontSize(), sz = lh * 1.1f;
+        float lh = ImGui::GetFontSize(), sz = lh * 1.15f;
         ImVec2 lp = ImGui::GetCursorScreenPos();
         theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.55f), sz, IM_COL32(59, 196, 90, 255), 0);
         ImGui::Dummy(ImVec2(sz, lh));
-        ImGui::SameLine(0, lh * 0.35f);
-        ImGui::TextUnformatted(tr("Configuration"));
+        ImGui::SameLine(0, lh * 0.4f);
+        ImGui::TextUnformatted(g_cfg_settings ? tr("Settings") : "Super Odyssey PC Recomp");
     }
     ImGui::PopFont();
+    ImGui::SameLine(0, 14 * scale);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8 * scale);
+    ImGui::TextColored(kTextDimV, "%s %s", tr("Version"), APP_VERSION);
     ImGui::EndGroup();
-    if (plat_is_steam_deck()) {  // (the owner's finding, 2026-11-15: at a low power limit the GPU clock decides the frame rate)
-        ImGui::SetCursorPosX(c0.x + pad);
-        ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::PushTextWrapPos(c0.x + cardw - pad);
-        ImGui::TextWrapped("%s", tr("Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set "
-                           "it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS."));
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-    }
 #ifndef __APPLE__
     if (g_prep.load() == PREP_ASK || g_prep.load() == PREP_RUN) {  // (the shader preparation: this card only)
         prep_card(scale, big, c0, cardw, cardh, pad);
@@ -693,41 +796,31 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         return;
     }
 #endif
-    float footer = 84 * scale;
-    float top = ImGui::GetCursorPosY();
-    ImGui::SetCursorPos(ImVec2(c0.x + pad * 0.4f, top));
-    ImGui::BeginChild("##cfgtabs", ImVec2(cardw - pad * 0.8f, c0.y + cardh - top - footer - pad * 0.4f), ImGuiChildFlags_None,
-                      ImGuiWindowFlags_NoBackground);
-    menu_tabs_draw(scale, font, big, false, NULL);
-    ImGui::EndChild();
-
-    // the footer: Play, Exit, and whether this page shows at start
-    ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + cardh - footer + 6 * scale));
-    ImVec2 lp = ImGui::GetCursorScreenPos();
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(lp.x, lp.y - 8 * scale), ImVec2(lp.x + colw, lp.y - 8 * scale),
-                                        IM_COL32(255, 255, 255, 22), 1.0f * scale);
-    if (accent_button("Play", scale)) g_config_result = 1;  // (the controller's cursor starts on the first tab: config_run)
-    ImGui::SameLine(0, 16 * scale);
-    if (accent_button("Exit", scale)) g_config_result = 2;
-    ImGui::SameLine(0, 32 * scale);
-    {
-        float bh = ImGui::GetFrameHeight() + 28 * scale - ImGui::GetFrameHeight();  // (the buttons' height: their padding)
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (bh - ImGui::GetTextLineHeight()) * 0.5f + 7 * scale);
-        ImGui::PushStyleColor(ImGuiCol_CheckMark, kTextV);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, kSurfaceV);
-        ImGui::PushStyleColor(ImGuiCol_NavCursor, kAccentV);
-        if (ImGui::Checkbox(tr("Show this screen at every start"), &g_settings.config_at_start)) settings_save();
-        ImGui::PopStyleColor(3);
-    }
-    {   // (the controller's hint, at the right)
-        const char *hint = tr("Start: Play");
-        ImGui::SetWindowFontScale(0.8f);
-        ImVec2 ts = ImGui::CalcTextSize(hint);
-        ImGui::SameLine(c0.x + cardw - pad - ts.x);
-        ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextUnformatted(hint);
-        ImGui::PopStyleColor();
-        ImGui::SetWindowFontScale(1);
+    bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+    if (!g_cfg_settings) {
+        home_view(scale, big, c0, cardw, cardh, pad);
+    } else {
+        float footer = ImGui::GetFontSize() + 2 * 14 * scale + menu_hint_bar_height(scale) + 30 * scale;
+        float top = ImGui::GetCursorPosY() + 10 * scale;
+        ImGui::SetCursorPos(ImVec2(c0.x + pad, top));
+        ImGui::BeginChild("##cfgtabs", ImVec2(cardw - 2 * pad, c0.y + cardh - top - footer), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NavFlattened);
+        menu_tabs_draw(scale, font, big, false, NULL);
+        ImGui::EndChild();
+        // the footer: Play and Back, then the hint bar
+        ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + cardh - footer + 8 * scale));
+        if (accent_button("Play", scale)) g_config_result = 1;
+        ImGui::SameLine(0, 14 * scale);
+        if (plain_button("Back", scale)) { g_cfg_settings = false; g_cfg_focus = 2; }
+        ImGui::SetCursorPosX(c0.x + pad);
+        ImGui::BeginGroup();
+        menu_hint_bar(scale, 1);
+        ImGui::EndGroup();
+        // B / Esc: in a page, back to the sidebar; on the sidebar, back to Home
+        if (!any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+            if (!menu_sidebar_focused() && ImGui::GetCurrentContext()->NavCursorVisible) menu_focus_sidebar();
+            else { g_cfg_settings = false; g_cfg_focus = 2; }
+        }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) g_config_result = 1;
     ImGui::PopFont();
@@ -797,6 +890,7 @@ bool config_run(void) {
     menu_setup_mode(true);
     static const char *shot = getenv("ODYSSEY_CONFIG_SHOT");  // (test) <frame>: the page as build/config.png, then Play
     if (getenv("ODYSSEY_MENU_TAB")) { extern int g_tab_request_ext; g_tab_request_ext = atoi(getenv("ODYSSEY_MENU_TAB")); }  // (tests: that tab)
+    if (const char *v = getenv("ODYSSEY_CONFIG_VIEW"); v && !strcmp(v, "settings")) g_cfg_settings = true, g_cfg_focus = 0;  // (tests)
     long frame = 0;
     int result = 0;
     {   // controllers: SDL sends their buttons only for opened ones - the game's input (input.c) opens them later, so the

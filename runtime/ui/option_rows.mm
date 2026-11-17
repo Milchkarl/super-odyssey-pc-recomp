@@ -28,11 +28,17 @@ void opt_focus_first(bool on) { g_focus_req = on; }
 static bool g_held;  // the last row's left / right has been held a while (steppers go faster)
 void opt_indent(int step) { g_indent = g_indent + step < 0 ? 0 : g_indent + step; }
 
+static int g_lr_block_until = -1;  // (frame count) left / right don't change a row until then
 void opt_begin(const char *id, float scale) {
     g_scale = scale;
     g_take_first = g_focus_req;
     g_focus_req = false;
-    if (g_take_first) ImGui::NavMoveRequestCancel();  // (this frame's Down goes to the first row instead)
+    if (g_take_first) {
+        ImGui::NavMoveRequestCancel();  // (this frame's Down goes to the first row instead)
+        // (the Right / A that came into the page from the sidebar isn't also the first row's change - it flipped
+        // "Early frame hand-off" when entering Performance)
+        g_lr_block_until = ImGui::GetFrameCount() + 1;
+    }
     g_indent = 0;
     g_desc_hover.clear(), g_desc_focus.clear();
     g_page = id;
@@ -78,14 +84,15 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         g_take_first = false;
         ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
         ImGui::SetNavCursorVisible(true);
-        ImGui::SetScrollHereY(0);
+        ImGui::SetScrollY(0);  // (the page's top: its first section's heading stays in view)
     }
     bool off = g_next_disabled;  // (greyed out: still selectable, so its description shows, but it can't change)
     g_next_disabled = false;
     bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
-    int step = clicked && !off ? 2 : 0;
+    bool blocked = ImGui::GetFrameCount() <= g_lr_block_until;
+    int step = clicked && !off && !blocked ? 2 : 0;
     g_held = false;
-    if (foc && !off) {
+    if (foc && !off && !blocked) {
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, repeat) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft, repeat) ||
             ImGui::IsKeyPressed(ImGuiKey_LeftArrow, repeat))
             step = -1;
@@ -105,10 +112,14 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     if (g_desc_first.empty() && desc) g_desc_first = desc;
 
     ImDrawList *dl = ImGui::GetWindowDrawList();
-    float r = 4 * g_scale, pad = 20 * g_scale, fs = ImGui::GetFontSize(), bar = 4 * g_scale > 2 ? 4 * g_scale : 2;
+    float r = 8 * g_scale, pad = 22 * g_scale, fs = ImGui::GetFontSize(), bar = 4 * g_scale > 2 ? 4 * g_scale : 2;
     bool lit = hov || foc;
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), theme_u32(lit ? kSurfaceHoverV : kSurfaceV), r);
-    if (lit) dl->AddRect(p, ImVec2(p.x + w, p.y + h), off ? kAccentDim : foc ? kAccent : kAccentDim, r, 0, bar * 0.5f);  // (red outline)
+    // (0.4.1 look: the selected row tinted red with a red bar on its left; under the mouse a lighter surface)
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), theme_u32(hov && !foc ? kSurfaceHoverV : kSurfaceV), r);
+    if (foc) {
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), theme_u32(kAccentTintV, off ? 0.08f : kAccentTintV.w), r);
+        dl->AddRectFilled(ImVec2(p.x, p.y + h * 0.18f), ImVec2(p.x + bar, p.y + h * 0.82f), off ? kAccentDim : kAccent, bar * 0.5f);
+    }
     std::string t = label;
     if (upper)
         for (char &c : t) c = (char)toupper((unsigned char)c);
