@@ -194,6 +194,10 @@ static void *heap_trim_thread(void *arg) {
 }
 
 void plat_init(void) {
+    // (4 malloc arenas, not up to 8 per core: the game's many threads spread freed memory over up to 32 arenas, which
+    // kept growing in RAM over a session on a Steam Deck; with 4 their memory stayed flat, FPS unchanged - 2026-11-16.
+    // MALLOC_ARENA_MAX set in the environment wins.)
+    if (!getenv("MALLOC_ARENA_MAX")) mallopt(M_ARENA_MAX, 4);
     log_to_file_without_terminal();
     require_cpu();
     const char *e = getenv("ODYSSEY_HEAP_TRIM");
