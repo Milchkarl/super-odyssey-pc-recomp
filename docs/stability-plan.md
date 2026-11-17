@@ -128,6 +128,19 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   (NVIDIA, 1600x900 window): averages 113.9-117.0 FPS, 0 skipped draws, 4 frames over 20 ms in play (worst 42 ms,
   Metro's crowd, 3 frames in a row), 0 crashes.
 
+- **RAM, first cut (owner: keep 16 GB PCs on Normal, make Normal leaner).** A half-second memory trace from launch
+  (`ODYSSEY_MEM_TRACE=1`) shows where 16 GB settings reach 12 GB: the pipeline warm-up +2.5 GB (2.5-5 s), then +7 GB in
+  2.5 s while the game sets up ~14,300 programs at boot - ~1,450 of them (drawn before, anywhere) built whole at once,
+  ~4 MB of NVIDIA driver memory each. Now only *warm* programs (drawn in a scene's first frames) are built whole; the
+  rest get their libraries at their first draw (`ODYSSEY_PREWARM_KNOWN` now off by default). 16 GB settings, Cap ->
+  Sand -> Metro -> Wooded, 2 runs each with an empty driver cache: 11.7 -> 10.3 GB at start, 13.6-14.2 -> 11.7-12.3 GB
+  after three kingdoms, worst frames and >50 ms frames unchanged. This PC's settings, the 120 FPS routes: 1.1-1.3 GB
+  less, 105.4 vs 105.5 FPS, 4 in-play hitches both, arrival hitches median 26 vs 25 ms, worst 91 vs 94 ms. Measured
+  and ruled out: only programs drawn before set up at all (`ODYSSEY_PREWARM=3`, -0.4 GB), no bulk set-ups
+  (`ODYSSEY_PREWARM_BULK=0`, nothing), warm-up off (-1.6 GB but 250-300 ms arrival freezes), Low memory (-7 GB at start
+  but 330 ms freezes, and 8 GB after three kingdoms anyway). Note: `ODYSSEY_LOG_MEM=1` costs ~65 ms a stats line
+  (heap walk) - no frame-time measurements with it.
+
 ## Owner play card (after the automatic gates)
 At most 10 minutes: enter the Lake Kingdom pond painting at 165 FPS; listen to the title music for a minute; play a
 cutscene transition; turn FSR frame generation on and switch upscalers twice. The answer per item is fine / not fine.

@@ -3723,14 +3723,19 @@ static void remember_frame_hold(Prog *p) {
 // shader of an effect resource - ~25,000 at boot, a few hundred ever drawn) only when drawn before.
 // A model's material set up as a stage loads that was drawn before (in any run, any scene) is built whole right away
 // too: a new player's first frame of the Sand Kingdom (2026-11-02, cold caches) stood 2.4 s for the 450 libraries of
-// such programs (all drawn then), the loading screen before it 10 s long. ODYSSEY_PREWARM_KNOWN=0: as before.
+// such programs (all drawn then), the loading screen before it 10 s long. Off by default since 2026-11-17: with the
+// pipeline binaries and the warm-up that came after, only warm programs (drawn in a scene's first frames) are built whole;
+// the others get their libraries at their first draw. Each built whole holds ~4 MB of NVIDIA driver memory and the boot
+// alone set up ~1,450 of them: 16 GB PC settings, Cap -> Sand -> Metro -> Wooded, 2 runs each with an empty driver
+// cache: in RAM 11.7 -> 10.3 GB at start, 13.6-14.2 -> 11.7-12.3 GB after three kingdoms; worst frames and frames over
+// 50 ms the same (437 / 439 ms vs 428 / 496 ms once, an empty-cache effect in both). ODYSSEY_PREWARM_KNOWN=1: built whole.
 // ODYSSEY_PREWARM=0: programs build when first drawn; =2: bulk ones too.
 static _Atomic uint64_t prog_setups;  // programs the game set up so far (backend_execute: when to prefetch)
 void renderer_program_hint(NvnProgram *np, bool bulk) {
     atomic_fetch_add(&prog_setups, 1);
     static int on = -1, known_whole = -1;
     if (on < 0) { const char *e = getenv("ODYSSEY_PREWARM"); on = e ? atoi(e) : 1; }
-    if (known_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_KNOWN"); known_whole = e ? atoi(e) != 0 : 1; }
+    if (known_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_KNOWN"); known_whole = e ? atoi(e) != 0 : 0; }
     if (!on || !g_vk.dev || (np->stage_mask & 3) != 3) return;
     // Low memory (settings: Memory use): nothing set up ahead - each program is translated and built at its first draw
     // (from the driver's cache when it has it: a few ms; 6.5 GB in RAM instead of 9.4, Cascade, NVIDIA)
@@ -3740,6 +3745,11 @@ void renderer_program_hint(NvnProgram *np, bool bulk) {
                                           np->stages[1].code_addr, np->stages[1].const_offset ? np->stages[1].const_offset : 0x10000),
                            &warm);
     if (bulk && !known && on < 2) return;
+    // ODYSSEY_PREWARM_BULK=0 (tests): no bulk set-ups at all, also those drawn before - the boot hands over every
+    // kingdom's programs at once; a stage load still sets up its own
+    static int bulk_on = -1;
+    if (bulk_on < 0) { const char *e = getenv("ODYSSEY_PREWARM_BULK"); bulk_on = e ? atoi(e) != 0 : 1; }
+    if (bulk && !bulk_on) return;
     // ODYSSEY_PREWARM=3: only programs drawn before (in any run: drawn_tab). A stage load hands over thousands of
     // programs (every material of every model), most never drawn; a Steam Deck sets them up at ~70 a second on its 4
     // cores - about a core busy for minutes after each kingdom change. Deck, 3 tours each (2026-11-16): Metro 52.3 ->
