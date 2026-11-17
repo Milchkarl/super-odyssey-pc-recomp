@@ -157,6 +157,36 @@ static bool in_game_menu(void) {
     if (!g_settings.mouse_menus || menu_input_captured()) return false;
     return plat_now_ns() - atomic_load(&g_camera_asked_ns) > MENU_MOUSE_CAMERA_NS;
 }
+// The pointer (prototype; runtime/hle/odyssey_pointer.c): in a menu the pointer is free and shown, and its place in
+// the game's layout coordinates (1280 x 720, the origin in the middle, y up - the space the game's layouts use) is
+// kept for the menus that know where their items are (runtime/hle/odyssey_pointer.c).
+static _Atomic double pic[6];                 // the picture in the window's pixels: x, y, w, h; the drawable's w, h
+static _Atomic float pointer_lx, pointer_ly;  // the pointer in layout coordinates
+static _Atomic uint64_t pointer_moved_ns;     // when it last moved (inside the picture)
+void input_set_picture(double vx, double vy, double vw, double vh, double dw, double dh) {
+    atomic_store(&pic[0], vx), atomic_store(&pic[1], vy), atomic_store(&pic[2], vw), atomic_store(&pic[3], vh);
+    atomic_store(&pic[4], dw), atomic_store(&pic[5], dh);
+}
+static void pointer_motion(SDL_Window *w, float x, float y) {
+    int ww = 0, wh = 0, pw = 0, ph = 0;
+    if (!w || !SDL_GetWindowSize(w, &ww, &wh) || !SDL_GetWindowSizeInPixels(w, &pw, &ph) || ww <= 0 || wh <= 0) return;
+    double px = x * pw / ww, py = y * ph / wh, vw = atomic_load(&pic[2]), vh = atomic_load(&pic[3]);
+    if (vw <= 0 || vh <= 0) return;
+    double u = (px - atomic_load(&pic[0])) / vw, v = (py - atomic_load(&pic[1])) / vh;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return;
+    atomic_store(&pointer_lx, (float)(u * 1280 - 640));
+    atomic_store(&pointer_ly, (float)(360 - v * 720));
+    atomic_store(&pointer_moved_ns, plat_now_ns());
+}
+// Where the pointer is in the game's layout space, if it moved lately in a menu (a still pointer doesn't take the
+// selection back from the keys / controller)
+bool input_pointer_layout(float *x, float *y) {
+    if (!in_game_menu() || plat_now_ns() - atomic_load(&pointer_moved_ns) > 400000000ull) return false;
+    *x = atomic_load(&pointer_lx), *y = atomic_load(&pointer_ly);
+    return true;
+}
+// The system pointer shown over the game (runtime/ui/menu.mm): in its menus, where the pointer isn't held
+bool input_pointer_visible(void) { return !atomic_load(&mouse_held) && in_game_menu(); }
 // A wheel notch (0 up, 1 down): one D-pad step in a menu, if the wheel isn't bound to anything
 static void menu_wheel_notch(int down) {
     if (mouse_code_bound(down ? BIND_WHEEL_DOWN : BIND_WHEEL_UP) || !in_game_menu()) return;
@@ -342,7 +372,8 @@ void hle__ZNK18ProjectCameraInput14calcInputStickEPN4sead7Vector2IfEE(Cpu *c) {
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
 void input_mouse_window(SDL_Window *w) {
     input_cappy_service(input_primary_id());
-    bool want = w && g_settings.mouse_camera && !host_test && !menu_input_captured() && SDL_GetKeyboardFocus() == w;
+    bool want = w && g_settings.mouse_camera && !host_test && !menu_input_captured() && SDL_GetKeyboardFocus() == w &&
+                !in_game_menu();  // (in the game's menus the pointer is free: it points at their items)
     if (want == SDL_GetWindowRelativeMouseMode(w)) { mouse_held = want; return; }
     if (!SDL_SetWindowRelativeMouseMode(w, want)) {
         static int nlog;
@@ -834,6 +865,7 @@ void input_handle_event(const SDL_Event *e) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
+        if (!mouse_held) pointer_motion(SDL_GetWindowFromID(e->motion.windowID), e->motion.x, e->motion.y);
         if (mouse_held) {
             mouse_add(e->motion.xrel, e->motion.yrel);
             if (fabsf(e->motion.xrel) + fabsf(e->motion.yrel) > 2) kbprompts_note_device(true);  // (not a jitter)
@@ -971,6 +1003,13 @@ static void host_test_frame(uint64_t frame) {
                 if (sc) keys[sc] = 1;
             }
             else if (!strcmp(dev, "lstick")) sscanf(name, "%d/%d", &sx, &sy);
+            else if (!strcmp(dev, "pointer")) {  // the pointer at <x>/<y> in layout coordinates (the menus' pointer)
+                float px, py;
+                if (sscanf(name, "%f/%f", &px, &py) == 2) {
+                    atomic_store(&pointer_lx, px), atomic_store(&pointer_ly, py);
+                    atomic_store(&pointer_moved_ns, plat_now_ns());
+                }
+            }
             else if (!strcmp(dev, "mouse")) {  // the mouse moved by <dx>/<dy> counts each frame (the mouse camera)
                 float mx, my;
                 if (sscanf(name, "%f/%f", &mx, &my) == 2) mouse_add(mx, my);

@@ -329,6 +329,7 @@ static void trace_calls_boot(void) {
 void odyssey_boot(void) {
     discord_start();  // (the game's own process: not the one that re-executes itself for its address layout)
     linread_boot();
+    { extern void odyssey_pointer_boot(void); odyssey_pointer_boot(); }
     trace_calls_boot();
     const char *e = getenv("ODYSSEY_WARP");
     // ("none": no warp - the Deck bench's WARP=none, which was taken as a stage named "none": the game then crashed
