@@ -91,6 +91,15 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   the monitors powered and cover them with the black overlay (`black_overlay.ps1`: a black always-on-top window on
   every screen, display kept awake) instead.
 
+- **New crash signature, seen once (2026-11-17, build 4346029 + the audio fix, game 1.0.0, Windows):** at the first
+  frames, `exception c0000005 accessing 0x7af5cdf420` in `f_700420a2f4+478`, called from
+  `nn::hid::GetTouchScreenState` <- `sead::ControllerMgr::calc`. The address is inside the hid shared memory the game
+  mapped (x8 = 0x7af5cdf400, the touch screen's block). One start in roughly a hundred that day; the start-up log up
+  to it matches a good run line for line. Not from PR #86 (it doesn't touch this path). Suspects, unproven: the page
+  protected or decommitted by something else (the guarded GPU-write pages, a neighbour's unmap), or the game's random
+  choice of mapping address landing somewhere not committed. **Next:** log the address and protection of every
+  MapSharedMemory, and VirtualQuery the faulting page in the crash report; run 200 starts by script.
+
 ## Owner play card (after the automatic gates)
 At most 10 minutes: enter the Lake Kingdom pond painting at 165 FPS; listen to the title music for a minute; play a
 cutscene transition; turn FSR frame generation on and switch upscalers twice. The answer per item is fine / not fine.
