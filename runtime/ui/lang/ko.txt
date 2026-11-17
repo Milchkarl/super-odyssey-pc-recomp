@@ -450,3 +450,5 @@ Move ||| 이동
 Settings ||| 설정
 YOUR SETTINGS ||| 내 설정
 Version ||| 버전
+Mouse in menus ||| 메뉴에서 마우스
+In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something else keep that binding. Not while you play. ||| 게임 자체 메뉴(타이틀, 파일 선택, 일시 정지 메뉴, 상점, 대화)에서: 왼쪽 클릭은 확인(A), 오른쪽 클릭이나 마우스의 뒤로 버튼은 뒤로(B), 휠은 위아래로 이동합니다. 다른 동작에 지정한 마우스 버튼은 그 지정을 유지합니다. 플레이 중에는 동작하지 않습니다.

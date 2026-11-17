@@ -12,6 +12,7 @@ Crash fixes, a reworked settings menu and start screen, and much clearer crash r
 - **Settings menu** (in game and from the start screen): the categories in a sidebar on the left, the options on the right. Move the cursor onto a category to see it, press A / Enter / Right (or click) to go into it, B / Esc to come back, L / R (Q / E) to switch from anywhere.
 - **A hint bar** at the bottom always shows what your buttons do, in your controller's own names (Xbox, PlayStation, Nintendo) or the keyboard's.
 - **A cleaner black and red look**, with bigger, easier targets for the mouse and the controller.
+- **The mouse in the game's own menus** (#64): left click confirms, right click goes back, the wheel moves up and down, and the pointer works in the pause menu, Options and more (Controls > Mouse in menus). Thanks to galaxyhf (#86).
 
 ## Crash reports and the log
 

@@ -443,3 +443,5 @@ Move ||| Mover
 Settings ||| Configurações
 YOUR SETTINGS ||| SUAS CONFIGURAÇÕES
 Version ||| Versão
+Mouse in menus ||| Mouse nos menus
+In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something else keep that binding. Not while you play. ||| Nos menus do próprio jogo (tela inicial, seleção de arquivo, menu de pausa, lojas, diálogos): o clique esquerdo confirma (A), o clique direito ou o botão Voltar do mouse volta (B) e a roda sobe e desce. Botões do mouse que você mapeou para outra coisa continuam com esse mapeamento. Não vale enquanto você joga.

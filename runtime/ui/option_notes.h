@@ -104,6 +104,7 @@ static const OptionNote k_option_notes[] = {
     {"Mouse camera", "", "On for keyboard and mouse (the default)."},
     {"Mouse horizontal speed", "", "100% (the default), then to taste."},
     {"Mouse vertical speed", "", "100% (the default), then to taste."},
+    {"Mouse in menus", "", "On (the default)."},
     {"Invert mouse left / right", "", "Off (the default)."},
     {"Invert mouse up / down", "", "Off (the default)."},
     {"Button prompts", "", "Auto (the default)."},
