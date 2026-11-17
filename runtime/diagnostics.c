@@ -178,6 +178,11 @@ bool diagnostics_write_report(char *path, size_t capacity) {
         for (unsigned i = 0; i < sizeof main->build_id; i++) fprintf(out, "%02x", main->build_id[i]);
         fprintf(out, "\n");
     } else fprintf(out, "Game main build ID: not loaded\n");
+    {   // (where it happened: a crash's own call chain has no names on 1.4.1)
+        extern const char *odyssey_stage_name(void);
+        fprintf(out, "Stage: %s\nFrame rate: setting %d, drawing %d a second\n", odyssey_stage_name(), settings_game_hz(),
+                odyssey_native_hz());
+    }
     fprintf(out, "Contains saved settings and a bounded log, copied as-is and including local paths. No process memory dump or additional game/key/save files are collected.\n");
     fflush(stderr);
     append_file(out, "Saved settings", settings_current_file(), 65536, false);

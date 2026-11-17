@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include "../hle.h"
+#include "../platform.h"
 #include "../settings.h"
 #include "../ipc.h"
 
@@ -881,11 +882,17 @@ static void *renderer_tick(void *arg) {
     uint64_t next = 0;
     struct timespec now;
     int target = 4 * frame_bytes;  // queued audio to keep ahead of the device: >= 2 device periods
+    // (tests, #83 / #84 crackling) ODYSSEY_AUDIO_QUEUE=<device periods> ahead (default 2); ODYSSEY_AUDIO_PRIO=1: this
+    // thread at the vsync timer's priority. The log counts the times the device's queue had run dry (an audible gap).
+    int periods = getenv("ODYSSEY_AUDIO_QUEUE") ? atoi(getenv("ODYSSEY_AUDIO_QUEUE")) : 2;
+    if (periods < 1 || periods > 8) periods = 2;
+    if (getenv("ODYSSEY_AUDIO_PRIO") && atoi(getenv("ODYSSEY_AUDIO_PRIO"))) plat_thread_realtime((uint64_t)N * 1000000000ull / r->sample_rate);
+    uint64_t dry = 0, dry_total = 0, dry_t0 = 0, blocks = 0;
     if (r->stream) {
         SDL_AudioSpec dev;
         int dev_frames = 0;
         if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(r->stream), &dev, &dev_frames) && dev_frames > 0) {
-            int t = (2 * dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000) + (int)N) * nch * (int)sizeof(float);
+            int t = (periods * dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000) + (int)N) * nch * (int)sizeof(float);
             if (t > target) target = t;
             LOG("[audren] device %d Hz (%s), %d frames/period; queue target %d samples\n", dev.freq,
                 SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?", dev_frames, target / (nch * (int)sizeof(float)));
@@ -922,7 +929,19 @@ static void *renderer_tick(void *arg) {
             memset(out, 0, frame_bytes);
         }
         pthread_mutex_unlock(&r->lock);
-        if (r->stream) { apply_gain(r->stream); SDL_PutAudioStreamData(r->stream, out, frame_bytes); }
+        if (r->stream) {
+            // (an empty queue just before this block: the device played silence meanwhile - after the first second)
+            if (++blocks > 200 && SDL_GetAudioStreamQueued(r->stream) == 0) dry++, dry_total++;
+            uint64_t tnow = plat_now_ns();
+            if (!dry_t0) dry_t0 = tnow;
+            if (tnow - dry_t0 >= 10000000000ull) {
+                if (dry) LOG("[audren] the sound device ran dry %llu times in 10 s (%llu in all)\n", (unsigned long long)dry,
+                             (unsigned long long)dry_total);
+                dry = 0, dry_t0 = tnow;
+            }
+            apply_gain(r->stream);
+            SDL_PutAudioStreamData(r->stream, out, frame_bytes);
+        }
         if (r->wav && r->state == 0 && nch == 2) {
             fwrite(out, 1, frame_bytes, r->wav);
             r->wav_bytes += frame_bytes;
