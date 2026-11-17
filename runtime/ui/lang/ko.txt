@@ -414,7 +414,7 @@ How big the performance overlay's text is. ||| 성능 오버레이 글자의 크
 How solid the performance overlay's background is. ||| 성능 오버레이 배경의 불투명도입니다.
 A part of the performance overlay. ||| 성능 오버레이의 한 부분입니다.
 Shows the kingdom you're in on your Discord profile while Discord is open. ||| Discord가 열려 있는 동안 지금 있는 나라를 Discord 프로필에 표시합니다.
-On if you use Discord (the default); it does nothing without it. ||| Discord를 쓴다면 켜기(기본값). Discord가 없으면 아무 일도 하지 않습니다.
+Off (the default). On if you want your Discord friends to see what you're playing. ||| 끄기(기본값). Discord 친구들에게 플레이 중인 게임을 보여 주고 싶다면 켜기.
 Prepares all of the game's shaders again at the next start (a few minutes). ||| 다음 시작 때 게임의 모든 셰이더를 다시 준비합니다(몇 분).
 Only after a graphics driver update, or if stutter comes back. ||| 그래픽 드라이버를 업데이트했거나 끊김이 다시 생길 때만.
 Keeps the game running while a new effect's shader is being prepared, instead of pausing. ||| 새 효과의 셰이더를 준비하는 동안 멈추지 않고 게임을 계속 진행합니다.

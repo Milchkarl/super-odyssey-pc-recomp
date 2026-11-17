@@ -26,7 +26,8 @@ The first start after the update prepares the shaders once (a few minutes) - as 
 6. **Quit** from the menu and with the window's close button (PC with DLSS frame generation on; Deck in Gaming Mode):
    no crash.
 7. **Deck, docked, FSR 2 Quality** (Fill): no dark smears, black buildings or white mist dome in Cap Kingdom.
-8. **Discord:** with Discord open, your profile shows the kingdom; Performance > Discord activity Off clears it.
+8. **Discord:** Off by default. Turn Performance > Discord activity On with Discord open: your profile shows the
+   kingdom; Off clears it.
 9. **Wardrobe** in the Odyssey, the map, the pause menu.
 
 ## Known

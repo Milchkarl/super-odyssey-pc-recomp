@@ -25,7 +25,7 @@ Settings g_settings = {
     .volume = 1.0f,
     .reverb = true,
     .movie_audio = true,
-    .discord_presence = true,
+    .discord_presence = false,  // (off until the player turns it on - owner 2026-11-17)
     .show_fps = false,
     .overlay_size = 1, .overlay_opacity = 80,
     .overlay_gpu = true, .overlay_cpu = true, .overlay_ram = true, .overlay_graph = true, .overlay_hardware = true,

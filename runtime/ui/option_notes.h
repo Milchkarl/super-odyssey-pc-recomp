@@ -68,7 +68,7 @@ static const OptionNote k_option_notes[] = {
     {"Show upscaler and resolution", "A part of the performance overlay.", "As you like."},
     {"Show Mario's position", "A part of the performance overlay.", "As you like."},
     {"Discord activity", "Shows the kingdom you're in on your Discord profile while Discord is open.",
-     "On if you use Discord (the default); it does nothing without it."},
+     "Off (the default). On if you want your Discord friends to see what you're playing."},
     {"Compile shaders", "Prepares all of the game's shaders again at the next start (a few minutes).",
      "Only after a graphics driver update, or if stutter comes back."},
     {"Asynchronous shader building", "Keeps the game running while a new effect's shader is being prepared, instead of pausing.",

@@ -407,7 +407,7 @@ How big the performance overlay's text is. ||| O tamanho do texto da sobreposiç
 How solid the performance overlay's background is. ||| O quanto o fundo da sobreposição de desempenho é sólido.
 A part of the performance overlay. ||| Uma parte da sobreposição de desempenho.
 Shows the kingdom you're in on your Discord profile while Discord is open. ||| Mostra o reino em que você está no seu perfil do Discord enquanto o Discord estiver aberto.
-On if you use Discord (the default); it does nothing without it. ||| Ligado se você usa o Discord (o padrão); sem ele não faz nada.
+Off (the default). On if you want your Discord friends to see what you're playing. ||| Desligado (o padrão). Ligado se quiser que seus amigos do Discord vejam o que você está jogando.
 Prepares all of the game's shaders again at the next start (a few minutes). ||| Prepara de novo todos os shaders do jogo na próxima inicialização (alguns minutos).
 Only after a graphics driver update, or if stutter comes back. ||| Só depois de atualizar o driver de vídeo, ou se os engasgos voltarem.
 Keeps the game running while a new effect's shader is being prepared, instead of pausing. ||| Mantém o jogo rodando enquanto o shader de um efeito novo é preparado, em vez de pausar.

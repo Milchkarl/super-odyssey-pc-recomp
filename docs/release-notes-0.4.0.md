@@ -29,7 +29,7 @@ A big update: more FPS on busy scenes, fixes for crashes in Lake Kingdom, on qui
 ## New
 
 - **Joy-Con pair** support: the game sees them as Joy-Cons; anything else stays a Pro Controller.
-- **Discord activity**: your Discord profile shows the kingdom you're in and the time played, while Discord is open (Performance > Discord). Thanks to galaxyhf (#76, #78).
+- **Discord activity**: your Discord profile shows the kingdom you're in and the time played, while Discord is open. Off by default: turn it on in Performance > Discord. Thanks to galaxyhf (#76, #78).
 - Windows: a game folder with accents in its path (e.g. "Área de Trabalho") no longer stops the game at start (galaxyhf).
 
 ## Updating
