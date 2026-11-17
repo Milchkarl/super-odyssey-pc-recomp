@@ -226,3 +226,24 @@ Upscale method ||| Método de upscaling
 How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| Como a imagem é reconstruída e ampliada. Desligado: o jogo renderiza normalmente na resolução interna (o Escalonador espacial acima a amplia até a janela). NVIDIA DLSS, AMD FSR e Intel XeSS: upscaling e antisserrilhado temporais - mais nítidos numa resolução interna menor, e exigem a GPU e o driver compatíveis. Cada um guarda o próprio modo e os próprios ajustes de nitidez. Muda durante o jogo.
 Auto ||| Automático
 This covers this menu and the configuration screen. The game's own text language is in Controls > System language. ||| Isto vale para este menu e para a tela de configuração. O idioma do texto do próprio jogo fica em Controles > Idioma do sistema.
+Discord ||| Discord
+Discord activity ||| Atividade no Discord
+Shows Super Odyssey PC Recomp, the kingdom you're in and the time played on your Discord profile, while the Discord app is open on this computer. Off: nothing is shown. Changes at once. ||| Mostra Super Odyssey PC Recomp, o reino em que você está e o tempo de jogo no seu perfil do Discord, enquanto o app do Discord estiver aberto neste computador. Desligado: nada é mostrado. Muda na hora.
+Title screen ||| Tela inicial
+Cap Kingdom ||| Reino do Chapéu
+Cascade Kingdom ||| Reino da Cascata
+Sand Kingdom ||| Reino da Areia
+Lake Kingdom ||| Reino do Lago
+Wooded Kingdom ||| Reino da Floresta
+Cloud Kingdom ||| Reino das Nuvens
+Lost Kingdom ||| Reino Perdido
+Metro Kingdom ||| Reino Metropolitano
+Snow Kingdom ||| Reino da Neve
+Seaside Kingdom ||| Reino Litorâneo
+Luncheon Kingdom ||| Reino Culinário
+Ruined Kingdom ||| Reino em Ruínas
+Bowser's Kingdom ||| Reino do Bowser
+Moon Kingdom ||| Reino da Lua
+Mushroom Kingdom ||| Reino do Cogumelo
+Dark Side ||| Lado Oculto da Lua
+Darker Side ||| Lado Sombrio da Lua

@@ -1154,6 +1154,10 @@ static void tab_performance(void) {
             opt_toggle(part.label, part.on, true, part.help);
         }
     }
+    opt_section("Discord");
+    opt_toggle("Discord activity", &g_settings.discord_presence, true,
+               "Shows Super Odyssey PC Recomp, the kingdom you're in and the time played on your Discord profile, while "
+               "the Discord app is open on this computer. Off: nothing is shown. Changes at once.");
 #ifndef __APPLE__  // (Vulkan: nvn/vulkan/device.c vk_prepare_before_start)
     opt_section("Shaders");
     {

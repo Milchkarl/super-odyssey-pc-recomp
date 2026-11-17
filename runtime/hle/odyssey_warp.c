@@ -15,6 +15,8 @@
 #include "../hle.h"
 #include "../rt.h"
 #include "../nvn/nvn.h"
+#include "../discord.h"
+#include "../settings.h"
 
 // StageScene::mGameDataHolder (OdysseyDecomp StageScene.h; control() loads it): 0x2d0; 1.4.1: 0x2e0 (its control()
 // reads it there as 1.0.0 does at 0x2d0)
@@ -189,7 +191,7 @@ static void stage_scene_control(Cpu *c) {
         g_scene_new = false;
         g_scene_start = now;
         input_motion_settle(); // the first playable update after loading a save/stage
-        if (g_log) {
+        if (g_log || g_settings.discord_presence) {  // (the stage's name: the log, and the Discord activity's kingdom)
             uint64_t current = loader_find_symbol("_ZN16GameDataFunction19getCurrentStageNameE22GameDataHolderAccessor");
             char name[128] = "unknown";
             if (current) {
@@ -202,8 +204,10 @@ static void stage_scene_control(Cpu *c) {
                     snprintf(name, sizeof name, "%.*s", (int)sizeof name - 1, (const char *)(uintptr_t)ptr);
                 *c = saved;
             }
-            LOG("[warp] stage scene %llx running at frame %llu stage \"%s\"\n",
-                (unsigned long long)c->x[0], (unsigned long long)now - 1, name);
+            if (current) discord_set_stage(name);
+            if (g_log)
+                LOG("[warp] stage scene %llx running at frame %llu stage \"%s\"\n",
+                    (unsigned long long)c->x[0], (unsigned long long)now - 1, name);
         }
     }
     g_last_control = now;
@@ -321,6 +325,7 @@ static void trace_calls_boot(void) {
 }
 
 void odyssey_boot(void) {
+    discord_start();  // (the game's own process: not the one that re-executes itself for its address layout)
     linread_boot();
     trace_calls_boot();
     const char *e = getenv("ODYSSEY_WARP");
