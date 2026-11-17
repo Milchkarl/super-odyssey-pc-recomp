@@ -873,6 +873,14 @@ static void wav_header(FILE *f, uint32_t bytes) {
     fseek(f, 0, SEEK_END);
 }
 
+// (the sound device's thread) each pull of the mixer's stream: additional_amount > 0 is what it wanted and the stream
+// didn't have - SDL plays silence there, an audible gap (#83 / #84 crackling). Counted for the log (renderer_tick).
+static _Atomic uint64_t g_device_short;
+static void SDLCALL device_pull(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount) {
+    (void)userdata, (void)stream, (void)total_amount;
+    if (additional_amount > 0) atomic_fetch_add(&g_device_short, 1);
+}
+
 static void *renderer_tick(void *arg) {
     Renderer *r = arg;
     float out[6 * 4096];
@@ -882,12 +890,15 @@ static void *renderer_tick(void *arg) {
     uint64_t next = 0;
     struct timespec now;
     int target = 4 * frame_bytes;  // queued audio to keep ahead of the device: >= 2 device periods
-    // (tests, #83 / #84 crackling) ODYSSEY_AUDIO_QUEUE=<device periods> ahead (default 2); ODYSSEY_AUDIO_PRIO=1: this
-    // thread at the vsync timer's priority. The log counts the times the device's queue had run dry (an audible gap).
+    // (#83 / #84 crackling) ODYSSEY_AUDIO_QUEUE=<device periods> ahead (default 2: Windows 25 ms); ODYSSEY_AUDIO_PRIO=1:
+    // this thread at the vsync timer's priority. Measured 2026-11-17 (1.0.0, Match display, title + a load, 3 runs each,
+    // gaps counted by the device: device_pull): 2 periods 0 / 6 / 5, 3 periods 9 / 4 / 2, 3 + catch-up 7 / 0 / 0 - no
+    // clear gain; the gaps come at loads whatever the depth (a long stall, not a short queue).
     int periods = getenv("ODYSSEY_AUDIO_QUEUE") ? atoi(getenv("ODYSSEY_AUDIO_QUEUE")) : 2;
     if (periods < 1 || periods > 8) periods = 2;
     if (getenv("ODYSSEY_AUDIO_PRIO") && atoi(getenv("ODYSSEY_AUDIO_PRIO"))) plat_thread_realtime((uint64_t)N * 1000000000ull / r->sample_rate);
     uint64_t dry = 0, dry_total = 0, dry_t0 = 0, blocks = 0;
+    uint64_t w_sync = 0, w_lock = 0, w_mix = 0, w_gap = 0, last_put = 0;  // (the window's longest waits, ns)
     if (r->stream) {
         SDL_AudioSpec dev;
         int dev_frames = 0;
@@ -917,11 +928,20 @@ static void *renderer_tick(void *arg) {
         // ahead without it (aux_process then passes the dry signal through). ODYSSEY_AUDIO_NO_SYNC=1: as before.
         static int nosync = -1;
         if (nosync < 0) nosync = getenv("ODYSSEY_AUDIO_NO_SYNC") != NULL;
-        for (int i = 0; !nosync && i < 16 && r->state == 0 && atomic_load(&r->updates) < r->signals && !r->quit; i++) {
+        // Catching up: with the device's queue under half its target, this block is mixed at once. Waiting up to 4 ms
+        // for a game that answers late (a load, #83 / #84) made each 5 ms block cost ~5 ms, so a drained queue never
+        // refilled and the next hiccup was a gap. ODYSSEY_AUDIO_CATCHUP=1 (tests; off: measured no clear gain).
+        static int catchup = -1;
+        if (catchup < 0) catchup = getenv("ODYSSEY_AUDIO_CATCHUP") && atoi(getenv("ODYSSEY_AUDIO_CATCHUP")) != 0;  // (tests: no clear gain)
+        bool low = catchup && r->stream && SDL_GetAudioStreamQueued(r->stream) < target / 2;
+        uint64_t t_sync = plat_now_ns();
+        for (int i = 0; !nosync && !low && i < 16 && r->state == 0 && atomic_load(&r->updates) < r->signals && !r->quit; i++) {
             struct timespec ts = {0, 250000};
             nanosleep(&ts, NULL);
         }
+        uint64_t t_lock = plat_now_ns();
         pthread_mutex_lock(&r->lock);
+        uint64_t t_mix = plat_now_ns();
         if (r->state == 0) {
             render_frame(r, out, nch);
             r->elapsed_frames++;
@@ -930,14 +950,23 @@ static void *renderer_tick(void *arg) {
         }
         pthread_mutex_unlock(&r->lock);
         if (r->stream) {
-            // (an empty queue just before this block: the device played silence meanwhile - after the first second)
-            if (++blocks > 200 && SDL_GetAudioStreamQueued(r->stream) == 0) dry++, dry_total++;
+            // (the device's short pulls since the last block - after the first second, the start's fill)
+            uint64_t s = atomic_exchange(&g_device_short, 0);
+            if (++blocks > 200 && s) dry += s, dry_total += s;
             uint64_t tnow = plat_now_ns();
+            // (where this block's time went: the wait for the game's answer, for the renderer lock, the mix; and the time
+            // since the last block - a gap needs one longer than the queue)
+            if (t_lock - t_sync > w_sync) w_sync = t_lock - t_sync;
+            if (t_mix - t_lock > w_lock) w_lock = t_mix - t_lock;
+            if (tnow - t_mix > w_mix) w_mix = tnow - t_mix;
+            if (last_put && tnow - last_put > w_gap) w_gap = tnow - last_put;
+            last_put = tnow;
             if (!dry_t0) dry_t0 = tnow;
             if (tnow - dry_t0 >= 10000000000ull) {
-                if (dry) LOG("[audren] the sound device ran dry %llu times in 10 s (%llu in all)\n", (unsigned long long)dry,
-                             (unsigned long long)dry_total);
-                dry = 0, dry_t0 = tnow;
+                if (dry) LOG("[audren] the sound device ran dry %llu times in 10 s (%llu in all); longest: between blocks %.1f ms, "
+                             "waiting for the game %.1f, for the lock %.1f, mixing %.1f\n", (unsigned long long)dry,
+                             (unsigned long long)dry_total, w_gap / 1e6, w_sync / 1e6, w_lock / 1e6, w_mix / 1e6);
+                dry = 0, dry_t0 = tnow, w_sync = w_lock = w_mix = w_gap = 0;
             }
             apply_gain(r->stream);
             SDL_PutAudioStreamData(r->stream, out, frame_bytes);
@@ -1231,6 +1260,7 @@ static void renderer_open_output(Renderer *r) {
     SDL_AudioSpec spec = {SDL_AUDIO_F32, r->nch, (int)r->sample_rate};
     r->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
     if (!r->stream) { LOG("[audren] SDL audio open failed: %s\n", SDL_GetError()); return; }
+    SDL_SetAudioStreamGetCallback(r->stream, device_pull, NULL);  // (counts the device's pulls it found short: gaps)
     if (getenv("ODYSSEY_AUDIO_GAIN")) SDL_SetAudioStreamGain(r->stream, (float)atof(getenv("ODYSSEY_AUDIO_GAIN")));
     SDL_ResumeAudioStreamDevice(r->stream);
 }

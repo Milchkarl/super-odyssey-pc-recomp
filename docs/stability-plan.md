@@ -75,10 +75,17 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   exact signature. 1.4.1, 240 FPS: crash 1 of 1, `f_70009917d0+d2` - #85's exact signature. With the fix
   (`odyssey_native_hz()` returns 60 while the last gameplay frame came from a scene without extra-draw preparation):
   1.0.0 at 165 / 165 / 240 FPS, 0 crashes in 3, the painting at 60 FPS and the next kingdom back at 120 at once.
-  **Still to do:** the same gate on 1.4.1 with a display on (the night's 1.4.1 runs are void, below).
+  1.4.1 with the fix (display on): 165 / 165 / 240 / 240 FPS, 0 crashes in 4, Lake Kingdom at 120 FPS before the
+  painting, the painting at 60, Luncheon Kingdom after. **Gate passed on both game versions (7 runs).**
 - **A3 crash reports** now carry `Stage:` and `Frame rate: setting N, drawing M a second`.
-- **B2 audio:** the log now counts device dry-outs (`[audren] the sound device ran dry N times in 10 s`), with
-  `ODYSSEY_AUDIO_QUEUE` / `ODYSSEY_AUDIO_PRIO` for the A/B. Not measured yet (needs a display on, below).
+- **B2 audio, measured, not fixed yet.** A first counter (queue empty before a block) over-counted; the log now
+  counts real gaps (SDL's get-callback: the device's pulls it found short) and, per 10 s with gaps, the mixer's longest
+  waits (`longest: between blocks, waiting for the game, for the lock, mixing`). 1.0.0, Match display, a title minute +
+  a load, 3 runs each, real gaps: queue of 2 periods (25 ms, as shipped) 0 / 6 / 5; 3 periods 9 / 4 / 2; 3 + catch-up
+  7 / 0 / 0; raised mixer priority no better. No setup is clearly better, so the defaults stay as shipped (switches
+  kept: `ODYSSEY_AUDIO_QUEUE`, `ODYSSEY_AUDIO_PRIO`, `ODYSSEY_AUDIO_CATCHUP`). The gaps come at the title's load and at
+  the Continue load whatever the queue depth: a long stall of the mixer, not a short queue. **Next:** run the new
+  longest-wait line to see which wait it is (the renderer lock the game's audio thread holds is the first suspect).
 - **Test environment, learned:** with the monitors powered off the NVIDIA driver reports no active display and every
   present waits ~250 ms: the game runs at 4-10 FPS and high-FPS paths never happen, so such runs prove nothing. Keep
   the monitors powered and cover them with the black overlay (`black_overlay.ps1`: a black always-on-top window on
