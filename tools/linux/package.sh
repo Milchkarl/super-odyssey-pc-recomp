@@ -15,7 +15,7 @@ P=$L/deps
 W=$L/deps-build
 B=$L/game
 APPDIR=$L/AppDir
-VERSION=$(sed -n 's/.*"ProductVersion", "\(.*\)"/\1/p' runtime/platform/windows.rc)
+VERSION=$(sed -n 's/.*"ProductVersion", "\(.*\)"/\1/p' runtime/platform/windows.rc | tr -d '\r')  # (tr: a CRLF checkout left a carriage return in the file name)
 OUT="build/dist/Super Odyssey PC Recomp-$VERSION-linux-$ARCH.AppImage"
 JOBS=$(nproc)
 

@@ -27,7 +27,7 @@ rm -f "$TAR"
 # make rebuilds just what changed)
 $SSH "$DECK" 'set -e; rm -rf ~/sopr-stage && mkdir ~/sopr-stage && cd ~/sopr-stage && tar -xf ~/sopr-sync.tar && rm ~/sopr-sync.tar
     n=0; while IFS= read -r -d "" f; do
-        case "$f" in *.c|*.h|*.mm|*.sh|*.py|*Makefile|*.txt|*.cpp|*.glsl|*.comp|*.desktop|*.manifest|*.json|*AppRun|*Containerfile|*.spec) sed -i "s/\r$//" "$f";; esac
+        case "$f" in *.c|*.h|*.mm|*.sh|*.py|*Makefile|*.txt|*.cpp|*.glsl|*.comp|*.desktop|*.manifest|*.json|*AppRun|*Containerfile|*.spec|*.rc) sed -i "s/\r$//" "$f";; esac
         if ! cmp -s "$f" ~/sopr/"$f"; then mkdir -p ~/sopr/"$(dirname "$f")"; cp -p "$f" ~/sopr/"$f"; touch ~/sopr/"$f"; n=$((n+1)); fi
     done < <(find . -type f -print0)
     chmod +x ~/sopr/tools/linux/*.sh ~/sopr/tools/linux/deck/*.sh; cd ~ && rm -rf ~/sopr-stage; echo "$n files changed"'

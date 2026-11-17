@@ -331,6 +331,9 @@ void odyssey_boot(void) {
     linread_boot();
     trace_calls_boot();
     const char *e = getenv("ODYSSEY_WARP");
+    // ("none": no warp - the Deck bench's WARP=none, which was taken as a stage named "none": the game then crashed
+    // looking for noneMap.byml right after Continue, 2026-11-17)
+    if (e && !strcmp(e, "none")) e = NULL;
     g_log = (e && *e) || getenv("ODYSSEY_LOG_STAGES");
     g_complete_at = getenv("ODYSSEY_SAVE_COMPLETE") ? strtoull(getenv("ODYSSEY_SAVE_COMPLETE"), NULL, 10) + 1 : 0;
     g_nwarps = g_next = 0;
