@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: upstream-sync-${{ github.ref }}
@@ -16,8 +16,17 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Check for a token with workflow permissions
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Create an Actions secret named FORK_SYNC_TOKEN with Contents and Workflows write access for this repository."
+            exit 1
+          fi
+
       - name: Merge upstream into the default branch
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" --field "branch=${DEFAULT_BRANCH}"
