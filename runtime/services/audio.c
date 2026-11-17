@@ -898,7 +898,7 @@ static void *renderer_tick(void *arg) {
     if (periods < 1 || periods > 8) periods = 2;
     if (getenv("ODYSSEY_AUDIO_PRIO") && atoi(getenv("ODYSSEY_AUDIO_PRIO"))) plat_thread_realtime((uint64_t)N * 1000000000ull / r->sample_rate);
     uint64_t dry = 0, dry_total = 0, dry_t0 = 0, blocks = 0;
-    uint64_t w_sync = 0, w_lock = 0, w_mix = 0, w_gap = 0, last_put = 0;  // (the window's longest waits, ns)
+    uint64_t w_sync = 0, w_lock = 0, w_mix = 0, w_gap = 0, last_put = 0, w_klock = 0;  // (the window's longest waits, ns)
     if (r->stream) {
         SDL_AudioSpec dev;
         int dev_frames = 0;
@@ -935,9 +935,24 @@ static void *renderer_tick(void *arg) {
         if (catchup < 0) catchup = getenv("ODYSSEY_AUDIO_CATCHUP") && atoi(getenv("ODYSSEY_AUDIO_CATCHUP")) != 0;  // (tests: no clear gain)
         bool low = catchup && r->stream && SDL_GetAudioStreamQueued(r->stream) < target / 2;
         uint64_t t_sync = plat_now_ns();
-        for (int i = 0; !nosync && !low && i < 16 && r->state == 0 && atomic_load(&r->updates) < r->signals && !r->quit; i++) {
-            struct timespec ts = {0, 250000};
-            nanosleep(&ts, NULL);
+        // The wait is bounded by the clock: at most 4 ms, and it ends as soon as the device's queue is down to one
+        // period's worth. It was 16 sleeps of 0.25 ms - 4 ms on Linux, but Windows sleeps 1-2 ms at the least and much
+        // longer while the PC is busy, so with the game's audio thread away (a load) the mixer waited 17 / 29 / 90 ms
+        // (measured 2026-11-17, game 1.0.0, the title's start and the Continue load) and the 25 ms queue ran dry: the
+        // crackling of #83 / #84. ODYSSEY_AUDIO_SYNC_OLD=1: the 16 sleeps, as before (tests).
+        static int sync_old = -1;
+        if (sync_old < 0) sync_old = getenv("ODYSSEY_AUDIO_SYNC_OLD") != NULL;
+        if (sync_old) {
+            for (int i = 0; !nosync && !low && i < 16 && r->state == 0 && atomic_load(&r->updates) < r->signals && !r->quit; i++) {
+                struct timespec ts = {0, 250000};
+                nanosleep(&ts, NULL);
+            }
+        } else {
+            uint64_t until = t_sync + 4000000ull;
+            int floor_bytes = target - 2 * frame_bytes > frame_bytes ? target - 2 * frame_bytes : frame_bytes;  // (queue kept above this)
+            while (!nosync && !low && r->state == 0 && atomic_load(&r->updates) < r->signals && !r->quit && plat_now_ns() < until &&
+                   (!r->stream || SDL_GetAudioStreamQueued(r->stream) > floor_bytes))
+                SDL_DelayPrecise(200000);  // (0.2 ms, exact: SDL sleeps the bulk and spins the last part)
         }
         uint64_t t_lock = plat_now_ns();
         pthread_mutex_lock(&r->lock);
@@ -964,9 +979,9 @@ static void *renderer_tick(void *arg) {
             if (!dry_t0) dry_t0 = tnow;
             if (tnow - dry_t0 >= 10000000000ull) {
                 if (dry) LOG("[audren] the sound device ran dry %llu times in 10 s (%llu in all); longest: between blocks %.1f ms, "
-                             "waiting for the game %.1f, for the lock %.1f, mixing %.1f\n", (unsigned long long)dry,
-                             (unsigned long long)dry_total, w_gap / 1e6, w_sync / 1e6, w_lock / 1e6, w_mix / 1e6);
-                dry = 0, dry_t0 = tnow, w_sync = w_lock = w_mix = w_gap = 0;
+                             "waiting for the game %.1f, for the lock %.1f, mixing %.1f, signalling %.1f\n", (unsigned long long)dry,
+                             (unsigned long long)dry_total, w_gap / 1e6, w_sync / 1e6, w_lock / 1e6, w_mix / 1e6, w_klock / 1e6);
+                dry = 0, dry_t0 = tnow, w_sync = w_lock = w_mix = w_gap = w_klock = 0;
             }
             apply_gain(r->stream);
             SDL_PutAudioStreamData(r->stream, out, frame_bytes);
@@ -976,9 +991,12 @@ static void *renderer_tick(void *arg) {
             r->wav_bytes += frame_bytes;
             if ((r->elapsed_frames & 255) == 0) { wav_header(r->wav, r->wav_bytes); fflush(r->wav); }
         }
+        uint64_t k0 = plat_now_ns();
         pthread_mutex_lock(&g_klock);
         kernel_signal(r->event);
         pthread_mutex_unlock(&g_klock);
+        uint64_t k1 = plat_now_ns();
+        if (k1 - k0 > w_klock) w_klock = k1 - k0;  // (the kernel lock and the signal: the log's "signalling")
         if (r->state == 0) r->signals = atomic_load(&r->updates) + 1;  // (the game answers this signal next)
     }
     return NULL;
