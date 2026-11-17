@@ -100,6 +100,34 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   choice of mapping address landing somewhere not committed. **Next:** log the address and protection of every
   MapSharedMemory, and VirtualQuery the faulting page in the crash report; run 200 starts by script.
 
+## Results, 2026-11-17 evening (after 0.4.2, local commits only)
+
+- **Start-up crash in `nn::hid::GetTouchScreenState`: cause found and fixed (8bfb6bf).** The crash's registers put the
+  touch screen's state at `0x7094004400`: the hid shared memory was mapped at `0x7094004000`, inside the runtime's HLE
+  heap (`0x7092000000`, 224 MB of host-owned data the guest can see), which QueryMemory reported as **free**, along
+  with everything outside the guest window. The SDK maps shared memory at a random free address, so roughly one start
+  in 40-70 could land there; host data then overwrote the touch lifo's header and the game read past it. Now the HLE
+  heap and the HLE call range are listed as inaccessible (type 0x10, not committed up front) and addresses outside
+  the window are reported inaccessible. `ODYSSEY_LOG_MAPS=1` logs every mapping and what QueryMemory says about the
+  crash's address (old: `7090100000+f6ff00000 type 0`, free; new: `7092000000+e000000 type 10`). A mapping onto the
+  runtime's memory or outside the window is always logged. 80 scripted starts (40 old map, 40 new): 0 crashes; the 160
+  mappings all landed in `0x7000000000-0x7220000000`. `ODYSSEY_QUERY_OLD=1` restores the old map for A/B.
+- **B1 honest memory numbers: already there.** The `[status]` line, the crash report summary and the overlay's "game"
+  figure show memory in RAM (resident) apart from committed.
+- **B3 leak soak: passed.** 30 kingdom warps (Cascade, Sand, Lake, Wooded, Metro, Seaside x5) in one 23-minute
+  session, 60 FPS, this PC (95 GB RAM, warm-up Long): in RAM 16.8 GB at warp 5, 17.1 GB at warp 30 (+1.9%); committed
+  27.5 -> 27.9 GB (+1.7%). 0 crashes in 31 arrivals; lowest 2 s 51 FPS.
+- **C2 16 GB PCs: the level, not growth, is the problem.** Same soak with a 16 GB PC's settings (warm-up Normal, preload
+  budget 4 GB), 12 warps: 12.5 GB in RAM at the first arrival, 15.1 GB after six kingdoms, 25.6 GB committed - a
+  16 GB PC swaps (#75, #61). Breakdown at 10 s: guest memory 3.2 GB, heaps 0.5 GB, the rest (~8 GB) the driver's
+  objects for the ~14,300 shader programs set up before play. **Low memory** (Auto only below 12 GB today) on the
+  same route: 4.4 GB in RAM at start, 5.9 GB after the warp (programs set up 60 -> 420); cost: one 340 ms frame on
+  arriving in Sand Kingdom (Normal: worst 92 ms). **Open decision (owner):** Auto -> Low memory below 20 GB of RAM,
+  i.e. on 16 GB PCs.
+- **C1 routes at 120 FPS: clean.** Cascade, Sand, Lake, Wooded, Metro, Cap, walking and turning the camera
+  (NVIDIA, 1600x900 window): averages 113.9-117.0 FPS, 0 skipped draws, 4 frames over 20 ms in play (worst 42 ms,
+  Metro's crowd, 3 frames in a row), 0 crashes.
+
 ## Owner play card (after the automatic gates)
 At most 10 minutes: enter the Lake Kingdom pond painting at 165 FPS; listen to the title music for a minute; play a
 cutscene transition; turn FSR frame generation on and switch upscalers twice. The answer per item is fine / not fine.
