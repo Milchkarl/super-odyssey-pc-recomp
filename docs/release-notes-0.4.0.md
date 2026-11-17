@@ -11,17 +11,19 @@ A big update: more FPS on busy scenes, fixes for crashes in Lake Kingdom, on qui
 ## Fixes
 
 - **Crash entering or resuming in Lake Kingdom** on game version 1.0.0 above 60 FPS (#72).
-- **Crash when closing the game** with NVIDIA DLSS frame generation (#70), and on the Steam Deck in Gaming Mode.
+- **Crash when closing the game** with NVIDIA DLSS frame generation (#70, #80), and on the Steam Deck in Gaming Mode.
 - **FSR 2, FSR 3.1 and DLSS below native at 16:10** (the Steam Deck's screen): dark smears over the ground, half-black buildings and a white mist are gone.
 - **"Show this screen at every start"** can be turned off again (#74).
 - **Korean and Brazilian Portuguese menus** fully translated (#63).
 
 ## Settings menu
 
-- **Same defaults everywhere** (Windows, Linux, Steam Deck): borderless, FXAA, 60 FPS, VSync off, the game's own texture filtering. The Steam Deck keeps its 1280 x 800 picture filling the screen.
+- **Same defaults everywhere** (Windows, Linux, Steam Deck), chosen for stability, no stutter and the Switch's look: borderless, FXAA, 60 FPS, VSync off, the game's own texture filtering, texture detail and shadows, Early frame hand-off on, Multithreaded rendering Auto, asynchronous shader building on, warm-up Auto, Reflex, upscaling, frame generation and Discord off. The Steam Deck keeps its 1280 x 800 picture filling the screen.
+- Your current settings are kept when you update; only new players (or a deleted powermoon.ini) get these defaults.
 - **Every option says in plain words what it does and what is recommended**, at the top of its description (a line under each control on the Controls page).
 - **VSync**: On, Fast (Mailbox), Adaptive (Relaxed), Off.
-- **New**: Shadow quality (2x / 4x shadow maps), Texture detail, FXAA, AMD FSR 1 in the upscaler list.
+- **New**: Shadow quality (2x / 4x shadow maps), Texture detail, FXAA, AMD FSR 1 in the upscaler list, and **Only set up shaders seen before** (for slower CPUs that dip after loading).
+- **Shaders** rows tidied: the main ones first, then "Shaders - advanced", and Preload area shaders under Experimental (it uses a lot of memory).
 - **Controllers**: A / Cross selects and B / Circle goes back in the menu (it was the other way round on Xbox, PlayStation and Steam Deck controllers).
 - Nothing overlaps or gets cut off at 1280 x 800, in any language.
 - **Removed**: 120 FPS interpolation (it crashed - use Performance > Frame rate 72-240 instead) and Battery saver.
