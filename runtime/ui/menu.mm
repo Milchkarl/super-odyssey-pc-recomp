@@ -1238,11 +1238,12 @@ static void tab_performance(void) {
     opt_section("Shaders - advanced");
     {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
-        opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_LONG,
+        opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_AUTO,
                    "How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter "
                    "the first time they appear. Normal: up to 15 s and 3 GB of memory. Long: up to 30 s and 12 GB "
-                   "(at most half of this PC's memory) - the default: the fewest first-time stutters. Auto: Long with 16 GB "
-                   "of memory or more, else Normal. Applies at the next start.", false);
+                   "(at most half of this PC's memory): the fewest first-time stutters, but each pipeline keeps some "
+                   "graphics driver memory. Auto (the default): Long with 32 GB of memory or more, else Normal. Applies "
+                   "at the next start.", false);
     }
     opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
                "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "

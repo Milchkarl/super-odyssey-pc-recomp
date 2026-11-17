@@ -60,7 +60,7 @@ PY
     for i in $(seq 1 960); do [ -f "$OUT/game-exited" ] && break; sleep 1; done
     [ -f "$OUT/game-exited" ] || echo "the game did not finish (or never started) through Steam" >> "$OUT/run.log"
 else
-    ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout 900 "$APP" > "$OUT/run.log" 2>&1
+    ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout ${TMO:-900} "$APP" > "$OUT/run.log" 2>&1
     echo "EXIT=$?" >> "$OUT/run.log"
 fi
 cp "$F/build/samples.txt" "$F/build/stacks.txt" "$F"/build/shot_*.png "$OUT/" 2>/dev/null
