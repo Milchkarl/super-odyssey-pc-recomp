@@ -1932,6 +1932,21 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
             int ln = snprintf(line, sizeof line, "[vk] t=%.1f frame %llu %.1f fps max %.0fms level - (%s)\n", now,
                               (unsigned long long)total_frames, frames / (now - last_fps_time), max_gap * 1000.0, stats);
             if (ln > 0) fwrite(line, 1, ln < (int)sizeof line ? (size_t)ln : sizeof line - 1, stderr);
+            {   // A plain status line a minute (players' logs: where, how smooth, how much memory - at a glance)
+                static double minute_t0, minute_low = 1e9, minute_worst;
+                static uint64_t minute_f0;
+                double fps = frames / (now - last_fps_time);
+                if (fps < minute_low) minute_low = fps;
+                if (max_gap > minute_worst) minute_worst = max_gap;
+                if (!minute_t0) minute_t0 = now, minute_f0 = total_frames;
+                if (now - minute_t0 >= 60.0) {
+                    extern const char *odyssey_stage_name(void);
+                    LOG("[status] %.0f min: %s, %.1f FPS (lowest 2 s: %.1f), worst frame %.0f ms, memory %.1f GB in RAM, "
+                        "%.1f GB committed\n", now / 60.0, odyssey_stage_name(), (total_frames - minute_f0) / (now - minute_t0),
+                        minute_low, minute_worst * 1000.0, plat_resident_bytes() / 1073741824.0, plat_private_bytes() / 1073741824.0);
+                    minute_t0 = now, minute_f0 = total_frames, minute_low = 1e9, minute_worst = 0;
+                }
+            }
             uint64_t st2 = plat_now_ns();
             if (st2 - st0 > 5000000ull) {  // (the stats line itself: memory queries, the log write)
                 static int nlog;

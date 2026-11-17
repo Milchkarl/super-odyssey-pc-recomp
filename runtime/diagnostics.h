@@ -14,3 +14,4 @@ bool diagnostics_last_crash(char *path, size_t capacity);
 bool diagnostics_copy_path(const char *path);
 int diagnostics_copy_status(void); // 1 copied, 0 queued, -1 failed
 void diagnostics_fatal_dialog(const char *message);
+void diagnostics_fault_where(const char *sym, uint64_t off);  // the faulting code (dispatch.c): its symbol and offset
