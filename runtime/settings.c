@@ -77,6 +77,9 @@ volatile bool g_app_unfocused;
 // instead of 16:9 with bars, the HUD at the picture's edges. (The battery saver's lighter settings - 75% with FSR 1,
 // the game's handheld rendering - were the Deck's defaults before 2026-11-16; owner: one set of defaults.)
 static void settings_steam_deck(void) {
+    // (Multithreaded rendering off here: one scripted run in four with it on hung the Deck's GPU - "illegal register
+    // access in command stream", a GPU reset - while never with it off; owner 2026-11-16: off on the Deck until found)
+    g_settings.record_thread = 0;
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
     g_settings.hud_edges = 1;

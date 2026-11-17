@@ -853,7 +853,7 @@ static void tab_display(void) {
     }
     {
         static const char *modes[] = {"Docked (TV)", "Handheld"};
-        opt_choice("Console mode", &g_settings.console_mode, modes, 2, plat_is_steam_deck() ? CONSOLE_HANDHELD : CONSOLE_DOCKED,
+        opt_choice("Console mode", &g_settings.console_mode, modes, 2, CONSOLE_DOCKED,  /* (the Deck too since 2026-11-16) */
                    "What the game is told it runs as. Docked: its TV rendering (1600 x 900 before scaling, docked effects). "
                    "Handheld: its own handheld rendering (1280 x 720, lighter effects), as on a Switch Lite - much less "
                    "work for the GPU, for handhelds and low-power PCs. Applies at the next start.");
@@ -1128,13 +1128,15 @@ static void tab_performance(void) {
     {
         static const int rt_start = g_settings.record_thread;  // (read at start)
         bool on = g_settings.record_thread != 0;
-        char d[900];
-        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
+        char d[1100];
+        snprintf(d, sizeof d, "%s%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
                                          "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
                                          "Uses one more CPU core. On by default. If you see flickering, missing objects, a "
                                          "frozen picture or crashes, turn it off."),
+                 plat_is_steam_deck() ? tr(" Off by default on the Steam Deck: there it can stop the graphics chip (a rare "
+                                           "GPU reset) - a fix is being looked for.") : "",
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        opt_toggle("Multithreaded rendering", &on, true, d);
+        opt_toggle("Multithreaded rendering", &on, !plat_is_steam_deck(), d);
         g_settings.record_thread = on;
     }
 #endif
