@@ -207,6 +207,7 @@ static int g_kbd_max = 8;
 static std::atomic<int> g_note{0};  // 1 shown, 2 closed
 static char g_note_title[128], g_note_text[800];
 static bool capturing() { return g_open.load() || g_kbd.load() == 1 || g_note.load() == 1 || g_setup.load(); }
+extern "C" bool input_pointer_visible(void);  // (runtime/hle/input.c: the game's menus, the pointer free)
 // Draw the settings pointer in the overlay so it also appears in fullscreen.
 static void sync_mouse_cursor(bool ui_active) {
     SDL_Window *mouse_window = SDL_GetMouseFocus();
@@ -222,7 +223,7 @@ static void sync_mouse_cursor(bool ui_active) {
         push(q);
     }
     g_draw_mouse_cursor.store(draw_cursor);
-    bool show = !focused || (ui_active && !draw_cursor);
+    bool show = !focused || (ui_active && !draw_cursor) || (!ui_active && input_pointer_visible());
     static int log_cursor = -1;
     if (log_cursor < 0) log_cursor = getenv("ODYSSEY_LOG_CURSOR") != NULL;
     static int last = -1;
@@ -1713,6 +1714,10 @@ static void tab_about(void) {
     toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
     toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
     hint("Moving the mouse up turns the camera down instead.");
+    toggle("Mouse in menus", &g_settings.mouse_menus);
+    hint("In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click "
+         "or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something "
+         "else keep that binding. Not while you play.");
     {
         static const char *const names[PROMPTS_COUNT] = {"Auto", "Controller", "Keyboard and mouse", "Switch", "Xbox",
                                                          "PlayStation"};
