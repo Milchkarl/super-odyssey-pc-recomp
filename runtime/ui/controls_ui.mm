@@ -137,9 +137,9 @@ extern "C" void controls_bindings_draw(float scale) {
     if (ImGui::Button("Reset keyboard to defaults")) { bind_capture_cancel(); bind_reset(BIND_DEV_KEY); }
     ImGui::EndDisabled();
     ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("Bindings apply to the game only. Menus keep the fixed layout (right face button / Enter "
-                        "select, bottom face button / Esc back), and the in-game menu always opens with F1 or Esc, or "
-                        "the controller's Back + Start held together, or its Home / Guide button - so this page can't be "
-                        "locked out. The game's button icons follow the controller bindings.");
+    ImGui::TextDisabled("%s", tr("Bindings apply to the game only. Menus keep a fixed layout (A / Cross or Enter selects, "
+                                 "B / Circle or Esc goes back), and the in-game menu always opens with F1 or Esc, or "
+                                 "the controller's Back + Start held together, or its Home / Guide button - so this page "
+                                 "can't be locked out. The game's button icons follow the controller bindings."));
     ImGui::PopTextWrapPos();
 }

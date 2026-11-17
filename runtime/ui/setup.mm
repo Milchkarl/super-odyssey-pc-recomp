@@ -773,12 +773,18 @@ bool config_run(void) {
     for (const char *v : skip_vars)
         if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST"))
             return true;
+    // (the settings file read first: its "Show this screen at every start" was checked before ui_window_init read the
+    // file, so the default - shown - always won and unticking it did nothing, on every platform: issue #74, owner's
+    // Steam Deck 2026-11-16)
+    settings_load();
     const char *force = getenv("ODYSSEY_CONFIG");  // (1: shown even when turned off; 0: never)
 #ifndef __APPLE__
     bool prep_due = vk_prepare_due();  // (shown for that even when the page is turned off: no window of its own)
 #else
     bool prep_due = false;
 #endif
+    LOG("[config] show at start %d, shaders to prepare %d%s\n", g_settings.config_at_start, prep_due,
+        force ? " (ODYSSEY_CONFIG)" : "");
     if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due) return true;
     ui_window_init();
 #ifndef __APPLE__

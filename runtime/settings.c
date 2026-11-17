@@ -21,7 +21,7 @@ static const char *settings_file(void) {
 const char *settings_current_file(void) { return settings_file(); }
 
 Settings g_settings = {
-    .window_mode = WINDOWED,
+    .window_mode = BORDERLESS,  // (owner 2026-11-16: the first-start defaults, the same on Windows, Linux and the Steam Deck)
     .volume = 1.0f,
     .reverb = true,
     .movie_audio = true,
@@ -44,6 +44,7 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
+    .antialias = AA_FXAA,
     .rumble = true,
     .rumble_strength = 100,
     .motion = true,
@@ -60,33 +61,25 @@ Settings g_settings = {
     .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
-    .early_fences = -1,  // (Auto: on - nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default)
-    .record_thread = -1,  // (Auto: on with an NVIDIA GPU - nvn/vulkan/exec.c dq_enabled)
+    .early_fences = 1,   // (on: nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default, every platform)
+    .record_thread = 1,  // (on: nvn/vulkan/exec.c dq_enabled)
     .stick_deadzone = 10,  // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22)
     .skip_intro = true,
-    .warmup = WARMUP_AUTO,
+    .warmup = WARMUP_LONG,  // (every recorded pipeline ready before play: the fewest first-time stutters)
     .check_updates = true,
     .config_at_start = true,
 };
 
 volatile bool g_app_unfocused;
 
-// The battery saver (Steam Deck's defaults, and the menu's Performance > Battery saver): less work per frame. Odyssey's
-// gameplay steps once per drawn frame, so a lower frame rate cap would slow the game down, not save power - the savings
-// come from the picture instead: 75% of the display (960 x 600 on a Deck) upscaled with FSR 1, no SMAA, no extra
-// frames (120 FPS, interpolation), the game's own texture filtering, the shorter warm-up at start.
-// The Steam Deck's defaults (no settings file yet): the battery saver's, at its own screen's 1280 x 800 rendered and
-// shown 1:1 and filled - the game's view made 16:10 (runtime/hle/odyssey_wide.c) instead of 16:9 with bars (75% + FSR 1
-// before, 2026-11-15).
+// The Steam Deck's first start (no settings file yet): the same settings as everywhere else, fitted to its screen - its
+// own 1280 x 800 rendered and shown 1:1 (100%) and filled: the game's view made 16:10 (runtime/hle/odyssey_wide.c)
+// instead of 16:9 with bars, the HUD at the picture's edges. (The battery saver's lighter settings - 75% with FSR 1,
+// the game's handheld rendering - were the Deck's defaults before 2026-11-16; owner: one set of defaults.)
 static void settings_steam_deck(void) {
-    settings_battery_saver();
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
     g_settings.hud_edges = 1;
-    g_settings.console_mode = CONSOLE_HANDHELD;  // (the game's handheld rendering: what a Switch shows on its own screen)
-    g_settings.game_dynres = false;  // (always the full 1280x800: at 7-10 W the game's own drops went to 768x480)
-    g_settings.vsync = VSYNC_OFF;
-    g_settings.upscaler = UPSCALE_BILINEAR;  // (Upscale method Off by default - at 100% there is nothing to scale anyway)
 }
 bool settings_game_dynres(void) {
     static int v = -1;
@@ -103,19 +96,6 @@ bool settings_handheld(void) {
         h = e && *e ? atoi(e) != 0 : g_settings.console_mode == CONSOLE_HANDHELD;
     }
     return h;
-}
-void settings_battery_saver(void) {
-    g_settings.res_mode = RES_Q75;
-    g_settings.upscaler = UPSCALE_SHARP;
-    g_settings.antialias = AA_OFF;
-    g_settings.frame_rate = FPS_60;
-    g_settings.frame_interp = false;
-    g_settings.aniso = ANISO_GAME;
-    g_settings.dlss_mode = DLSS_OFF;
-    g_settings.warmup = WARMUP_NORMAL;
-    // (no preloading: every program a stage sets up built in the background competed with the game thread on a Deck's
-    // 4 cores - 26 fps with it, 40 without, in Cap Kingdom)
-    g_settings.shader_preload = false;
 }
 static const char *const warmups[WARMUP_COUNT] = {"auto", "normal", "long"};
 
@@ -222,7 +202,7 @@ void settings_load(void) {
     static bool loaded;
     if (loaded) return;
     loaded = true;
-    // Steam Deck: the battery saver's settings unless chosen otherwise (the settings file, read below, wins)
+    // Steam Deck: fitted to its screen unless chosen otherwise (the settings file, read below, wins)
     if (plat_is_steam_deck()) settings_steam_deck();
     FILE *f = fopen(SETTINGS_FILE, "r");
     if (!f && !getenv("ODYSSEY_SETTINGS")) f = fopen("odyssey.ini", "r");  // (the settings of the earlier builds)
@@ -355,9 +335,9 @@ void settings_load(void) {
         else if (!strcmp(key, "shader_preload")) g_settings.shader_preload = atoi(val) != 0;
         else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
         else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
-        else if (!strcmp(key, "early_fences")) g_settings.early_fences = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
-        else if (!strcmp(key, "record_thread"))  // (auto / on / off; 0 / 1 before 2026-11-16 - 0 was the default then: Auto)
-            g_settings.record_thread = !strcmp(val, "on") || !strcmp(val, "1") ? 1 : !strcmp(val, "off") ? 0 : -1;
+        // (on / off; "auto" and the older 0 / 1 were the earlier defaults - now on, as the default is)
+        else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
+        else if (!strcmp(key, "record_thread")) g_settings.record_thread = strcmp(val, "off") != 0;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
@@ -413,7 +393,7 @@ void settings_load(void) {
     if (g_settings.volume < 0) g_settings.volume = 0;
     if (g_settings.volume > 2) g_settings.volume = 2;
     settings_aniso_at_start();  // (latched now: the menu's changes apply at the next start)
-    LOG("[settings] loaded\n");
+    LOG("[settings] loaded %s (show at start %d)\n", SETTINGS_FILE, g_settings.config_at_start);
 }
 
 void settings_save(void) {
@@ -486,8 +466,8 @@ void settings_save(void) {
     fprintf(f, "shader_known_only = %d\n", g_settings.shader_known_only);
     fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
     fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
-    fprintf(f, "early_fences = %s\n", g_settings.early_fences == 1 ? "on" : g_settings.early_fences == 0 ? "off" : "auto");
-    fprintf(f, "record_thread = %s\n", g_settings.record_thread == 1 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
+    fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");
+    fprintf(f, "record_thread = %s\n", g_settings.record_thread ? "on" : "off");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);

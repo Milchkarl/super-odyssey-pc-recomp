@@ -30,6 +30,8 @@ SAVE=${SAVE:-/home/deck/sopr/bench/savecomplete.tar}
 if [ -d "$SAVE" ]; then cp -a "$SAVE/." "$OUT/save/"; else tar -xf "$SAVE" -C "$OUT/save/"; fi
 [ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
 %b" "${EXTRA_INI:-}" > "$OUT/set.ini"
+# (scripted runs never vibrate the Deck: their scripted inputs set off the rumble - owner 2026-11-16)
+sed -i "/^vibration *=/d" "$OUT/set.ini"; echo "vibration = 0" >> "$OUT/set.ini"
 rm -f "$F/build/samples.txt" "$F/build/stacks.txt" "$F"/build/shot_*.png
 D=$(dirname "$(readlink -f "$0")")
 if [ "${LAUNCH:-}" = steam ]; then

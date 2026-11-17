@@ -167,11 +167,18 @@ static ImGuiKey key_from_scancode(SDL_Scancode sc) {
     }
 }
 
-// Nintendo layout: the right face button (A) confirms, the bottom one (B) goes back.
-static ImGuiKey key_from_pad(Uint8 b) {
+// By the button's label: A (Xbox, Steam Deck, Switch) or Cross (PlayStation) confirms, B or Circle goes back - the
+// bottom button on Xbox / PlayStation / Steam Deck controllers, the right one on Nintendo's (owner 2026-11-16: it was
+// the Nintendo layout on every controller, so B / Circle confirmed there).
+static ImGuiKey key_from_pad(SDL_JoystickID pad, Uint8 b) {
+    if (b == SDL_GAMEPAD_BUTTON_SOUTH || b == SDL_GAMEPAD_BUTTON_EAST) {
+        SDL_Gamepad *gp = SDL_GetGamepadFromID(pad);
+        SDL_GamepadButtonLabel l = gp ? SDL_GetGamepadButtonLabel(gp, (SDL_GamepadButton)b) : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN;
+        if (l == SDL_GAMEPAD_BUTTON_LABEL_A || l == SDL_GAMEPAD_BUTTON_LABEL_CROSS) return ImGuiKey_GamepadFaceDown;   // activate
+        if (l == SDL_GAMEPAD_BUTTON_LABEL_B || l == SDL_GAMEPAD_BUTTON_LABEL_CIRCLE) return ImGuiKey_GamepadFaceRight; // back
+        return b == SDL_GAMEPAD_BUTTON_SOUTH ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;  // (unknown: bottom)
+    }
     switch (b) {
-    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceDown;   // activate
-    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceRight; // cancel / back
     case SDL_GAMEPAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
     case SDL_GAMEPAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;
@@ -318,7 +325,7 @@ bool menu_handle_event(const SDL_Event *e) {
             return true;
         }
         if (!capturing()) return false;
-        ImGuiKey k = key_from_pad(e->gbutton.button);
+        ImGuiKey k = key_from_pad(e->gbutton.which, e->gbutton.button);
         if (k != ImGuiKey_None) { QEvent q = {}; q.kind = QEvent::KEY; q.key = k; q.down = down; push(q); }
         return true;
     }
@@ -753,7 +760,7 @@ static void tab_display(void) {
     }
     pthread_mutex_unlock(&g_displays_mutex);
     static const char *window_modes[] = {"Windowed", "Borderless", "Exclusive fullscreen"};
-    if (opt_choice("Display mode", &g_settings.window_mode, window_modes, WINDOW_MODE_COUNT, WINDOWED,
+    if (opt_choice("Display mode", &g_settings.window_mode, window_modes, WINDOW_MODE_COUNT, BORDERLESS,
                    "Borderless uses the desktop's resolution. Exclusive fullscreen requests a monitor display mode. "
                    "F11 and Alt+Enter toggle between the window and your last fullscreen mode."))
         g_want_window_apply.store(true);
@@ -935,7 +942,7 @@ static void tab_graphics(void) {
 #endif
     opt_section("Anti-aliasing");
     static const char *aa[AA_COUNT] = {"Off", "SMAA", "FXAA"};
-    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_OFF,
+    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_FXAA,
                "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
                "blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every "
                "high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. "
@@ -1109,30 +1116,26 @@ static void tab_performance(void) {
     // The speed-ups, on by default and first in the tab (owner 2026-11-16), each saying to turn it off on trouble
     opt_section("Optimizations");
     {
-        int v = g_settings.early_fences + 1;  // (-1 Auto, 0 Off, 1 On)
-        static const char *ef[] = {"Auto (on)", "Off", "On"};
-        opt_choice("Early frame hand-off", &v, ef, 3, 0,
+        bool on = g_settings.early_fences != 0;
+        opt_toggle("Early frame hand-off", &on, true,
                    "The game starts its next frame as soon as this one is handed to the graphics card, instead of "
                    "waiting for the card to finish it - the game and the drawing run side by side. Busy places: about "
                    "10-15% more FPS on a PC (132 -> 148 at 240 FPS), and 45 -> 58-60 FPS on a Steam Deck. On by "
-                   "default. If you see flickering or broken objects, set it to Off.", false);
-        g_settings.early_fences = v - 1;
+                   "default. If you see flickering or broken objects, turn it off.");
+        g_settings.early_fences = on;
     }
 #ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
     {
         static const int rt_start = g_settings.record_thread;  // (read at start)
-        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
-        static char autolab[48];
-        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
-        const char *rt[] = {autolab, "Off", "On"};
+        bool on = g_settings.record_thread != 0;
         char d[900];
         snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
-                                         "prepares the next ones. Busy places at high frame rates: about 25-30% more FPS on a fast "
-                                         "PC (148 -> 179 at 240 FPS). Uses one more CPU core. Auto: on with an NVIDIA graphics "
-                                         "card, where it was tested; off with AMD and Intel for now - try On there. If you see "
-                                         "flickering, missing objects or crashes, set it to Off."),
+                                         "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
+                                         "Uses one more CPU core. On by default. If you see flickering, missing objects, a "
+                                         "frozen picture or crashes, turn it off."),
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        if (opt_choice("Multithreaded rendering", &v, rt, 3, 0, d, false)) g_settings.record_thread = v - 1;
+        opt_toggle("Multithreaded rendering", &on, true, d);
+        g_settings.record_thread = on;
     }
 #endif
 #ifdef _WIN32
@@ -1169,15 +1172,6 @@ static void tab_performance(void) {
         g_settings.frame_rate = order[pos];
     }
 #endif
-    opt_section("Power");
-    if (opt_action("Battery saver", "",
-                   "Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, "
-                   "no SMAA, Frame rate 60 FPS, the game's own texture filtering. The game itself still runs at its normal "
-                   "speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) "
-                   "for the biggest savings. Some changes apply at the next start.")) {
-        settings_battery_saver();
-        settings_save();
-    }
     opt_section("Overlay");
     opt_toggle("Show FPS", &g_settings.show_fps, false, "Shows the frame rate in the top right corner.");
     opt_toggle("Performance overlay", &g_settings.performance_overlay, false,
@@ -1242,11 +1236,11 @@ static void tab_performance(void) {
     opt_section("Shaders - advanced");
     {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
-        opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_AUTO,
+        opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_LONG,
                    "How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter "
                    "the first time they appear. Normal: up to 15 s and 3 GB of memory. Long: up to 30 s and 12 GB "
-                   "(at most half of this PC's memory). Auto: Long with 16 GB of memory or more. Applies at the next "
-                   "start.", false);
+                   "(at most half of this PC's memory) - the default: the fewest first-time stutters. Auto: Long with 16 GB "
+                   "of memory or more, else Normal. Applies at the next start.", false);
     }
     opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
                "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
@@ -1254,7 +1248,7 @@ static void tab_performance(void) {
                "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
                "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
     opt_section("Experimental");
-    opt_toggle("Preload area shaders (uses a lot of memory)", &g_settings.shader_preload, false,
+    opt_toggle("Preload area shaders (more RAM)", &g_settings.shader_preload, false,
                "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
                "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
                "Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on.");
@@ -1722,9 +1716,11 @@ static void tab_about(void) {
     controls_bindings_draw(ImGui::GetFontSize() / 34);
     ImGui::Spacing();
     header("Menu");
-    ImGui::TextUnformatted("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start");
-    ImGui::TextUnformatted("Switch tabs:  L / R  (Q / E)        Back:  B  (Esc)");
-    ImGui::TextUnformatted("Fullscreen:  F11 / Alt+Enter");
+    ImGui::PushTextWrapPos(0);  // (wrapped: at 1280 x 800 the first line ran past the window's edge)
+    ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
+    ImGui::TextUnformatted(tr("Select:  A / Cross  (Enter)        Back:  B / Circle  (Esc)        Switch tabs:  L / R  (Q / E)"));
+    ImGui::TextUnformatted(tr("Fullscreen:  F11 / Alt+Enter"));
+    ImGui::PopTextWrapPos();
 }
 
 // Reboot (runtime/main.c): the game is gone - menu and name dialog close; the ImGui context stays.

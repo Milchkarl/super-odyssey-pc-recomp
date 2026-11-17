@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <execinfo.h>
 #include <fcntl.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -232,7 +233,17 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
 }
 
 // Fatal error without a terminal: say so in a message box rather than vanishing (the details are in the log).
-uint64_t plat_private_bytes(void) { return 0; }
+uint64_t plat_private_bytes(void) {  // (anonymous memory, resident or swapped: what Windows counts as private)
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    unsigned long long kb, anon = 0, swap = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        if (sscanf(line, "RssAnon: %llu", &kb) == 1) anon = kb;
+        else if (sscanf(line, "VmSwap: %llu", &kb) == 1) swap = kb;
+    }
+    if (f) fclose(f);
+    return (anon + swap) << 10;
+}
 uint64_t plat_resident_bytes(void) {
     FILE *f = fopen("/proc/self/statm", "r");
     unsigned long long size = 0, rss = 0;
@@ -244,7 +255,14 @@ uint64_t plat_resident_bytes(void) {
 }
 uint64_t plat_total_ram(void) { return (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE); }
 uint64_t plat_guest_bytes(void) { return 0; }
-uint64_t plat_heap_bytes(void) { return 0; }
+uint64_t plat_heap_bytes(void) {  // (malloc's memory in use: small blocks plus its own mmap'd big ones)
+    struct mallinfo2 m = mallinfo2();
+    return (uint64_t)m.uordblks + (uint64_t)m.hblkhd;
+}
+uint64_t plat_heap_held_bytes(void) {  // (what malloc holds from the system, in use or free in its arenas)
+    struct mallinfo2 m = mallinfo2();
+    return (uint64_t)m.arena + (uint64_t)m.hblkhd;
+}
 void plat_heap_histogram(void) {}
 void plat_heap_check(const char *where) { (void)where; }
 

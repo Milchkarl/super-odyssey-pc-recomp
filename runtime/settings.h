@@ -135,9 +135,9 @@ typedef struct {
     bool shader_wait;    // a draw whose shader is still loading waits for it (a hitch) instead of being left out /
                          // its frame not being shown (exec.c builds_block)
     int texture_detail;  // 0 as the Switch, 1 high, 2 ultra: a sharper mip bias on surface textures (textures.c; at start)
-    int record_thread;   // -1 Auto (on with an NVIDIA GPU), 0 off, 1 on: a second thread makes the draws' Vulkan calls
+    int record_thread;   // 1 on (the default), 0 off: a second thread makes the draws' Vulkan calls
                          // (nvn/vulkan/exec.c dq_*; read at start)
-    int early_fences;    // -1 Auto (on), 0 off, 1 on: the game goes on once its frame is translated, not
+    int early_fences;    // 1 on (the default), 0 off: the game goes on once its frame is translated, not
                          // when the GPU has run it (nvn/objects.c nvnSyncWait; ODYSSEY_SYNC_EARLY overrides)
     int shadow_quality;  // 0 as the Switch, 1 high (2x), 2 ultra (4x): shadow map size (nvn/vulkan/textures.c shadow_factor)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
@@ -193,9 +193,6 @@ static inline int *settings_temporal_cas_sharpness(void) {
 void settings_load(void);
 const char *settings_current_file(void);
 void settings_save(void);
-// The battery saver's settings (lower internal resolution with FSR 1, no extra frames or SMAA): the Steam Deck's
-// defaults and a one-press preset in the menu (runtime/settings.c says what and why)
-void settings_battery_saver(void);
 // The console mode in effect this run (read once: a change applies at the next start; ODYSSEY_HANDHELD=1 / =0 overrides)
 bool settings_handheld(void);
 // The game's dynamic resolution this run (read once; ODYSSEY_GAME_DYNRES=0 / =1 overrides)

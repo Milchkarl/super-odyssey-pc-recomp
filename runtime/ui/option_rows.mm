@@ -1,4 +1,5 @@
 // Two-pane settings pages (see option_rows.h): rows on the left, the selected / hovered row's description on the right.
+#include <set>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include "imgui_internal.h"  // (SetKeyOwner, NavCursorVisible)
 
 #include "option_rows.h"
+#include "../rt.h"  // (LOG)
 #include "i18n.h"
 #include "osk.h"
 #include "theme.h"
@@ -102,11 +104,28 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         for (char &c : t) c = (char)toupper((unsigned char)c);
     float ty = p.y + (h - fs) * 0.5f;
     ImU32 label_col = off ? kTextOff : kText;  // (greyed out: clearly dim)
-    dl->AddText(ImVec2(p.x + pad, ty), label_col, t.c_str());
+    // Label and value fitted into the row: where both don't fit at full size (a narrow window such as the Steam Deck's
+    // 1280 x 800, a longer translation), the label is drawn smaller - down to 70% - then the value too, so they never
+    // overlap (owner 2026-11-16). Each fitted row is logged once (tests read it: "[menu] fitted").
+    float aw0 = fs * 0.42f, gap0 = fs * 0.55f;
+    float lw = ImGui::CalcTextSize(t.c_str()).x, vw0 = value.empty() ? 0 : ImGui::CalcTextSize(value.c_str()).x;
+    float vblock = vw0 + (arrows && !value.empty() ? 2 * (aw0 + gap0) : 0);
+    float room = w - 2 * pad - (value.empty() ? 0 : gap0 * 1.5f);
+    float ls = 1, vs = 1;
+    if (lw + vblock > room && lw > 0) {
+        ls = fmaxf(0.7f, (room - vblock) / lw);
+        if (lw * ls + vblock > room && vw0 > 0) vs = fmaxf(0.7f, (room - lw * ls - (vblock - vw0)) / vw0);
+        static std::set<std::string> logged;
+        if (logged.insert(t + "|" + value).second)
+            LOG("[menu] fitted: \"%s\" (%.0f%%) | \"%s\" (%.0f%%)%s\n", t.c_str(), ls * 100, value.c_str(), vs * 100,
+                lw * ls + vw0 * vs + (vblock - vw0) > room + 0.5f ? " - STILL OVERLAPS" : "");
+    }
+    ImFont *font = ImGui::GetFont();
+    dl->AddText(font, fs * ls, ImVec2(p.x + pad, p.y + (h - fs * ls) * 0.5f), label_col, t.c_str());
     float right = p.x + w - pad;  // (the value's right edge)
     if (arrows && !value.empty()) {  // ◀ value ▶, drawn (the fonts have no arrow glyphs); a click on one steps
         float aw = fs * 0.42f, gap = fs * 0.55f, cy = ty + fs * 0.52f;
-        float rx = right - aw, lx = rx - gap - ImGui::CalcTextSize(value.c_str()).x - gap - aw;
+        float rx = right - aw, lx = rx - gap - vw0 * vs - gap - aw;
         ImU32 ac = off ? kTextOff : lit ? kText : kTextDim;
         dl->AddTriangleFilled(ImVec2(lx, cy), ImVec2(lx + aw, cy - aw * 0.75f), ImVec2(lx + aw, cy + aw * 0.75f), ac);
         dl->AddTriangleFilled(ImVec2(rx + aw, cy), ImVec2(rx, cy - aw * 0.75f), ImVec2(rx, cy + aw * 0.75f), ac);
@@ -119,8 +138,8 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         right = rx - gap;
     }
     if (!value.empty()) {
-        float vw = ImGui::CalcTextSize(value.c_str()).x, vx = right - vw;
-        dl->AddText(ImVec2(vx, ty), off ? kTextOff : changed ? ImGui::ColorConvertFloat4ToU32(kAccentSoftV)
+        float vw = vw0 * vs, vx = right - vw;
+        dl->AddText(font, fs * vs, ImVec2(vx, p.y + (h - fs * vs) * 0.5f), off ? kTextOff : changed ? ImGui::ColorConvertFloat4ToU32(kAccentSoftV)
                                                                  : theme_u32(kTextV, 0.78f), value.c_str());
     }
     ImGui::PopID();

@@ -1203,9 +1203,20 @@ static void *dq_main(void *arg) {
             int spin = 0;
             while (r == atomic_load_explicit(&dq_w, memory_order_acquire) && spin < 4000) { SDL_CPUPauseInstruction(); spin++; }
             if (r == atomic_load_explicit(&dq_w, memory_order_acquire)) {
+                // (sleeping: dq_sleeping, then dq_w checked again - both sequentially consistent, as dq_push's store of
+                // dq_w and its read of dq_sleeping: one side always sees the other. With release / acquire only, both
+                // could read the old value - the worker slept on queued work, the render thread waited for it in
+                // dq_sync: the picture froze at the title screen, and quitting hung too (owner's Steam Deck,
+                // 2026-11-16). A 2 ms timeout on top, so a missed wake-up can never hang the game.)
                 pthread_mutex_lock(&dq_lock);
                 atomic_store(&dq_sleeping, 1);
-                while (r == atomic_load_explicit(&dq_w, memory_order_acquire)) pthread_cond_wait(&dq_cond, &dq_lock);
+                while (r == atomic_load(&dq_w)) {
+                    struct timespec ts;
+                    clock_gettime(CLOCK_REALTIME, &ts);
+                    ts.tv_nsec += 2000000;
+                    if (ts.tv_nsec >= 1000000000) ts.tv_sec++, ts.tv_nsec -= 1000000000;
+                    pthread_cond_timedwait(&dq_cond, &dq_lock, &ts);
+                }
                 atomic_store(&dq_sleeping, 0);
                 pthread_mutex_unlock(&dq_lock);
             }
@@ -1225,10 +1236,8 @@ static bool dq_enabled(void) {
     static int on = -1;
     if (on < 0) {
         const char *e = getenv("ODYSSEY_VK_RECORD_THREAD");  // (overrides the setting: Performance > Multithreaded rendering)
-        // Auto: on with an NVIDIA GPU, the one it was tested on (2026-11-16); off elsewhere until players have tried it -
-        // in the TOTK port the same kind of thread lost the device or hung the GPU at start on AMD's drivers
-        on = e && *e ? atoi(e) != 0
-                     : g_settings.record_thread == 1 || (g_settings.record_thread < 0 && g_vk.props.vendorID == 0x10de);
+        // (on by default on every GPU since 2026-11-16, owner; Performance > Multithreaded rendering turns it off)
+        on = e && *e ? atoi(e) != 0 : g_settings.record_thread != 0;
         if (on) {
             dq_ring = malloc(DQ_RING);
             VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -1244,18 +1253,46 @@ static bool dq_enabled(void) {
 }
 
 // (render thread) wait until the recording thread has made every queued call
+static _Atomic uint64_t dq_producer;  // (the thread queueing: the render thread)
 static void dq_sync(void) {
     if (!dq_on) return;
+    {   // (diagnostic: another thread syncing records into the command buffer the recording thread may still be filling)
+        uint64_t me = (uint64_t)(uintptr_t)pthread_self(), prod = atomic_load(&dq_producer);
+        static _Atomic int reported;
+        if (prod && me != prod && atomic_load(&dq_r) != atomic_load(&dq_w) && atomic_fetch_add(&reported, 1) < 3) {
+            LOG("[vk] recording thread: thread %llu (not the render thread %llu) recorded while draws were queued\n",
+                (unsigned long long)me, (unsigned long long)prod);
+            plat_print_backtrace();
+        }
+    }
     uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
     int spin = 0;
-    while (atomic_load_explicit(&dq_r, memory_order_acquire) != w) {
+    uint64_t t0 = 0;
+    // (until the worker is at or PAST w, not exactly at it: a thread other than the render thread syncs too - a texture
+    // upload ahead of its draw - while the render thread goes on queueing, and the worker publishes its position only
+    // after each batch: it stepped over w, that thread waited forever (from the first frames, holding its lock) and the
+    // game froze once the render thread needed that lock - the owner's Steam Deck with Multithreaded rendering On,
+    // at the title or the first load, and at quitting, 2026-11-16)
+    while ((int64_t)(atomic_load_explicit(&dq_r, memory_order_acquire) - w) < 0) {
         if (++spin < 20000) SDL_CPUPauseInstruction();
-        else sched_yield();
+        else {
+            // (a wait this long is a bug: logged once a second, with where both sides are)
+            uint64_t now = plat_now_ns();
+            if (!t0) t0 = now;
+            else if (now - t0 > 1000000000ull) {
+                LOG("[vk] recording thread: the render thread waited over 1 s (read %llu, written %llu, sleeping %d)\n",
+                    (unsigned long long)atomic_load(&dq_r), (unsigned long long)w, atomic_load(&dq_sleeping));
+                t0 = now;
+            }
+            if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
+            sched_yield();
+        }
     }
 }
 
 // (render thread) room for a packet of `size` payload bytes; dq_push publishes it
 static void *dq_begin(uint32_t op, VkCommandBuffer cb, uint32_t size) {
+    atomic_store_explicit(&dq_producer, (uint64_t)(uintptr_t)pthread_self(), memory_order_relaxed);
     uint32_t total = (uint32_t)((sizeof(DqHdr) + size + 7) & ~7u);
     uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
     uint32_t at = (uint32_t)(w % DQ_RING);
@@ -1275,7 +1312,7 @@ static void *dq_begin(uint32_t op, VkCommandBuffer cb, uint32_t size) {
 static void dq_push(void) {
     uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
     DqHdr *h = (DqHdr *)(dq_ring + w % DQ_RING);
-    atomic_store_explicit(&dq_w, w + h->size, memory_order_release);
+    atomic_store(&dq_w, w + h->size);  // (sequentially consistent: see dq_main's sleep)
     if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
 }
 
@@ -1855,8 +1892,9 @@ const char *renderer_stats(void) {
         }
         vk_overlay_memory(vram, vram_budget);
         extern int vk_live_textures(void);
-        snprintf(stats_text + n, sizeof stats_text - n, ", %d textures, ram %llu MB", vk_live_textures(),
-                 (unsigned long long)(plat_private_bytes() >> 20));
+        // (ram: the process's private memory - committed on Windows, anonymous + swapped on Linux; in RAM: resident)
+        snprintf(stats_text + n, sizeof stats_text - n, ", %d textures, ram %llu MB (in RAM %llu MB)", vk_live_textures(),
+                 (unsigned long long)(plat_private_bytes() >> 20), (unsigned long long)(plat_resident_bytes() >> 20));
         if (g_vk.pbin) {  // (libraries created from saved data / compiled and saved)
             n = strlen(stats_text);
             extern uint32_t vk_libs_shared_take(void);
@@ -1867,14 +1905,21 @@ const char *renderer_stats(void) {
         // ODYSSEY_LOG_MEM=1: where that memory is (the guest's window, the process's heaps: malloc and drivers), build
         // queues, programs, command records. ODYSSEY_HEAP_HIST=<frame>: the heaps' blocks by size, once.
         static int log_mem = -1, hist_at = -2;
+#ifdef __linux__
+        extern uint64_t plat_heap_held_bytes(void);
+#define heap_held_bytes plat_heap_held_bytes
+#else
+#define heap_held_bytes plat_heap_bytes
+#endif
         if (log_mem < 0) log_mem = getenv("ODYSSEY_LOG_MEM") != NULL;
         if (hist_at == -2) hist_at = getenv("ODYSSEY_HEAP_HIST") ? atoi(getenv("ODYSSEY_HEAP_HIST")) : -1;
         if (log_mem) {
             extern uint64_t nvn_record_bytes(void);
             n = strlen(stats_text);
             snprintf(stats_text + n, sizeof stats_text - n,
-                     " (guest %llu, heaps %llu) [jobs %d/%d, translate %d/%d, programs %d, records %llu MB]",
+                     " (guest %llu, heaps %llu, held %llu) [jobs %d/%d, translate %d/%d, programs %d, records %llu MB]",
                      (unsigned long long)(plat_guest_bytes() >> 20), (unsigned long long)(plat_heap_bytes() >> 20),
+                     (unsigned long long)(heap_held_bytes() >> 20),
                      atomic_load(&dbg_qlen[0]), atomic_load(&dbg_qlen[1]), atomic_load(&dbg_qlen[2]),
                      atomic_load(&dbg_qlen[3]), atomic_load(&dbg_progs), (unsigned long long)(nvn_record_bytes() >> 20));
             for (uint32_t h = 0; h < mp->memoryHeapCount; h++) {  // (every heap: system memory ones too)
