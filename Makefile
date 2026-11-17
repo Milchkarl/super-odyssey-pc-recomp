@@ -220,7 +220,7 @@ $(PTBR_TEST): $(filter-out $(B)/rt/main.o,$(RT_OBJ)) $(BACKEND_OBJ) $(UI_OBJ) $(
 test-ptbr-installer: $(PTBR_TEST)
 	$(PY) tools/test_ptbr_install.py $(PTBR_TEST)
 
-$(B)/rt/platform/windows_rc.o: runtime/platform/windows.rc docs/icon/icon.ico
+$(B)/rt/platform/windows_rc.o: runtime/platform/windows.rc runtime/platform/app.manifest docs/icon/icon.ico
 	@mkdir -p $(dir $@)
 	$(WINDRES) -I docs/icon -O coff $< -o $@
 
