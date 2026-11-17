@@ -1713,6 +1713,10 @@ static void tab_about(void) {
     toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
     toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
     hint("Moving the mouse up turns the camera down instead.");
+    toggle("Mouse in menus", &g_settings.mouse_menus);
+    hint("In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click "
+         "or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something "
+         "else keep that binding. Not while you play.");
     {
         static const char *const names[PROMPTS_COUNT] = {"Auto", "Controller", "Keyboard and mouse", "Switch", "Xbox",
                                                          "PlayStation"};
