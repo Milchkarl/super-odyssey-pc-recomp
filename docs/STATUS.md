@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md)
 
-Where each part of Super Odyssey PC Recomp stands, as of version 0.4.1. The numbers are the maintainer's estimates,
+Where each part of Super Odyssey PC Recomp stands, as of version 0.4.2. The numbers are the maintainer's estimates,
 not measurements: they say how finished a part is, with the open issues that hold it back.
 
 The overall bar in the README is a weighted average. Each area has its share of the whole (the percentage in its
@@ -21,7 +21,7 @@ weighted mean of its parts, and the overall value the weighted mean of the areas
 | 🔧 | **Maxwell shader translator** | ![95%](media/progress/95.svg) | x3 | Every shader of the game's archives (about 32,800 programs) translates to Vulkan |
 | 🔧 | **Graphics (NVN on Vulkan)** | ![90%](media/progress/90.svg) | x3 | Every kingdom draws on NVIDIA, AMD, Intel and the Steam Deck. Open: a GPU hang on Radeon RX 7800 XT under Linux ([#21](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/21)), a tutorial video and blocky shadows on an RX 6700 XT ([#66](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/66)) |
 | 🔧 | **Tested in game** | ![80%](media/progress/80.svg) | x3 | Every kingdom is visited by scripted tours on both game versions, with paintings, the wardrobe and the map. Open crash reports waiting for their reporters: [#69](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/69), [#55](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/55), [#79](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/79) |
-| 🔧 | **Sound** | ![90%](media/progress/90.svg) | x2 | The game SDK's audio renderer with reverb and 5.1 surround. Open: short gaps during loads on Windows ([#83](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/83), [#84](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/84)); the cause is found and the fix is being tested |
+| 🔧 | **Sound** | ![95%](media/progress/95.svg) | x2 | The game SDK's audio renderer with reverb and 5.1 surround. The crackling during loads on Windows ([#83](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/83), [#84](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/84)) is fixed in 0.4.2 |
 | ✅ | **Game files setup** | ![100%](media/progress/100.svg) | x2 | The start screen copies your extracted game, builds the game code and prepares the shaders |
 | 🔧 | **Game versions 1.0.0 and 1.4.1** | ![90%](media/progress/90.svg) | x1 | Both play. 1.4.1 ships without function names, so a few test tools and fixes reach it later |
 

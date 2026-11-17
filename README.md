@@ -126,7 +126,6 @@ You can also download the new zip from [Releases](../../releases) and extract it
 This is a preview. Known problems and things not done yet:
 
 - **Being worked on** (from the [issues](../../issues)):
-  - Sound can crackle for a moment during loads on Windows (#83, #84): the cause is found, the fix is being tested.
   - The game freezes on Radeon RX 7800 XT under Linux (#21).
   - The Steam Deck's own gyro isn't read yet (#68); a no-sound report on the Deck (#43).
   - High committed memory on PCs with 16 GB of RAM (#75, #61).
