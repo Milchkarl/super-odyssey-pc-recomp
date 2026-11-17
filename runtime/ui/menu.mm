@@ -15,6 +15,7 @@
 
 #include "imgui.h"
 #include "option_rows.h"
+#include "option_notes.h"
 #include "performance.h"
 #include "steam_shortcut.h"
 #include "imgui_internal.h"  // (NavCursorVisible)
@@ -705,6 +706,11 @@ static bool choice(const char *label, int *value, const char *const *names, int 
         }
     }
     ImGui::PopID();
+    if (const OptionNote *note = option_note(label)) {  // (the recommendation, plain English: option_notes.h)
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("%s %s", tr("Recommended:"), tr(note->recommended));
+        ImGui::PopTextWrapPos();
+    }
     return changed;
 }
 
@@ -1127,17 +1133,19 @@ static void tab_performance(void) {
 #ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
     {
         static const int rt_start = g_settings.record_thread;  // (read at start)
-        bool on = g_settings.record_thread != 0;
+        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
+        static char autolab[48];
+        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
+        const char *rt[] = {autolab, "Off", "On"};
         char d[1100];
-        snprintf(d, sizeof d, "%s%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
+        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
                                          "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
-                                         "Uses one more CPU core. On by default. If you see flickering, missing objects, a "
-                                         "frozen picture or crashes, turn it off."),
-                 plat_is_steam_deck() ? tr(" Off by default on the Steam Deck: there it can stop the graphics chip (a rare "
-                                           "GPU reset) - a fix is being looked for.") : "",
+                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
+                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
+                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
+                                         "crashes, set it to Off."),
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        opt_toggle("Multithreaded rendering", &on, !plat_is_steam_deck(), d);
-        g_settings.record_thread = on;
+        if (opt_choice("Multithreaded rendering", &v, rt, 3, 0, d, false)) g_settings.record_thread = v - 1;
     }
 #endif
 #ifdef _WIN32

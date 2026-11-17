@@ -63,7 +63,7 @@ Settings g_settings = {
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
     .early_fences = 1,   // (on: nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default, every platform)
-    .record_thread = 1,  // (on: nvn/vulkan/exec.c dq_enabled)
+    .record_thread = -1,  // (Auto: on with an NVIDIA GPU, the only kind it has been tested on - nvn/vulkan/exec.c dq_enabled)
     .stick_deadzone = 10,  // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22)
     .skip_intro = true,
     .warmup = WARMUP_AUTO,  // (Long - every recorded pipeline ready before play - where the PC has the memory for it)
@@ -80,7 +80,7 @@ volatile bool g_app_unfocused;
 static void settings_steam_deck(void) {
     // (Multithreaded rendering off here: one scripted run in four with it on hung the Deck's GPU - "illegal register
     // access in command stream", a GPU reset - while never with it off; owner 2026-11-16: off on the Deck until found)
-    g_settings.record_thread = 0;
+    g_settings.record_thread = -1;  // (Auto: off with its AMD GPU)
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
     g_settings.hud_edges = 1;
@@ -343,7 +343,7 @@ void settings_load(void) {
         else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         // (on / off; "auto" and the older 0 / 1 were the earlier defaults - now on, as the default is)
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
-        else if (!strcmp(key, "record_thread")) g_settings.record_thread = strcmp(val, "off") != 0;
+        else if (!strcmp(key, "record_thread")) g_settings.record_thread = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
@@ -474,7 +474,7 @@ void settings_save(void) {
     fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
     fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
     fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");
-    fprintf(f, "record_thread = %s\n", g_settings.record_thread ? "on" : "off");
+    fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);

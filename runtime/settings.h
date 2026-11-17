@@ -135,7 +135,7 @@ typedef struct {
     bool shader_wait;    // a draw whose shader is still loading waits for it (a hitch) instead of being left out /
                          // its frame not being shown (exec.c builds_block)
     int texture_detail;  // 0 as the Switch, 1 high, 2 ultra: a sharper mip bias on surface textures (textures.c; at start)
-    int record_thread;   // 1 on (the default), 0 off: a second thread makes the draws' Vulkan calls
+    int record_thread;   // -1 Auto (on with an NVIDIA GPU; the default), 0 off, 1 on: a second thread makes the draws' Vulkan calls
                          // (nvn/vulkan/exec.c dq_*; read at start)
     int early_fences;    // 1 on (the default), 0 off: the game goes on once its frame is translated, not
                          // when the GPU has run it (nvn/objects.c nvnSyncWait; ODYSSEY_SYNC_EARLY overrides)

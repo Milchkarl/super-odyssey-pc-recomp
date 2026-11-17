@@ -17,8 +17,9 @@ The first start after the update prepares the shaders once (a few minutes) - as 
 2. **Menu with a controller:** A (Cross) selects, B (Circle) goes back. Every tab at 1280 x 800 (the Deck): nothing
    overlaps or is cut off.
 3. **Defaults** (fresh settings): borderless, FXAA, 60 FPS, VSync Off; Performance > Optimizations: Early frame
-   hand-off On, Multithreaded rendering On (Off on the Deck); Warm-up Auto. No Battery saver, no 120 FPS
-   interpolation.
+   hand-off On, Multithreaded rendering Auto (shows "Auto (on)" with NVIDIA, "Auto (off)" with AMD / Intel and on the Deck); Warm-up Auto. No Battery saver, no 120 FPS
+   interpolation. Each option's description starts with what it does and "Recommended: ..." (Korean and Portuguese
+   too).
 4. **Play an hour on the Deck** through several kingdoms and loading zones: the frame rate should not sink over time
    (Performance overlay: memory).
 5. **Lake Kingdom:** continue a save that is in Lake Kingdom.
@@ -32,4 +33,4 @@ The first start after the update prepares the shaders once (a few minutes) - as 
 
 - Scripted test tours that warp between kingdoms sometimes stop the game with its own "sead halt" (its 512 KB scene
   heap) right after a warp; whether normal play can hit it is being checked.
-- The Steam Deck's GPU reset with Multithreaded rendering on: not seen again, but it stays off there.
+- The Steam Deck's GPU reset with Multithreaded rendering on: not seen again, but Auto keeps it off there (and on AMD / Intel).

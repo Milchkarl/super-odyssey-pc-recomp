@@ -2,9 +2,9 @@ A big update: more FPS on busy scenes, fixes for crashes in Lake Kingdom, on qui
 
 ## Performance
 
-- **Faster on busy scenes.** Two new options at the top of Performance > Optimizations, both on by default:
-  - **Early frame hand-off**: the game starts its next frame while the graphics card finishes the last one (about 10-15% more FPS in busy places, 45 -> 58-60 FPS on a Steam Deck).
-  - **Multithreaded rendering**: a second CPU thread hands the drawing commands to the driver (about 25% more FPS in busy places at high frame rates). Off by default on the Steam Deck for now.
+- **Faster on busy scenes.** Two new options at the top of Performance > Optimizations:
+  - **Early frame hand-off**: on by default: the game starts its next frame while the graphics card finishes the last one (about 10-15% more FPS in busy places, 45 -> 58-60 FPS on a Steam Deck).
+  - **Multithreaded rendering**: a second CPU thread hands the drawing commands to the driver (about 25% more FPS in busy places at high frame rates). Auto by default: on with NVIDIA graphics cards, off with AMD and Intel ones and on the Steam Deck, until it has been tested more there.
   - If you see flickering, missing objects or a frozen picture, turn them off.
 - **Steady memory over long sessions.** Memory no longer grows with every kingdom and loading zone on Linux / Steam Deck (the cause of slowdowns after a while). On PCs with less than 32 GB of RAM the warm-up at start prepares fewer shaders ahead, which used several GB of graphics driver memory (#75, #61).
 
@@ -19,6 +19,7 @@ A big update: more FPS on busy scenes, fixes for crashes in Lake Kingdom, on qui
 ## Settings menu
 
 - **Same defaults everywhere** (Windows, Linux, Steam Deck): borderless, FXAA, 60 FPS, VSync off, the game's own texture filtering. The Steam Deck keeps its 1280 x 800 picture filling the screen.
+- **Every option says in plain words what it does and what is recommended**, at the top of its description (a line under each control on the Controls page).
 - **VSync**: On, Fast (Mailbox), Adaptive (Relaxed), Off.
 - **New**: Shadow quality (2x / 4x shadow maps), Texture detail, FXAA, AMD FSR 1 in the upscaler list.
 - **Controllers**: A / Cross selects and B / Circle goes back in the menu (it was the other way round on Xbox, PlayStation and Steam Deck controllers).
