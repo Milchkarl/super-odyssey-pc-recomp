@@ -1,7 +1,7 @@
 // Where Super Odyssey PC Recomp keeps its files (runtime/paths.c).
 //
 // Data root: everything the app writes or the user brings - extracted/ (game files), save/, cache/ (shaders /
-// pipelines), mods/ (RomFS mods), fonts/ (system fonts), powermoon.ini. rt_paths_init() picks it and makes it the
+// pipelines), mods/ (RomFS mods), fonts/ (system fonts), settings.ini. rt_paths_init() picks it and makes it the
 // working directory, so the rest of the runtime opens those by their relative names. In order:
 //   1. ODYSSEY_DATA_ROOT (tests, scratch installs)
 //   2. dev / portable mode: the starting directory has extracted/ (a source checkout: `./build/SuperOdysseyRecomp`, the

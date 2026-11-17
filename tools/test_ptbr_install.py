@@ -26,7 +26,7 @@ class InstallerTests(unittest.TestCase):
         self.root.mkdir()
         (self.root / 'save').mkdir()
         (self.root / 'save/progress.bin').write_bytes(b'Synthetic save fixture')
-        (self.root / 'powermoon.ini').write_text('language = ja\nmod_off = Other/romfs\n')
+        (self.root / 'settings.ini').write_text('language = ja\nmod_off = Other/romfs\n')
         (self.root / 'mods/Other/romfs').mkdir(parents=True)
         (self.root / 'mods/Other/romfs/file.txt').write_bytes(b'Unrelated mod')
         self.before = self.snapshot()

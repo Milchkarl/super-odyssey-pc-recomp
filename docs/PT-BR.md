@@ -74,7 +74,7 @@ Restart the application after installing files. In **Controls > System language*
 select **Português (Brasil)** and ensure the translation is enabled in **Mods**.
 The description reports detection, disabled files, incomplete/modified packages,
 unsupported code patches, or a conflicting mod. Restart again if the game was
-already running. The preference is saved as `language = pt-BR` in `powermoon.ini`.
+already running. The preference is saved as `language = pt-BR` in `settings.ini`.
 
 ## Detection and limitations
 

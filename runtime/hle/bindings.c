@@ -1,5 +1,5 @@
 // Control remapping: tables runtime/hle/input.c reads on every input event (so a change applies at once), the
-// capture used by the "click a binding, then press" UI, and their powermoon.ini lines. See runtime/input_bind.h.
+// capture used by the "click a binding, then press" UI, and their settings.ini lines. See runtime/input_bind.h.
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -36,7 +36,7 @@ static const char *const k_names[BIND_KEY_COUNT] = {
     "D-pad Left", "D-pad Up", "D-pad Right", "D-pad Down", "Left stick Up", "Left stick Down", "Left stick Left",
     "Left stick Right", "Right stick Up", "Right stick Down", "Right stick Left", "Right stick Right",
 };
-// controller buttons by position (powermoon.ini)
+// controller buttons by position (settings.ini)
 static const char *const k_pad_ini[PADB_HOST_COUNT] = {
     "south", "east", "west", "north", "back", "guide", "start", "lstick", "rstick", "lshoulder", "rshoulder",
     "dpad_up", "dpad_down", "dpad_left", "dpad_right", "misc1", "rpaddle1", "lpaddle1", "rpaddle2", "lpaddle2",
@@ -75,7 +75,7 @@ const char *bind_pad_label(int host, int fam) {
     return fam == 1 ? xb[host] : fam == 2 ? ps[host] : nin[host];
 }
 
-// powermoon.ini's and the menu's names of the mouse's bindings (BIND_MOUSE_LEFT..)
+// settings.ini's and the menu's names of the mouse's bindings (BIND_MOUSE_LEFT..)
 static const char *const k_mouse[BIND_KEY_CODE_COUNT - BIND_MOUSE_LEFT] = {
     "Mouse Left", "Mouse Middle", "Mouse Right", "Mouse Back", "Mouse Forward", "Wheel Up", "Wheel Down"};
 
@@ -218,7 +218,7 @@ bool bind_capture_event(const SDL_Event *e) {
     }
 }
 
-// ------------------------------------------------------------------ powermoon.ini
+// ------------------------------------------------------------------ settings.ini
 bool bind_settings_load(const char *key, const char *val) {
     bool pad = !strncmp(key, "bind_pad_", 9), kb = !strncmp(key, "bind_key_", 9);
     if (!pad && !kb) return false;

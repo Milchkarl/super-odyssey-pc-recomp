@@ -1,4 +1,4 @@
-// User settings (powermoon.ini in the data root), edited from the in-game menu.
+// User settings (settings.ini in the data root), edited from the in-game menu.
 #pragma once
 #include <stdbool.h>
 
@@ -21,7 +21,7 @@ enum { DISPLAY_AUTO, DISPLAY_1080, DISPLAY_1440, DISPLAY_2160, DISPLAY_MODE_COUN
 // VSync (Vulkan present modes, named as in Savage Wind Recomp - owner 2026-11-16): ON = FIFO (classic vsync: each frame
 // waits for its refresh), FAST = mailbox (no tearing, the newest frame at each refresh, the game paces itself),
 // ADAPTIVE = FIFO relaxed (On, but a late frame goes out at once - tearing then), OFF = immediate (tearing, the lowest
-// latency; the default). The numbers are the settings file's older order (powermoon.ini "vsync": on = mailbox, strict
+// latency; the default). The numbers are the settings file's older order (settings.ini "vsync": on = mailbox, strict
 // = FIFO); the file now says "vsync_mode" (settings.c).
 enum { VSYNC_FAST, VSYNC_OFF, VSYNC_ON, VSYNC_ADAPTIVE, VSYNC_COUNT };
 static inline int settings_display_height(int mode) {

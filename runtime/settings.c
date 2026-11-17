@@ -13,10 +13,27 @@
 
 #define SETTINGS_FILE settings_file()
 
-// ODYSSEY_SETTINGS=<path>: another settings file (test runs never touch the player's powermoon.ini)
+// The settings file: settings.ini in the data root (before 0.4.1: powermoon.ini, renamed at the first start - the
+// name came from the project's first name). ODYSSEY_SETTINGS=<path>: another file (test runs never touch the player's).
 static const char *settings_file(void) {
     const char *e = getenv("ODYSSEY_SETTINGS");
-    return e && *e ? e : "powermoon.ini";
+    if (e && *e) return e;
+    static bool moved;
+    if (!moved) {
+        moved = true;
+        FILE *now = fopen("settings.ini", "rb"), *old = now ? NULL : fopen("powermoon.ini", "rb");
+        if (now) fclose(now);
+        if (old) {
+            fclose(old);
+            if (rename("powermoon.ini", "settings.ini") == 0) LOG("[settings] powermoon.ini renamed to settings.ini\n");
+            else LOG("[settings] couldn't rename powermoon.ini to settings.ini: reading and saving powermoon.ini\n");
+        }
+    }
+    FILE *f = fopen("settings.ini", "rb");
+    if (f) { fclose(f); return "settings.ini"; }
+    f = fopen("powermoon.ini", "rb");  // (the rename failed: a read-only folder, the file in use)
+    if (f) { fclose(f); return "powermoon.ini"; }
+    return "settings.ini";
 }
 const char *settings_current_file(void) { return settings_file(); }
 

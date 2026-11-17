@@ -172,7 +172,7 @@ accelerometer: PlayStation and Switch Pro controllers. Menu > Controls > *Motion
 The program folder holds the program; the install folder (the same one unless you chose another) holds:
 
 - `extracted\` - your game data as the installer wrote it and the game code built from it (`odyssey_game.dll`)
-- `save\` - your saves, `cache\` - compiled shaders, `powermoon.ini` - settings, `SuperOdysseyRecomp.log` - the log
+- `save\` - your saves, `cache\` - compiled shaders, `settings.ini` - settings, `SuperOdysseyRecomp.log` - the log
 - `mods\` - optional RomFS mods, each in its own folder (`mods\<Mod name>\romfs\...`; the Atmosphere layout works too)
 
 Never share `extracted\` or anything built from it: it's Nintendo's game.

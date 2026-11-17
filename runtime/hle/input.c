@@ -110,7 +110,7 @@ static void recompute_pad(void) {
     pad_rx = x, pad_ry = y;
 }
 
-// Mouse camera (Controls tab "Mouse camera", `mouse_camera` in powermoon.ini): while the game has the window and no
+// Mouse camera (Controls tab "Mouse camera", `mouse_camera` in settings.ini): while the game has the window and no
 // menu is up, the pointer is held in the window (SDL relative mode, input_mouse_window) and its movement turns the
 // camera: the speed of the movement, sampled every ~12 ms (the game reads it several times a frame), is a stick's
 // tilt. MOUSE_FULL counts a second make a full tilt at 100% sensitivity; any movement tilts at least MOUSE_MIN, past
@@ -363,7 +363,7 @@ int input_pad_family(void) {
 // Odyssey reads the controller's motion for its motion moves (a shake throws the cap at a homing target, spins,
 // tilting): nn::hid GetSixAxisSensorStates. It comes from the active controller's gyro and accelerometer (SDL),
 // turned into the Switch's axes and units (as Switch emulators do: acceleration in G, rotation in turns a second,
-// the angle and orientation integrated from it). Controls tab "Motion controls" (`motion` in powermoon.ini).
+// the angle and orientation integrated from it). Controls tab "Motion controls" (`motion` in settings.ini).
 static pthread_mutex_t motion_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     bool on;              // the active pad has a gyro or an accelerometer
@@ -428,7 +428,7 @@ void input_motion_settle(void) {
 }
 
 // Calibrate gyro (Controls tab, #53): the controller lies still for 2 s; the offset its gyro reports at rest is learned
-// (as at every settle, motion_bias_sample) from scratch, then kept in powermoon.ini (motion_gyro_bias).
+// (as at every settle, motion_bias_sample) from scratch, then kept in settings.ini (motion_gyro_bias).
 // input_motion_calibration: 0 none, 1 running, 2 done, -1 this controller has no gyro.
 void input_motion_calibrate(void) {
     pthread_mutex_lock(&motion_lock);
@@ -787,7 +787,7 @@ static _Atomic int32_t script_lx, script_ly, script_rx, script_ry;
 
 // Tests of the bindings, through them like a real player:
 // ODYSSEY_HOST_INPUT="frame:key:<SDL key name>:frames,frame:pad:<button>:frames,..." holds a host key / controller
-//   button (names as in powermoon.ini's bind_* lines: "Z", "Keypad 0", "south", "ltrigger"...);
+//   button (names as in settings.ini's bind_* lines: "Z", "Keypad 0", "south", "ltrigger"...);
 //   "frame:lstick:<x>/<y>:frames" holds the controller's left stick there (raw SDL units, y up: a drifting stick);
 //   "frame:mouse:<dx>/<dy>:frames" moves the mouse by that many counts each frame (screen y down: the mouse camera).
 // "frame:type:<text>" types <text> as real key events (down, text, up per character), through the overlay menu / name
@@ -1182,7 +1182,7 @@ HLE_FUNC("_ZN2nn3hid27BindNpadStyleSetUpdateEventERKjPNS_2os15SystemEventTypeENS
 // a low and a high band's amplitude for each device (left / right Joy-Con, or the two sides of a Pro Controller) -
 // through the hid service (services/hid_set.c: SendVibrationValue(s)) to here: onto the gamepad's two motors, the
 // stronger side per band (low band: the low-frequency motor). Sent again while it lasts, so a value runs 250 ms at most:
-// a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in powermoon.ini).
+// a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in settings.ini).
 void input_vibration(uint32_t handle, float amp_low, float amp_high) {
     static float lo[2][2], hi[2][2];
     static uint16_t last_l[2], last_h[2];
