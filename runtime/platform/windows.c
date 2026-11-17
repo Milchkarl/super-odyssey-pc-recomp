@@ -143,14 +143,11 @@ static void log_to_file_without_console(void) {
     _putenv("ODYSSEY_LOG_APPEND=1");
 }
 
-// The recompiled game code is built for x86-64-v3 (Makefile GENARCH: AVX2, FMA, BMI2): say so instead of crashing
-// with an illegal instruction on an older CPU.
+// The recompiled game code is compiled on this PC for the CPU it has (runtime/gamelib.c: AVX2 as built, or AVX /
+// SSE4.2 / baseline on older CPUs, with an id of its own), so any x86-64 CPU runs it: nothing to refuse, only noted.
 static void require_cpu(void) {
-    __builtin_cpu_init();
-    if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2")) return;
-    MessageBoxA(NULL, "Super Odyssey PC Recomp needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or newer).",
-                "Super Odyssey PC Recomp", MB_ICONERROR | MB_OK);
-    ExitProcess(1);
+    extern const char *gamelib_cpu_name(void);
+    fprintf(stderr, "[cpu] game code target: %s\n", gamelib_cpu_name());
 }
 
 // Heap corruption ends the process from inside the heap (0xC0000374), with no exception to report and often long
@@ -613,3 +610,93 @@ bool plat_remove_tree(const char *dir) {
 
 // End the process at once, skipping DLL teardown (from an atexit handler, after flushing). Exit status 0.
 void plat_terminate(void) { TerminateProcess(GetCurrentProcess(), 0); }
+
+// ODYSSEY_SAMPLE=<file> (profiling): from the first plat_sample_this_thread() call, every thread of the process is
+// sampled ~1000 times a second - its instruction pointer and up to 7 callers (unwound through the modules' unwind
+// tables) - into <file> as records of 10 u64: time in ms on the caller's clock (now_ms), the thread id (the caller's
+// with bit 32 set), then 8 addresses (0: none). <file>.modules lists the modules (base, size, path) for resolving.
+#include <tlhelp32.h>
+static DWORD sample_tid;
+static int64_t sample_clock;  // (caller's clock - GetTickCount64)
+static FILE *sample_out;
+static void sample_modules(void) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s.modules", getenv("ODYSSEY_SAMPLE"));
+    FILE *m = fopen(path, "w");
+    HMODULE mods[512];
+    DWORD need = 0;
+    if (m && EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &need))
+        for (DWORD i = 0; i < need / sizeof *mods && i < 512; i++) {
+            MODULEINFO mi;
+            char name[MAX_PATH];
+            if (GetModuleInformation(GetCurrentProcess(), mods[i], &mi, sizeof mi) && GetModuleFileNameA(mods[i], name, sizeof name))
+                fprintf(m, "%llx %lx %s\n", (unsigned long long)(uintptr_t)mi.lpBaseOfDll, (unsigned long)mi.SizeOfImage, name);
+        }
+    if (m) fclose(m);
+}
+static DWORD WINAPI sample_main(LPVOID arg) {
+    (void)arg;
+    timeBeginPeriod(1);
+    DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
+    enum { MAXT = 256 };
+    HANDLE th[MAXT];
+    DWORD tid[MAXT];
+    int nt = 0;
+    static uint64_t recs[MAXT][10];
+    for (unsigned long n = 0;; n++) {
+        if (n % 2000 == 0) {  // (threads come and go: the list again every ~2 s)
+            sample_modules();
+            for (int i = 0; i < nt; i++) CloseHandle(th[i]);
+            nt = 0;
+            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            THREADENTRY32 te = {.dwSize = sizeof te};
+            for (BOOL ok = Thread32First(snap, &te); ok && nt < MAXT; ok = Thread32Next(snap, &te)) {
+                if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+                HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+                if (h) th[nt] = h, tid[nt++] = te.th32ThreadID;
+            }
+            CloseHandle(snap);
+        }
+        Sleep(1);
+        int nrec = 0;
+        uint64_t now = (uint64_t)((int64_t)GetTickCount64() + sample_clock);
+        for (int t = 0; t < nt; t++) {
+            CONTEXT ctx = {.ContextFlags = CONTEXT_FULL};
+            if (SuspendThread(th[t]) == (DWORD)-1) continue;
+            BOOL ok = GetThreadContext(th[t], &ctx);
+            uint64_t *rec = recs[nrec];
+            memset(rec, 0, sizeof recs[0]);
+            rec[0] = now;
+            rec[1] = tid[t] | (tid[t] == sample_tid ? 1ull << 32 : 0);
+            for (int i = 0; ok && i < 8; i++) {
+                rec[2 + i] = ctx.Rip;
+                DWORD64 base;
+                PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &base, NULL);
+                if (!fn) {  // a leaf without unwind data: its return address is at the stack pointer
+                    if (!ctx.Rsp || IsBadReadPtr((void *)ctx.Rsp, 8)) break;
+                    ctx.Rip = *(DWORD64 *)ctx.Rsp;
+                    ctx.Rsp += 8;
+                } else {
+                    void *handler_data;
+                    DWORD64 frame;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, fn, &ctx, &handler_data, &frame, NULL);
+                }
+                if (!ctx.Rip) break;
+            }
+            ResumeThread(th[t]);
+            if (ok) nrec++;
+        }
+        fwrite(recs, sizeof recs[0], (size_t)nrec, sample_out);
+        if (n % 500 == 499) fflush(sample_out);
+    }
+    return 0;
+}
+void plat_sample_this_thread(uint64_t now_ms) {
+    static int done;
+    if (done++) return;
+    const char *f = getenv("ODYSSEY_SAMPLE");
+    if (!f || !(sample_out = fopen(f, "wb"))) return;
+    sample_tid = GetCurrentThreadId();
+    sample_clock = (int64_t)now_ms - (int64_t)GetTickCount64();
+    CreateThread(NULL, 0, sample_main, NULL, 0, NULL);
+}

@@ -55,8 +55,10 @@ static void common_state_getter(Service *s, IpcReq *req, IpcResp *resp) {
         }
         pthread_mutex_unlock(&g_klock);
         break;
-    case 5: OUT(uint8_t, 0) = 1; resp_size(resp, 1); break;   // GetOperationMode: docked
-    case 6: OUT(uint32_t, 0) = 1; resp_size(resp, 4); break;  // GetPerformanceMode: boost
+    // GetOperationMode / GetPerformanceMode: docked and boost (ODYSSEY_HANDHELD=1: handheld and normal - the game's own
+    // handheld rendering, as on a Switch Lite)
+    case 5: OUT(uint8_t, 0) = settings_handheld() ? 0 : 1; resp_size(resp, 1); break;
+    case 6: OUT(uint32_t, 0) = settings_handheld() ? 0 : 1; resp_size(resp, 4); break;
     case 8: OUT(uint8_t, 0) = 0; resp_size(resp, 1); break;   // GetBootMode
     case 9: OUT(uint8_t, 0) = 1; resp_size(resp, 1); break;   // GetCurrentFocusState: in focus
     case 13: case 61: resp->copy_handles[resp->ncopy++] = new_event(); break;
@@ -72,7 +74,7 @@ static void common_state_getter(Service *s, IpcReq *req, IpcResp *resp) {
 static void self_controller(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     switch (req->cmd) {
-    case 0: LOG("[am] application requested exit\n"); exit(0);
+    case 0: { LOG("[am] application requested exit\n"); extern void vk_exit_now(void); vk_exit_now(); }
     case 9: resp->copy_handles[resp->ncopy++] = new_event(); break;
     case 40: OUT(uint64_t, 0) = 1; resp_size(resp, 8); break;  // CreateManagedDisplayLayer
     case 69: OUT(uint8_t, 0) = 0; resp_size(resp, 1); break;

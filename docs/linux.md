@@ -7,7 +7,7 @@ The Linux version is an AppImage: one file that runs on SteamOS and on desktop d
 Ubuntu 22.04, Debian 12, Fedora 36, Arch, SteamOS, ...). It's built with `make appimage` (`tools/linux/appimage.sh`,
 in Ubuntu 22.04 containers).
 
-You need a Vulkan 1.3 driver (Mesa RADV / ANV / NVK, or NVIDIA's), a CPU with AVX2 (2013 or newer), about 12 GB of free
+You need a Vulkan 1.3 driver (Mesa RADV / ANV / NVK, or NVIDIA's), a 64-bit x86 CPU (AVX2, 2013 or newer, recommended; older ones work, slower), about 12 GB of free
 space, and the extracted **`exefs`** and **`romfs`** folders of your own copy of Super Mario Odyssey (version 1.0.0, or
 1.4.1 with the update already applied).
 
@@ -45,16 +45,16 @@ the previous file only while it still matches the change this app made; later
 Steam edits are never overwritten. No shortcut is created during updates or
 without pressing the button.
 
-On a Steam Deck the game starts with the **battery saver** settings: 75% internal resolution (960 x 600) upscaled with
-AMD FSR 1, no SMAA, 60 FPS without interpolation, 4x texture filtering. The menu's Performance tab has a *Battery
-saver* button to apply them again after changing things. For the biggest savings, also lower the power limit in the
+The Steam Deck starts with the same settings as Windows and other Linux PCs (borderless, FXAA, 60 FPS, the speed-ups
+on), fitted to its screen: its own 1280 x 800, filled (16:10). For longer battery life, set Display > Console mode to
+Handheld (the game's lighter handheld rendering) and lower the power limit in the
 Deck's Quick Access menu (Performance > TDP Limit, e.g. 8-10 W). Don't use the Deck's frame limit below 60: Odyssey's
 gameplay runs one step per frame, so a 30 or 40 FPS limit slows the game itself down.
 
 **90 and 120 FPS** (Performance > Frame rate: 60, 90 or 120, experimental) draw up to 90 or 120 frames a second with
 gameplay still at 60. They are for a screen that fast: 90 Hz on a Steam Deck OLED, or a faster external display (the
 LCD Deck's screen shows 60 at most). On an LCD
-Deck in Cap Kingdom with the battery saver settings it measured about 78 FPS walking and 55 in the busiest town view,
+Deck in Cap Kingdom at 75% resolution with FSR 1 it measured about 78 FPS walking and 55 in the busiest town view,
 with gameplay kept at full speed. It uses noticeably more power than 60 FPS.
 
 ## Where things are
@@ -73,6 +73,13 @@ wherever the game is installed); started from a terminal, it prints there instea
 
 The menu's Updates tab (F1 > Updates) downloads the new AppImage from this project's releases and replaces the one you
 started, then restarts. It uses the system's `curl`, and the AppImage's folder must be writable (an SD card is fine).
+
+## Brazilian Portuguese fan translation
+
+The [Brazilian Portuguese installer](PT-BR.md) also uses the system's `curl`.
+AppImages include `bsdtar` for the authors' RAR package. For a source build,
+install your distribution's `libarchive-tools` package instead. GNU tar cannot
+extract this package. No translation assets ship in the AppImage.
 
 ## Reporting a problem
 

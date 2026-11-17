@@ -1,4 +1,5 @@
 // Two-pane settings pages (see option_rows.h): rows on the left, the selected / hovered row's description on the right.
+#include <set>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -9,12 +10,16 @@
 #include "imgui_internal.h"  // (SetKeyOwner, NavCursorVisible)
 
 #include "option_rows.h"
+#include "option_notes.h"
+#include "../rt.h"  // (LOG)
+#include "i18n.h"
 #include "osk.h"
 #include "theme.h"
 
 static float g_scale = 1;
 static std::string g_desc_hover, g_desc_focus, g_desc_shown;  // this frame's hovered / selected row, and the last shown
 static std::string g_desc_first;  // the page's first row (shown until a row is selected or hovered)
+static std::string g_page, g_page_shown;  // this page's id, and the page g_desc_shown belongs to
 static bool g_next_disabled;
 void opt_disable_next(void) { g_next_disabled = true; }
 static int g_indent;
@@ -30,6 +35,7 @@ void opt_begin(const char *id, float scale) {
     if (g_take_first) ImGui::NavMoveRequestCancel();  // (this frame's Down goes to the first row instead)
     g_indent = 0;
     g_desc_hover.clear(), g_desc_focus.clear();
+    g_page = id;
     ImVec2 avail = ImGui::GetContentRegionAvail();
     ImGui::PushID(id);
     ImGui::BeginChild("##rows", ImVec2(avail.x * 0.48f, avail.y), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
@@ -38,7 +44,7 @@ void opt_begin(const char *id, float scale) {
 }
 
 void opt_section(const char *title) {
-    std::string t = title;
+    std::string t = tr(title);
     for (char &c : t) c = (char)toupper((unsigned char)c);
     if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 14 * g_scale));
     ImGui::TextColored(kTextDimV, "%s", t.c_str());  // (headings: white, red only outlines)
@@ -47,9 +53,21 @@ void opt_section(const char *title) {
 // One row: draws it, handles A / click and left / right while selected. Returns 2 (A / click), -1 / +1 (left / right) or 0.
 // arrows: ◀ value ▶ (a choice of several, or a stepper): left / right step it, and the arrows click too
 // Look (theme.h): a flat dark row, the label as written; selected / hovered: lighter, with a red bar on its left.
-static int row(const char *label, const std::string &value, bool changed, const char *desc, bool upper = false,
+static int row(const char *label_en, const std::string &value_en, bool changed, const char *desc_en, bool upper = false,
                bool arrows = false, bool repeat = false) {
-    ImGui::PushID(label);
+    ImGui::PushID(label_en);  // (the English one: the same row whatever the menu's language)
+    // (the menu's language: runtime/ui/i18n.h - label, value and description as shown)
+    const char *label = tr(label_en), *desc = tr(desc_en);
+    // (the option's plain-English note on top: what it does, what is recommended - option_notes.h)
+    std::string noted;
+    if (const OptionNote *n = option_note(label_en)) {
+        const char *sum = tr(n->summary);  // (left out when the description already starts with it: "The game's volume.")
+        if (sum[0] && !(desc && !strncmp(desc, sum, strlen(sum)))) noted = std::string(sum) + "\n";
+        noted += std::string(tr("Recommended:")) + " " + tr(n->recommended);
+        if (desc && *desc) noted += std::string("\n\n") + desc;
+        desc = noted.c_str();
+    }
+    std::string value = tr(value_en.c_str());
     if (g_indent) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + g_indent * 28 * g_scale);  // (an option of the row above)
     ImVec2 p = ImGui::GetCursorScreenPos();
     float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFontSize() * 1.9f;
@@ -96,11 +114,28 @@ static int row(const char *label, const std::string &value, bool changed, const 
         for (char &c : t) c = (char)toupper((unsigned char)c);
     float ty = p.y + (h - fs) * 0.5f;
     ImU32 label_col = off ? kTextOff : kText;  // (greyed out: clearly dim)
-    dl->AddText(ImVec2(p.x + pad, ty), label_col, t.c_str());
+    // Label and value fitted into the row: where both don't fit at full size (a narrow window such as the Steam Deck's
+    // 1280 x 800, a longer translation), the label is drawn smaller - down to 70% - then the value too, so they never
+    // overlap (owner 2026-11-16). Each fitted row is logged once (tests read it: "[menu] fitted").
+    float aw0 = fs * 0.42f, gap0 = fs * 0.55f;
+    float lw = ImGui::CalcTextSize(t.c_str()).x, vw0 = value.empty() ? 0 : ImGui::CalcTextSize(value.c_str()).x;
+    float vblock = vw0 + (arrows && !value.empty() ? 2 * (aw0 + gap0) : 0);
+    float room = w - 2 * pad - (value.empty() ? 0 : gap0 * 1.5f);
+    float ls = 1, vs = 1;
+    if (lw + vblock > room && lw > 0) {
+        ls = fmaxf(0.7f, (room - vblock) / lw);
+        if (lw * ls + vblock > room && vw0 > 0) vs = fmaxf(0.7f, (room - lw * ls - (vblock - vw0)) / vw0);
+        static std::set<std::string> logged;
+        if (logged.insert(t + "|" + value).second)
+            LOG("[menu] fitted: \"%s\" (%.0f%%) | \"%s\" (%.0f%%)%s\n", t.c_str(), ls * 100, value.c_str(), vs * 100,
+                lw * ls + vw0 * vs + (vblock - vw0) > room + 0.5f ? " - STILL OVERLAPS" : "");
+    }
+    ImFont *font = ImGui::GetFont();
+    dl->AddText(font, fs * ls, ImVec2(p.x + pad, p.y + (h - fs * ls) * 0.5f), label_col, t.c_str());
     float right = p.x + w - pad;  // (the value's right edge)
     if (arrows && !value.empty()) {  // ◀ value ▶, drawn (the fonts have no arrow glyphs); a click on one steps
         float aw = fs * 0.42f, gap = fs * 0.55f, cy = ty + fs * 0.52f;
-        float rx = right - aw, lx = rx - gap - ImGui::CalcTextSize(value.c_str()).x - gap - aw;
+        float rx = right - aw, lx = rx - gap - vw0 * vs - gap - aw;
         ImU32 ac = off ? kTextOff : lit ? kText : kTextDim;
         dl->AddTriangleFilled(ImVec2(lx, cy), ImVec2(lx + aw, cy - aw * 0.75f), ImVec2(lx + aw, cy + aw * 0.75f), ac);
         dl->AddTriangleFilled(ImVec2(rx + aw, cy), ImVec2(rx, cy - aw * 0.75f), ImVec2(rx, cy + aw * 0.75f), ac);
@@ -113,8 +148,8 @@ static int row(const char *label, const std::string &value, bool changed, const 
         right = rx - gap;
     }
     if (!value.empty()) {
-        float vw = ImGui::CalcTextSize(value.c_str()).x, vx = right - vw;
-        dl->AddText(ImVec2(vx, ty), off ? kTextOff : changed ? ImGui::ColorConvertFloat4ToU32(kAccentSoftV)
+        float vw = vw0 * vs, vx = right - vw;
+        dl->AddText(font, fs * vs, ImVec2(vx, p.y + (h - fs * vs) * 0.5f), off ? kTextOff : changed ? ImGui::ColorConvertFloat4ToU32(kAccentSoftV)
                                                                  : theme_u32(kTextV, 0.78f), value.c_str());
     }
     ImGui::PopID();
@@ -134,6 +169,28 @@ bool opt_choice(const char *label, int *v, const char *const *names, int n, int 
     int nv = cur + (step == 2 ? 1 : step);
     nv = wrap ? (nv + n) % n : nv < 0 ? 0 : nv >= n ? n - 1 : nv;
     if (nv == cur) return false;
+    *v = nv;
+    return true;
+}
+
+// opt_choice whose choices this machine may not support (avail[i] false): left / right / A skip those, and the
+// description names them ("Not available on this PC: ...") so they read as greyed out rather than missing. A choice
+// saved earlier that isn't available here stays selectable away from (the row isn't disabled).
+bool opt_choice_avail(const char *label, int *v, const char *const *names, int n, int def, const char *desc, const bool *avail) {
+    int cur = *v >= 0 && *v < n ? *v : 0;
+    std::string d = desc ? tr(desc) : "";
+    std::string missing;
+    for (int i = 0; i < n; i++)
+        if (!avail[i]) missing += (missing.empty() ? "" : ", ") + std::string(tr(names[i]));
+    if (!missing.empty()) d += "\n\n" + std::string(tr("Not available on this PC (greyed out):")) + " " + missing + ".";
+    int step = row(label, names[cur], cur != def, d.c_str(), false, true);
+    if (!step) return false;
+    int dir = step == 2 ? 1 : step, nv = cur;
+    for (int k = 0; k < n; k++) {  // (the next available one that way, wrapping)
+        nv = (nv + dir + n) % n;
+        if (avail[nv]) break;
+    }
+    if (nv == cur || !avail[nv]) return false;
     *v = nv;
     return true;
 }
@@ -208,7 +265,9 @@ void opt_end(void) {
     ImGui::PopStyleVar();
     if (const char *t = getenv("ODYSSEY_OPT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(t));  // (test)
     ImGui::EndChild();
-    // the description: the hovered row (mouse) wins, else the selected one (controller), else the last shown
+    // the description: the hovered row (mouse) wins, else the selected one (controller), else the last shown on this
+    // page (another page's stayed on every tab: the Display tab's Monitor text on Graphics, Audio, Mods...)
+    if (g_page_shown != g_page) g_desc_shown.clear(), g_page_shown = g_page;
     if (!g_desc_hover.empty()) g_desc_shown = g_desc_hover;
     else if (!g_desc_focus.empty()) g_desc_shown = g_desc_focus;
     else if (g_desc_shown.empty()) g_desc_shown = g_desc_first;

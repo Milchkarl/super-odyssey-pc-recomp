@@ -5,11 +5,13 @@
 #include <errno.h>
 #include <execinfo.h>
 #include <fcntl.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -35,12 +37,54 @@
 // (nvn/vulkan/exec.c gmem_import), and the amdgpu kernel driver walks such an imported range page by page on every
 // submission - 3.1 GB in 4 KB pages took 4.3 ms per submission on a Steam Deck, 45% of the render thread. madvise lets
 // the kernel assemble huge pages there (by default it only does where asked). ODYSSEY_THP=0: as before.
+// madvise alone isn't enough when memory is fragmented: a Steam Deck session had 96 MB of huge pages in all and
+// ~3 ms per submission. A thread of its own asks the kernel to assemble the heap's used part into huge pages
+// (MADV_COLLAPSE, Linux 6.1+: it compacts memory to do it), now and then - 20 s after start, then every 60 s.
+#ifndef MADV_COLLAPSE
+#define MADV_COLLAPSE 25
+#endif
+static atomic_bool gpu_owned_heap;
+void plat_guest_heap_gpu_owned(bool owned) { atomic_store(&gpu_owned_heap,owned); }
+static void *heap_collapse_thread(void *a) {
+    (void)a;
+    { struct timespec ts = {20, 0}; nanosleep(&ts, NULL); }
+    for (int round = 0;; round++) {
+        extern uint64_t kernel_heap_size(void);
+        uint64_t size = kernel_heap_size() & ~((2ull << 20) - 1);
+        if (size && !atomic_load(&gpu_owned_heap)) {
+            struct timespec t0, t1;
+            clock_gettime(CLOCK_MONOTONIC, &t0);
+            int ok = 0, inval = 0, other = 0, first_err = 0;
+            for (uint64_t off = 0; off < size; off += 64ull << 20) {  // (in 64 MB steps: an error in one leaves the rest)
+                uint64_t n = size - off < (64ull << 20) ? size - off : 64ull << 20;
+                if (madvise((void *)(uintptr_t)(HEAP_BASE + off), n, MADV_COLLAPSE) == 0) ok++;
+                else if (errno == EINVAL) inval++, first_err = first_err ? first_err : errno;
+                else other++, first_err = first_err ? first_err : errno;
+            }
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            if (round < 3)
+                fprintf(stderr, "[mem] guest heap into huge pages: %d of %d parts (%d refused, %d busy or no memory, first error %s; %.0f ms)\n",
+                        ok, ok + inval + other, inval, other, first_err ? strerror(first_err) : "none",
+                        (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6);
+            if (!ok && !other) return NULL;  // (not supported here at all)
+        }
+        struct timespec ts = {60, 0};
+        nanosleep(&ts, NULL);
+    }
+    return NULL;
+}
 static void heap_huge_pages(uint64_t lo, uint64_t hi) {
     const char *e = getenv("ODYSSEY_THP");
     if (e && !atoi(e)) return;
     uint64_t a = HEAP_BASE > lo ? HEAP_BASE : lo, b = HEAP_BASE + HEAP_MAX < hi ? HEAP_BASE + HEAP_MAX : hi;
     if (a < b && madvise((void *)(uintptr_t)a, b - a, MADV_HUGEPAGE) != 0)
         fprintf(stderr, "[mem] huge pages for the guest heap not available (%s)\n", strerror(errno));
+    static bool started;
+    if (a < b && !started) {
+        started = true;
+        pthread_t t;
+        if (pthread_create(&t, NULL, heap_collapse_thread, NULL) == 0) pthread_detach(t);
+    }
 }
 
 bool plat_reserve_guest(uint64_t lo, uint64_t hi) {
@@ -56,7 +100,7 @@ bool plat_reserve_guest(uint64_t lo, uint64_t hi) {
 bool plat_reset_guest(uint64_t lo, uint64_t hi) {
     bool ok = mmap((void *)(uintptr_t)lo, hi - lo, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED,
                    -1, 0) == (void *)(uintptr_t)lo;
-    if (ok) heap_huge_pages(lo, hi);
+    if (ok) { atomic_store(&gpu_owned_heap,false); heap_huge_pages(lo, hi); }
     return ok;
 }
 
@@ -121,22 +165,46 @@ static void log_to_file_without_terminal(void) {
 }
 
 #if defined(__x86_64__)
-// The recompiled game code is built for x86-64-v3 (Makefile GENARCH: AVX2, FMA, BMI2): say so instead of crashing
-// with an illegal instruction on an older CPU.
+// The recompiled game code is compiled on this PC for the CPU it has (runtime/gamelib.c: AVX2 as built, or AVX /
+// SSE4.2 / baseline on older CPUs, with an id of its own), so any x86-64 CPU runs it: nothing to refuse, only noted.
 static void require_cpu(void) {
-    __builtin_cpu_init();
-    if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2")) return;
-    fprintf(stderr, "FATAL: Super Odyssey PC Recomp needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or "
-                    "newer).\n");
-    exit(1);
+    extern const char *gamelib_cpu_name(void);
+    fprintf(stderr, "[cpu] game code target: %s\n", gamelib_cpu_name());
 }
 #else
 static void require_cpu(void) {}
 #endif
 
+// Freed memory handed back to the system every 30 s (a low-priority thread): glibc keeps what was freed in its arenas
+// for reuse, and the game's area loads free and allocate in bursts across many threads - the process's memory in RAM
+// crept up ~25 MB a minute on a Steam Deck with nothing in use (2026-11-16). ODYSSEY_HEAP_TRIM=0 turns it off; each
+// trim's time is logged the first few times.
+uint64_t plat_heap_held_bytes(void);
+static void *heap_trim_thread(void *arg) {
+    (void)arg;
+    if (nice(10) < 0) {}
+    for (int n = 0;; n++) {
+        sleep(30);
+        uint64_t held = plat_heap_held_bytes(), t0 = plat_now_ns();
+        malloc_trim(0);
+        if (n < 6) fprintf(stderr, "[mem] trim: %.1f ms, malloc held %llu -> %llu MB\n", (plat_now_ns() - t0) / 1e6,
+                       (unsigned long long)(held >> 20), (unsigned long long)(plat_heap_held_bytes() >> 20));
+    }
+    return NULL;
+}
+
 void plat_init(void) {
+    // (4 malloc arenas, not up to 8 per core: the game's many threads spread freed memory over up to 32 arenas, which
+    // kept growing in RAM over a session on a Steam Deck; with 4 their memory stayed flat, FPS unchanged - 2026-11-16.
+    // MALLOC_ARENA_MAX set in the environment wins.)
+    if (!getenv("MALLOC_ARENA_MAX")) mallopt(M_ARENA_MAX, 4);
     log_to_file_without_terminal();
     require_cpu();
+    const char *e = getenv("ODYSSEY_HEAP_TRIM");
+    if (!e || atoi(e) != 0) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, heap_trim_thread, NULL) == 0) pthread_detach(t);
+    }
 }
 
 // (inside an AppImage: the binary in its mount, which stays mounted while this process lives - re-exec included)
@@ -192,7 +260,17 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
 }
 
 // Fatal error without a terminal: say so in a message box rather than vanishing (the details are in the log).
-uint64_t plat_private_bytes(void) { return 0; }
+uint64_t plat_private_bytes(void) {  // (anonymous memory, resident or swapped: what Windows counts as private)
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    unsigned long long kb, anon = 0, swap = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        if (sscanf(line, "RssAnon: %llu", &kb) == 1) anon = kb;
+        else if (sscanf(line, "VmSwap: %llu", &kb) == 1) swap = kb;
+    }
+    if (f) fclose(f);
+    return (anon + swap) << 10;
+}
 uint64_t plat_resident_bytes(void) {
     FILE *f = fopen("/proc/self/statm", "r");
     unsigned long long size = 0, rss = 0;
@@ -204,7 +282,14 @@ uint64_t plat_resident_bytes(void) {
 }
 uint64_t plat_total_ram(void) { return (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE); }
 uint64_t plat_guest_bytes(void) { return 0; }
-uint64_t plat_heap_bytes(void) { return 0; }
+uint64_t plat_heap_bytes(void) {  // (malloc's memory in use: small blocks plus its own mmap'd big ones)
+    struct mallinfo2 m = mallinfo2();
+    return (uint64_t)m.uordblks + (uint64_t)m.hblkhd;
+}
+uint64_t plat_heap_held_bytes(void) {  // (what malloc holds from the system, in use or free in its arenas)
+    struct mallinfo2 m = mallinfo2();
+    return (uint64_t)m.arena + (uint64_t)m.hblkhd;
+}
 void plat_heap_histogram(void) {}
 void plat_heap_check(const char *where) { (void)where; }
 
@@ -367,15 +452,70 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
     uint64_t pc = (uint64_t)uc->uc_mcontext.gregs[REG_RIP], sp = (uint64_t)uc->uc_mcontext.gregs[REG_RSP], lr = 0;
     if (sig != SIGSEGV || (fa & ~0xFFFull) != (sp & ~0xFFFull)) lr = *(uint64_t *)(uintptr_t)sp;
 #endif
+    // (a page guarded until the GPU's write to it is done: nvn/vulkan/exec.c - waits there, then the access is retried)
+    extern int renderer_guard_fault(uint64_t addr, bool can_step, bool is_write);
+#if defined(__x86_64__)
+    int g = sig == SIGSEGV ? renderer_guard_fault(fa, true, (uc->uc_mcontext.gregs[REG_ERR] & 2) != 0) : 0;
+    if (g == 2) {  // (next to the GPU's results: that page is open for one instruction - trap flag, step_handler)
+        uc->uc_mcontext.gregs[REG_EFL] |= 0x100;
+        return;
+    }
+#else
+    int g = sig == SIGSEGV ? renderer_guard_fault(fa, false, false) : 0;
+#endif
+    if (g) {
+        static int log = -1, n;  // ODYSSEY_LOG_GUARD=1: where the first 40 came from
+        if (log < 0) log = getenv("ODYSSEY_LOG_GUARD") != NULL;
+        if (log && n++ < 40) {
+            uint64_t off = 0;
+            const char *s = plat_symbol(pc, &off);
+            if (!s) s = rt_host_fn_name(pc, &off);
+            fprintf(stderr, "[guard] fault at %llx from %s+%llx (pc %llx, lr %llx)\n", (unsigned long long)fa,
+                    s ? s : "?", (unsigned long long)off, (unsigned long long)pc, (unsigned long long)lr);
+        }
+        return;
+    }
     if (rt_fault_watch(fa, pc)) return;
     char what[32];
     snprintf(what, sizeof what, "signal %d", sig);
     rt_fault_report(what, fa, pc, lr);
 }
 
+// (x86-64) after the one instruction a guarded page was opened for (crash_handler): closed again, the trap flag off
+static void step_handler(int sig, siginfo_t *si, void *ctx) {
+    extern bool renderer_guard_stepping(void);
+    extern void renderer_guard_step_end(void);
+    if (renderer_guard_stepping()) {
+        renderer_guard_step_end();
+#if defined(__x86_64__)
+        ((ucontext_t *)ctx)->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+#endif
+        return;
+    }
+    (void)si;
+    signal(sig, SIG_DFL);  // (not ours: as without this handler)
+    raise(sig);
+}
+
+// The thread's alternate signal stack (1 MB, for the crash handler) freed when the thread ends: the game starts and
+// ends threads at every area load, and each one's stack stayed allocated - ~30 MB more memory for each kingdom visited
+// on a Steam Deck, gigabytes over an evening (owner's report, 2026-11-16).
+static pthread_key_t altstack_key;
+static pthread_once_t altstack_once = PTHREAD_ONCE_INIT;
+static void altstack_free(void *p) {
+    stack_t off = {.ss_flags = SS_DISABLE};
+    sigaltstack(&off, NULL);  // (no longer in use by this thread before it goes)
+    free(p);
+}
+static void altstack_key_make(void) { pthread_key_create(&altstack_key, altstack_free); }
+
 void plat_crash_handler_install(void) {
-    stack_t ss = {.ss_sp = malloc(1 << 20), .ss_size = 1 << 20};
-    sigaltstack(&ss, NULL);
+    pthread_once(&altstack_once, altstack_key_make);
+    if (!pthread_getspecific(altstack_key)) {  // (once per thread)
+        stack_t ss = {.ss_sp = malloc(1 << 20), .ss_size = 1 << 20};
+        if (ss.ss_sp && sigaltstack(&ss, NULL) == 0) pthread_setspecific(altstack_key, ss.ss_sp);
+        else free(ss.ss_sp);
+    }
     struct sigaction sa = {0};
     sa.sa_sigaction = crash_handler;
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
@@ -384,6 +524,10 @@ void plat_crash_handler_install(void) {
     sigaction(SIGILL, &sa, NULL);
     sigaction(SIGFPE, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
+    struct sigaction st = {0};
+    st.sa_sigaction = step_handler;
+    st.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGTRAP, &st, NULL);
 }
 
 // ---- child processes
@@ -431,3 +575,5 @@ bool plat_remove_tree(const char *dir) { return nftw(dir, rm_entry, 16, FTW_DEPT
 // End the process at once, skipping the library teardown: as on Windows, the GPU driver's threads crashed in exit()
 // while the game's threads still submitted work.
 void plat_terminate(void) { _exit(0); }
+
+void plat_sample_this_thread(uint64_t now_ms) { (void)now_ms; }  // (Windows only)

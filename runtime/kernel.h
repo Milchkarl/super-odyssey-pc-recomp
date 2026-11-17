@@ -35,12 +35,13 @@ struct KThread {
     pthread_cond_t cond;   // each thread sleeps on its own condition; wakers signal it directly
     // in-place reboot (kernel_stop_threads): thread_main's setjmp point, where the thread unwinds to and ends
     jmp_buf unwind;
-    bool started, finished;
+    bool started, finished, joined;  // (joined: its host thread collected - kernel.c reap_finished)
     KThread *anext;        // every thread of this boot (g_klock)
     // core gate (kernel.c): the core this thread is pinned to (-1: any core; gate_want: set by SetThreadCoreMask,
     // taken over at the thread's next gate change), whether it holds that core now
     int gate, gate_want;
     bool gate_held, gate_queued;
+    int ungated;           // (kernel_ungated_begin / _end) running guest code off the gate: no SVC exit takes it back
     uint64_t gate_ticket;
     KThread *gnext;        // the gate's waiters
 };
