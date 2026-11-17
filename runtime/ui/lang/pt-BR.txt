@@ -217,7 +217,6 @@ The monitor's refresh rate in exclusive fullscreen (windowed and borderless use 
 Upscaling ||| Upscaling
 Upscale method ||| Método de upscaling
 How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| Como a imagem é reconstruída e ampliada. Desligado: o jogo renderiza normalmente na resolução interna (o Escalonador espacial acima a amplia até a janela). NVIDIA DLSS, AMD FSR e Intel XeSS: upscaling e antisserrilhado temporais - mais nítidos numa resolução interna menor, e exigem a GPU e o driver compatíveis. Cada um guarda o próprio modo e os próprios ajustes de nitidez. Muda durante o jogo.
-Auto ||| Automático
 This covers this menu and the configuration screen. The game's own text language is in Controls > System language. ||| Isto vale para este menu e para a tela de configuração. O idioma do texto do próprio jogo fica em Controles > Idioma do sistema.
 # 0.3.2 / 1.0 additions (#63)
 HUD position (wide) ||| Posição do HUD (tela larga)
@@ -322,3 +321,24 @@ Select:  A / Cross  (Enter)        Back:  B / Circle  (Esc)        Switch tabs: 
 The game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places: about 10-15% more FPS on a PC (132 -> 148 at 240 FPS), and 45 -> 58-60 FPS on a Steam Deck. On by default. If you see flickering or broken objects, turn it off. ||| O jogo começa o próximo quadro assim que este é entregue à placa de vídeo, em vez de esperar a placa terminá-lo - o jogo e o desenho rodam lado a lado. Lugares pesados: cerca de 10-15% mais FPS num PC (132 -> 148 a 240 FPS), e 45 -> 58-60 FPS num Steam Deck. Ligado por padrão. Se vir objetos piscando ou quebrados, desligue.
  Off by default on the Steam Deck: there it can stop the graphics chip (a rare GPU reset) - a fix is being looked for. |||  Desligado por padrão no Steam Deck: lá pode travar o chip gráfico (um raro reset da GPU) - uma correção está sendo procurada.
 How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter the first time they appear. Normal: up to 15 s and 3 GB of memory. Long: up to 30 s and 12 GB (at most half of this PC's memory): the fewest first-time stutters, but each pipeline keeps some graphics driver memory. Auto (the default): Long with 32 GB of memory or more, else Normal. Applies at the next start. ||| Quanto tempo o jogo gasta no início preparando os pipelines que já viu, para os efeitos não engasgarem na primeira vez. Normal: até 15 s e 3 GB de memória. Longo: até 30 s e 12 GB (no máximo metade da memória deste PC): o mínimo de engasgos na primeira vez, mas cada pipeline ocupa memória do driver de vídeo. Automático (o padrão): Longo com 32 GB de memória ou mais, senão Normal. Vale na próxima inicialização.
+Discord ||| Discord
+Discord activity ||| Atividade no Discord
+Shows Super Odyssey PC Recomp, the kingdom you're in and the time played on your Discord profile, while the Discord app is open on this computer. Off: nothing is shown. Changes at once. ||| Mostra Super Odyssey PC Recomp, o reino em que você está e o tempo de jogo no seu perfil do Discord, enquanto o app do Discord estiver aberto neste computador. Desligado: nada é mostrado. Muda na hora.
+Title screen ||| Tela inicial
+Cap Kingdom ||| Reino do Chapéu
+Cascade Kingdom ||| Reino da Cascata
+Sand Kingdom ||| Reino da Areia
+Lake Kingdom ||| Reino do Lago
+Wooded Kingdom ||| Reino da Floresta
+Cloud Kingdom ||| Reino das Nuvens
+Lost Kingdom ||| Reino Perdido
+Metro Kingdom ||| Reino Metropolitano
+Snow Kingdom ||| Reino da Neve
+Seaside Kingdom ||| Reino Litorâneo
+Luncheon Kingdom ||| Reino Culinário
+Ruined Kingdom ||| Reino em Ruínas
+Bowser's Kingdom ||| Reino do Bowser
+Moon Kingdom ||| Reino da Lua
+Mushroom Kingdom ||| Reino do Cogumelo
+Dark Side ||| Lado Oculto da Lua
+Darker Side ||| Lado Sombrio da Lua

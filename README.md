@@ -22,9 +22,6 @@
 
 ## Current focus
 
-Updates will come **more slowly** for a while: the maintainer works a day job and has limited time, but the project
-continues. The order of work:
-
 1. **The same as on the Switch, at 60 FPS.** Every kingdom compared with the Switch version (recordings and
    captures, side by side): rendering, effects, shadows, behaviour and timing. Any difference gets fixed, so that the
    port plays and looks 1:1 with the original.

@@ -25,6 +25,7 @@ Settings g_settings = {
     .volume = 1.0f,
     .reverb = true,
     .movie_audio = true,
+    .discord_presence = true,
     .show_fps = false,
     .overlay_size = 1, .overlay_opacity = 80,
     .overlay_gpu = true, .overlay_cpu = true, .overlay_ram = true, .overlay_graph = true, .overlay_hardware = true,
@@ -357,6 +358,7 @@ void settings_load(void) {
         else if (!strcmp(key, "skip_intro")) g_settings.skip_intro = atoi(val) != 0;
         else if (!strcmp(key, "warmup")) g_settings.warmup = named_option(val, warmups, WARMUP_COUNT);
         else if (!strcmp(key, "mute_unfocused")) g_settings.mute_unfocused = atoi(val) != 0;
+        else if (!strcmp(key, "discord_presence")) g_settings.discord_presence = atoi(val) != 0;
         else if (!strcmp(key, "check_updates")) g_settings.check_updates = atoi(val) != 0;
         else if (!strcmp(key, "config_at_start")) g_settings.config_at_start = atoi(val) != 0;
         else if (!strcmp(key, "mouse_camera")) g_settings.mouse_camera = atoi(val) != 0;
@@ -478,6 +480,7 @@ void settings_save(void) {
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);
     fprintf(f, "warmup = %s\n", warmups[g_settings.warmup >= 0 && g_settings.warmup < WARMUP_COUNT ? g_settings.warmup : 0]);
     fprintf(f, "mute_unfocused = %d\n", g_settings.mute_unfocused);
+    fprintf(f, "discord_presence = %d\n", g_settings.discord_presence);
     fprintf(f, "check_updates = %d\n", g_settings.check_updates);
     fprintf(f, "config_at_start = %d\n", g_settings.config_at_start);
     fprintf(f, "mouse_camera = %d\n", g_settings.mouse_camera);
