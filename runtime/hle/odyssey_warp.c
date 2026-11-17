@@ -241,7 +241,9 @@ static void stage_scene_control(Cpu *c) {
         if (every && !(now % 600)) LOG("[warp] scene %llx at frame %llu, warp %d of %d next at %llu\n", (unsigned long long)c->x[0],
                                        (unsigned long long)now, g_next, g_nwarps, g_next < g_nwarps ? (unsigned long long)g_warps[g_next].at : 0ull);
     }
-    if (g_next < g_nwarps && renderer_present_count() >= g_warps[g_next].at) warp_now(c, c->x[0]);
+    // (tests: a warp waits until the stage has run 2 s - one asked on the first frame of a stage still starting (a
+    // kingdom's arrival scene restarting it) overflowed the game's 512 KB scene heap ("sead halt") in some tours)
+    if (g_next < g_nwarps && renderer_present_count() >= g_warps[g_next].at && now - g_scene_start > 120) warp_now(c, c->x[0]);
     g_control(c);
 }
 
