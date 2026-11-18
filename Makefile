@@ -112,7 +112,13 @@ endif
 # is never loaded (`make gen`, then `make` again; players' setup builds it again).
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/analyze.py tools/nso.py tools/passes.py tools/odyssey_patches.py \
                 tools/simd_c.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-                runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/zig_slim.sh
+                runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h
+# (the compiler runtime's script only where it is used: its change for #87 made every Linux / Steam Deck player's
+# game code rebuild too - about 25 minutes on a Deck - for a library that was the same. runtime/gamelib.c same_as
+# keeps the Linux libraries built before this.)
+ifeq ($(PLATFORM),windows)
+GAMELIB_SRCS += tools/zig_slim.sh
+endif
 # (line endings don't count: a Windows checkout with CRLF and GitHub's LF one make the same library)
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | tr -d '\015' | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
 
