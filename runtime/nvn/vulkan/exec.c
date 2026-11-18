@@ -1363,10 +1363,12 @@ static void *dq_begin(uint32_t op, VkCommandBuffer cb, uint32_t size) {
 // draw - cost 7.8% of the render thread at ~2,300 draws a frame (Metro, 120 FPS): each store also took the cache line
 // back from the recording thread polling it.
 #define DQ_PUBLISH 16384u
+static uint32_t dq_publish_bytes;  // (ODYSSEY_DQ_PUBLISH=<bytes>: tests)
 static void dq_push(void) {
     DqHdr *h = (DqHdr *)(dq_ring + dq_wl % DQ_RING);
     dq_wl += h->size;
-    if (dq_wl - dq_pub >= DQ_PUBLISH || !dq_batch) dq_publish();
+    if (!dq_publish_bytes) { const char *e = getenv("ODYSSEY_DQ_PUBLISH"); dq_publish_bytes = e && atoi(e) > 0 ? (uint32_t)atoi(e) : DQ_PUBLISH; }
+    if (dq_wl - dq_pub >= dq_publish_bytes || !dq_batch) dq_publish();
 }
 
 // The draw path's calls: queued while dq_mode, else made here (the macros sync first)
