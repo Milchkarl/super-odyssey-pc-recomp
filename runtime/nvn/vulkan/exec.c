@@ -7659,8 +7659,10 @@ static uint64_t prof_tp_;
 // more: the scene transitions' masks (a hole and the black around it, 5 panes scaled about 3 times: stretched
 // together, each alone wouldn't cover the sides; the HUD itself is never above 1).
 // tall (optional): it also covers the 16:9 screen's whole height (-360..360) - a background, not a band across it
+static float ui2d_ylo, ui2d_yhi;  // (the last pane ui2d_covers_screen found across the screen: its bottom and top, -360..360)
 static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
     if (tall) *tall = false;
+    ui2d_ylo = ui2d_yhi = 0;
     if (!u || size != 560) return false;
     if (!(u[0] > 0) || u[1] != 0 || u[2] != 0 || u[14] != -1 || u[12] != 0 || u[13] != 0) return false;  // (layouts' perspective)
     float w = u[132], h = u[133], l = u[134], t = u[135];
@@ -7672,6 +7674,7 @@ static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
         lo = fminf(lo, X), hi = fmaxf(hi, X), ylo = fminf(ylo, Y), yhi = fmaxf(yhi, Y);
     }
     if (tall) *tall = ylo <= -359.0f && yhi >= 359.0f;
+    ui2d_ylo = ylo, ui2d_yhi = yhi;
     return lo <= -639.0f && hi >= 639.0f;
 }
 
@@ -8194,10 +8197,13 @@ static void draw_(CmdRec *r, bool indexed) {
         // left its text above it).
         float k = 1.0f, ky = 1.0f;
         bool tall = false;
+        int band = 0;
         if ((pass_sx > pass_sy * 1.01f || pass_sy > pass_sx * 1.01f) &&
             ui2d_covers_screen((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, &tall)) {
             if (pass_sx > pass_sy) k = pass_sx / pass_sy;
             else if (tall) ky = pass_sy / pass_sx;
+            else if (ui2d_ylo <= -359.0f && ui2d_yhi < 200.0f) band = 1;   // (a band along the HUD's bottom edge)
+            else if (ui2d_yhi >= 359.0f && ui2d_ylo > -200.0f) band = 2;   // (... its top edge)
         }
         if (ui_mark && pass_sx > pass_sy * 1.01f) {  // (HUD position: Edges; a stretched pane stays)
             float shift = hud_edge_shift(pass_sx / pass_sy);
@@ -8211,6 +8217,23 @@ static void draw_(CmdRec *r, bool indexed) {
         if (k > 1.0f) { vx -= vw * (k - 1) / 2; vw *= k; }
         float vy = vp[1] * vp_sy + vp_oy, vh = vp[3] * vp_sy;
         if (ky > 1.0f) { vy -= vh * (ky - 1) / 2; vh *= ky; }
+        // A band across the screen along the HUD's bottom or top edge (the button tutorials' dark strip, the pause menu's
+        // footer) in a narrower target: the HUD is shorter than the screen there, and the band ended ~40 lines above the
+        // bottom of a Steam Deck's 1280x800, the scene showing below it. Its inner edge stays where it is (next to its
+        // text), its outer edge goes to the screen's: the viewport scaled about the inner edge. Layout y (up, -360..360)
+        // is at vy + vh * (0.5 - q * y / 720) on the screen, q the HUD's height in the target's. ODYSSEY_HUD_BANDS=0: off.
+        static int bands = -1;
+        if (bands < 0) { const char *e = getenv("ODYSSEY_HUD_BANDS"); bands = !e || !*e || atoi(e) != 0; }
+        if (band && bands) {
+            float q = pass_sx / pass_sy;  // (< 1 here)
+            if (band == 1) {
+                float a = 0.5f - q * ui2d_yhi / 720.0f, b = 0.5f + q / 2;
+                if (b - a > 0.01f) { float nh = vh * (1 - a) / (b - a); vy += vh * a - nh * a; vh = nh; }
+            } else {
+                float c = 0.5f - q * ui2d_ylo / 720.0f, a = 0.5f - q / 2;
+                if (c - a > 0.01f) { float nh = vh * c / (c - a); vy -= nh * a; vh = nh; }
+            }
+        }
         float jitter[2] = {0};
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
         if (st.rt.depth && st.ds[0])
