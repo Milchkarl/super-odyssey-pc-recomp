@@ -3601,12 +3601,10 @@ enum { PF_DRAW, PF_AHEAD, PF_AHEAD_WARM, PF_PREFETCH };  // (warm: drawn in a sc
 static Prog *program_for(NvnProgram *np, const ShaderKey *vkey, const ShaderKey *fkey, int how) {
     bool ahead = how == PF_AHEAD || how == PF_AHEAD_WARM;
     if (!(np->stage_mask & 1) || !(np->stage_mask & 2)) return NULL;
-    uint64_t h = 0xcbf29ce484222325ull;
-    for (int i = 0; i < 2; i++) { uint64_t a = np->stages[i].code_addr; for (int k = 0; k < 8; k++) { h ^= (a >> (k * 8)) & 0xFF; h *= 0x100000001B3ull; } }
-    const uint8_t *vb = (const uint8_t *)vkey;
-    for (size_t i = 0; i < sizeof *vkey; i++) { h ^= vb[i]; h *= 0x100000001B3ull; }
-    for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
-    if (!h) h = 1;
+    // (the table's key, in memory only: 8 bytes a step - byte by byte over the code addresses and the whole vertex key
+    // it was ~0.45% of the game's CPU time on a Steam Deck, at every draw)
+    extern uint64_t prog_key_hash(const NvnProgram *np, const ShaderKey *vkey, const ShaderKey *fkey);
+    uint64_t h = prog_key_hash(np, vkey, fkey);
     pthread_mutex_lock(&prog_lock);
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1), probes = 0;
     while (prog_tab[slot].key && prog_tab[slot].key != h && ++probes < PROG_TAB) slot = (slot + 1) & (PROG_TAB - 1);
@@ -4131,6 +4129,15 @@ static uint64_t hash_words(uint64_t h, const void *p, size_t n) {
     return h ^ (h >> 32);
 }
 
+static uint64_t hash_words(uint64_t h, const void *p, size_t n);
+uint64_t prog_key_hash(const NvnProgram *np, const ShaderKey *vkey, const ShaderKey *fkey) {
+    uint64_t a[2] = {np->stages[0].code_addr, np->stages[1].code_addr};
+    uint64_t h = hash_words(0xcbf29ce484222325ull, a, sizeof a);
+    h = hash_words(h, vkey, sizeof *vkey);
+    h = hash_words(h, fkey->rt_kind, 8);
+    h ^= h >> 32;
+    return h ? h : 1;
+}
 static uint64_t hmix(uint64_t h, const void *p, size_t n) {
     const uint8_t *b = p;
     for (size_t i = 0; i < n; i++) { h ^= b[i]; h *= 0x100000001B3ull; }
@@ -7859,14 +7866,21 @@ static void draw_(CmdRec *r, bool indexed) {
             last_fs = fs;
             // (cached per program object and code address: hashed byte by byte at every change of fragment shader it was
             // ~2% of the render thread in Metro, where nearly every draw changes it)
-            static struct { uint64_t fs, word; const void *prog; uint64_t hash; } fsc[1024];
-            uint32_t slot = (uint32_t)((fs >> 4) * 0x9E3779B97F4A7C15ull >> 54) & 1023;
-            uint64_t word = 0;
-            if (fs) memcpy(&word, (const void *)(uintptr_t)(fs + 0x30), 8);  // (and the code's first word: reused memory)
-            if (fs && fsc[slot].fs == fs && fsc[slot].prog == st.program && fsc[slot].word == word) last_hash = fsc[slot].hash;
+            // (by the code address and three words of the code - memory reused for another shader - not by the program
+            // object: Odyssey makes its program objects anew, and with it in the key most lookups missed and hashed
+            // the 512 bytes again, ~0.4% of the game's CPU time on a Steam Deck)
+            static struct { uint64_t fs, word[3]; uint64_t hash; } fsc[4096];
+            uint32_t slot = (uint32_t)((fs >> 4) * 0x9E3779B97F4A7C15ull >> 52) & 4095;
+            uint64_t word[3] = {0};
+            if (fs) {
+                memcpy(&word[0], (const void *)(uintptr_t)(fs + 0x30), 8);
+                memcpy(&word[1], (const void *)(uintptr_t)(fs + 0x130), 8);
+                memcpy(&word[2], (const void *)(uintptr_t)(fs + 0x228), 8);
+            }
+            if (fs && fsc[slot].fs == fs && !memcmp(fsc[slot].word, word, sizeof word)) last_hash = fsc[slot].hash;
             else {
                 last_hash = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0;
-                fsc[slot].fs = fs, fsc[slot].word = word, fsc[slot].prog = st.program, fsc[slot].hash = last_hash;
+                fsc[slot].fs = fs, memcpy(fsc[slot].word, word, sizeof word), fsc[slot].hash = last_hash;
             }
         }
         static uint64_t skip[16];
