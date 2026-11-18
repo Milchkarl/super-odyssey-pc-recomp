@@ -9554,7 +9554,14 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
     bool temporal = false;
 #endif
     // (also for its sharpening, where the picture is large enough for it: hud_sharpness)
-    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || hud_sharpness(oh) > 0);
+    // Not for the sharpening alone while the window shows a corner of the game's texture (handheld mode: 1280x720 of
+    // 1600x900): the layer is not placed for that crop - the pause menu lost its blurred scene and its footer (black
+    // instead), on a Steam Deck in its default console mode (0.4.4 / 0.4.5; owner 2026-11-18).
+    extern void renderer_present_crop(float crop[4]);
+    float crop[4];
+    renderer_present_crop(crop);
+    bool whole = crop[2] > 0.999f && crop[3] > 0.999f;
+    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || (whole && hud_sharpness(oh) > 0));
     if (on != hud.on || (on && (ow != hud.w || oh != hud.h)))
         LOG("[hud] layer %s (%ux%u, the picture %ux%u%s)\n", on ? "on" : "off", ow, oh, b->width, b->height, temporal ? ", temporal" : "");
     hud.on = on;
