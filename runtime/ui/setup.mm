@@ -923,7 +923,7 @@ bool config_run(void) {
         {   // (60 frames a second: the page is static, and a mailbox swapchain would otherwise draw it flat out)
             static uint64_t next;
             uint64_t now = SDL_GetTicksNS();
-            if (next > now && next - now < 100000000ull) SDL_DelayPrecise(next - now);
+            if (next > now && next - now < 100000000ull) SDL_DelayNS(next - now);  // (a sleep, no spinning: a page, not the game)
             next = (next > now && next - now < 100000000ull ? next : now) + 16666667ull;
         }
         frame++;
@@ -1255,13 +1255,15 @@ bool setup_run(const char *root) {
             SDL_Delay(16);
         }
 #endif
-        // While it works, about 15 pictures a second are plenty for a progress bar: drawn at the display's rate the
-        // page took most of a core the game code's compile could use (a Steam Deck has four).
-        if (busy) SDL_Delay(50);
-        else {  // (60 a second otherwise: with a mailbox swapchain the page was drawn thousands of times a second)
+        // 60 pictures a second, also while it works (owner 2026-11-18: at the ~15 a second it had while installing, the
+        // page and its progress bar looked stuck). The cost is small now that it is paced: on a Steam Deck the page at
+        // 60 took 9.5% of one core, a fifth of that in the precise delay's spinning - a plain sleep here. (Unpaced, on
+        // a mailbox swapchain, it was drawn thousands of times a second and took most of a core from the compile.)
+        (void)busy;
+        {
             static uint64_t next;
             uint64_t now = SDL_GetTicksNS();
-            if (next > now && next - now < 100000000ull) SDL_DelayPrecise(next - now);
+            if (next > now && next - now < 100000000ull) SDL_DelayNS(next - now);
             next = (next > now && next - now < 100000000ull ? next : now) + 16666667ull;
         }
     }
