@@ -116,3 +116,27 @@ stale custom collision state. It is inactive without the explicit variable.
 private settings/cache, and allows normal controls. Resume, wait for the test
 placement if necessary, advance/skip the Broodal introduction, and test the
 fight. Restart the launcher to repeat the one-time placement after a death.
+
+## Re-test recipe, 2026-11-18 (after the readback was made conditional, commit 2de3909)
+
+The readback now happens only when the map changed (exec.c renderer_cpu_texel: `gpu_wgen`, `paint_cpu_epoch`).
+How it was re-checked on game 1.0.0, scripted, about 2 minutes a case:
+
+- Data: the 1.0.0 test copy (`ODYSSEY_DATA_ROOT`), the issue's save (`save_0.zip` on #3) copied into a scratch save
+  folder. A released build run once on that copy builds its 1.0.0 game code; a dev exe with the same GAMELIB_ID then
+  loads it.
+- `ODYSSEY_TEST_PLAYER_POS=2400:-4350:6800:-20400` puts Mario at Spewart's arena; the Broodal introduction is skipped
+  with `ODYSSEY_INPUT=...,2800:PLUS:8,2900:A:8,3000:PLUS:8,3100:A:8`. Mario then stands on clean ground at the
+  arena's edge, the poison disc in front of him. Window shots (`ODYSSEY_HOST_INPUT=<frame>:shot:<name>`) show the
+  life gauge.
+- Cases and results (60 FPS, RTX 4090):
+  | Case | Result |
+  | --- | --- |
+  | stand still, current code | 3 hearts throughout |
+  | stand still, `ODYSSEY_PAINT_CPU_READBACK=0` (the #3 fix off) | 1 heart: damage on clean ground - the bug, so the test detects it |
+  | `4200:STICK_UP:70` (walk into the poison), current code | 3 -> 2 hearts, purple damage reaction |
+  | the same walk, `ODYSSEY_PAINT_SYNC_ALWAYS=1` (a readback every frame, as before) | the same: 3 -> 2 |
+  | the walk with `ODYSSEY_PAINT_SYNC_VERIFY=1` | 4,266 left-out readbacks byte-equal to the kept copy, 0 different, 3,665 new copies in between |
+- At 3840x2160 render and 120 FPS asked the fight ran at ~119 FPS either way; readbacks 236 -> 2 in 2 s.
+
+Not covered: clearing poison with Cappy, finishing the fight, other hardware, Linux / Steam Deck.
