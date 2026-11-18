@@ -706,6 +706,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal, VkCommandBuffer extra
     if (!s->main_begun && !s->upload_begun && !wait && !signal) return;
     VkCommandBufferSubmitInfo cbs[2];
     int n = 0;
+    { extern void paint_copy_at_submit(void); paint_copy_at_submit(); }  // (a paint map written in it: copied out here)
     vc_flush();
     if (s->upload_begun) {
         vk_full_barrier(s->upload);  // uploads complete before anything in the main buffer reads them
@@ -8770,6 +8771,90 @@ static bool paint_write_overlaps(const PaintShared *p, uint64_t addr, uint64_t s
         (addr >= p->addr ? addr - p->addr < p->size : p->addr - addr < size);
 }
 
+// A paint map copied out in the submission that wrote it (vk_submit_extra, before it is closed). While Cappy clears
+// poison the GPU does write the map between the game's reads, so each read needs the GPU's bytes - and it got them by
+// recording a copy at the read and waiting for everything queued, the frame's scene with it (the owner's recording
+// with Cappy's throws added, 4K, 120 FPS asked: ~119 FPS fell to 104-112 while clearing, ~0.75 ms waited ~150 times
+// a second). The submission that wrote the map had already finished on the GPU at 84% of those reads, and was sent
+// at all of them: with the copy made there the read waits for that submission alone, mostly not at all.
+// The copy is the map as long as nothing has written it since (gpu_wgen), the last write was not the compute
+// queue's (its order to this queue's copy is not known here), and no CPU edit waits to be uploaded.
+// ODYSSEY_PAINT_COPY_AT_WRITE=0: off, a copy at each read as before.
+typedef struct { VkBuffer buf; VmaAllocation mem; uint8_t *ptr; uint64_t cap, size, seq; uint32_t wgen; } PaintCopySlot;
+typedef struct { uint64_t id; uint32_t copied_wgen; bool any; PaintCopySlot slot[3]; } PaintCopy;
+static PaintCopy paint_copy[8];
+static unsigned paint_copy_next;
+static uint64_t paint_copy_made, paint_copy_used, paint_copy_waited;
+static int paint_copy_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_PAINT_COPY_AT_WRITE"); on = !e || atoi(e) != 0; }
+    return on;
+}
+static bool paint_copy_ok(const NvnTexture *t, const TexBackend *b) {  // (renderer_cpu_texel's own conditions)
+    const FormatInfo *fi = t->layout.fmt;
+    return b && b->image && fi && fi->bpb == 4 && t->format == 0x25 && b->gpu_owned && !b->guest_format && !b->paint_cpu_pending &&
+           b->width == t->width && b->height == t->height && b->layers == 1 && b->depth == 1 && b->samples == 1 &&
+           b->width <= 1024 && b->height <= 1024;
+}
+static PaintCopy *paint_copy_of(uint64_t id, bool make) {
+    for (int i = 0; i < 8; i++) if (paint_copy[i].any && paint_copy[i].id == id) return &paint_copy[i];
+    if (!make) return NULL;
+    PaintCopy *pc = &paint_copy[paint_copy_next++ % 8];
+    pc->id = id, pc->any = true, pc->copied_wgen = ~0u;
+    for (int i = 0; i < 3; i++) pc->slot[i].seq = 0, pc->slot[i].size = 0;  // (buffers kept: sized again when needed)
+    return pc;
+}
+void paint_copy_at_submit(void) {
+    if (!paint_shared_count || !paint_copy_on()) return;
+    for (size_t i = 0; i < paint_shared_count; i++) {
+        NvnTexture *t = paint_shared[i].tex;
+        TexBackend *b = t->backend;
+        if (!b || t->live <= 0 || t->debug_id != paint_shared[i].id || !paint_copy_ok(t, b)) continue;
+        PaintCopy *pc = paint_copy_of(t->debug_id, true);
+        if (pc->copied_wgen == b->gpu_wgen) continue;         // (not written since its last copy)
+        if (b->cq_wgen == b->gpu_wgen) continue;              // (last written on the compute queue)
+        uint64_t size = (uint64_t)b->width * b->height * 4, done = vk_completed_seq();
+        PaintCopySlot *sl = NULL;
+        for (int k = 0; k < 3 && !sl; k++) if (pc->slot[k].seq <= done) sl = &pc->slot[k];  // (not read by a pending submission)
+        if (sl)  // (of the free ones the oldest: a newer finished copy may be the one a read still wants)
+            for (int k = 0; k < 3; k++) if (pc->slot[k].seq <= done && pc->slot[k].seq < sl->seq) sl = &pc->slot[k];
+        if (!sl) continue;
+        if (sl->cap < size) {
+            if (sl->buf) vmaDestroyBuffer(g_vk.vma, sl->buf, sl->mem);
+            sl->buf = VK_NULL_HANDLE, sl->cap = 0;
+            VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+            VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+                                          .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
+            VmaAllocationInfo info;
+            if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &sl->buf, &sl->mem, &info) != VK_SUCCESS) { sl->buf = VK_NULL_HANDLE; continue; }
+            sl->ptr = info.pMappedData, sl->cap = size;
+        }
+        VkCommandBuffer cb = vk_cmd();
+        vk_full_barrier(cb);
+        VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {b->width, b->height, 1}};
+        vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, sl->buf, 1, &cp);
+        sl->seq = vk_pending_seq(), sl->size = size, sl->wgen = b->gpu_wgen;
+        pc->copied_wgen = b->gpu_wgen;
+        paint_copy_made++;
+    }
+}
+// The copy of the map as it is now, if one was made at its last write: waited for (its submission only) and returned.
+static const uint8_t *paint_copy_current(const NvnTexture *t, const TexBackend *b, uint64_t size) {
+    if (!paint_copy_on() || !paint_copy_ok(t, b) || b->cq_wgen == b->gpu_wgen) return NULL;
+    PaintCopy *pc = paint_copy_of(t->debug_id, false);
+    if (!pc) return NULL;
+    for (int k = 0; k < 3; k++) {
+        PaintCopySlot *sl = &pc->slot[k];
+        if (!sl->seq || sl->wgen != b->gpu_wgen || sl->size != size || !sl->buf) continue;
+        if (sl->seq >= vk_pending_seq()) return NULL;  // (in the submission still being recorded: the read flushes, as before)
+        if (sl->seq > vk_completed_seq()) { paint_copy_waited++; wait_why = "paint map copy"; vk_wait_seq(sl->seq); }
+        vmaInvalidateAllocation(g_vk.vma, sl->mem, 0, VK_WHOLE_SIZE);
+        paint_copy_used++;
+        return sl->ptr;
+    }
+    return NULL;
+}
+
 // Only textures fully synchronized for PaintObj's verified CPU filter qualify.
 // An explicit game CPU flush then hands those bytes back to the GPU uploader.
 void renderer_paint_cpu_written(uint64_t addr, uint64_t size) {
@@ -8940,6 +9025,11 @@ void renderer_cpu_texel(RqCpuTexel *q) {
                 if (e->frame != frame) n_frame++;
                 if (e->epoch != paint_cpu_epoch) n_epoch++;
                 if (gpu) n_gpu++; else n_none++;
+                // (would a copy made when the map was written be ready now? the submission that wrote it: done on the
+                // GPU, sent but still running, or the one still being recorded)
+                { static uint64_t w_done, w_run, w_rec, w_log;
+                  if (gpu) { if (b->gfx_wseq <= vk_completed_seq()) w_done++; else if (b->gfx_wseq < vk_pending_seq()) w_run++; else w_rec++; }
+                  if (frame - w_log >= 240) { w_log = frame; LOG("[paint-sync] the writing submission at those readbacks: finished %llu, running %llu, not sent yet %llu\n", (unsigned long long)w_done, (unsigned long long)w_run, (unsigned long long)w_rec); w_done = w_run = w_rec = 0; } }
             }
             last_wseq[ci] = b->gpu_wgen;
             if (frame - last_frame_logged >= 240) {
@@ -8992,7 +9082,47 @@ void renderer_cpu_texel(RqCpuTexel *q) {
                 (unsigned long long)n_same, (unsigned long long)n_diff, (unsigned long long)n_gen_seen);
         }
     }
-    if (q->refresh_snapshot || stale || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
+    static uint64_t paint_gens;
+    bool need = q->refresh_snapshot || stale || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch);
+    if (need && bytes == 4 && !paint_always) {
+        const uint8_t *cp = paint_copy_current(t, b, size);
+        if (cp) {
+            if (e->size != size) { free(e->bytes); e->bytes = malloc(size); e->size = size; }
+            if (!e->bytes) { e->size = 0; return; }
+            memcpy(e->bytes, cp, size);
+            e->wseq = b->gpu_wgen, e->frame = frame, e->epoch = paint_cpu_epoch, e->gen = ++paint_gens;
+            need = false;
+            if (paint_verify) {  // (the copy at the read, made all the same and compared)
+                static uint64_t v_same, v_diff, v_log;
+                vk_end_pass();
+                st.rt_dirty = true;
+                VkCommandBuffer vcb = vk_cmd();
+                vk_full_barrier(vcb);
+                VkSpan vout = vk_readback(size);
+                VkBufferImageCopy vcp = {.bufferOffset = vout.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                         .imageExtent = {b->width, b->height, 1}};
+                vkCmdCopyImageToBuffer(vcb, b->image, VK_IMAGE_LAYOUT_GENERAL, vout.buf, 1, &vcp);
+                wait_why = "paint verify";
+                renderer_flush();
+                if (!memcmp(e->bytes, vout.ptr, size)) v_same++;
+                else if (v_diff++ < 8) LOG("[paint-verify] DIFFERENT (copy at the write): texture %llx frame %llu\n", (unsigned long long)q->addr, (unsigned long long)frame);
+                if (frame - v_log >= 600) {
+                    v_log = frame;
+                    LOG("[paint-verify] copies made at the write: %llu equal to a copy at the read, %llu different\n", (unsigned long long)v_same, (unsigned long long)v_diff);
+                }
+            }
+        }
+    }
+    {   // ODYSSEY_LOG_PAINT_SYNC=1: how the copies at the write are doing
+        static uint64_t pl;
+        if (bytes == 4 && getenv("ODYSSEY_LOG_PAINT_SYNC") && frame - pl >= 240) {
+            pl = frame;
+            LOG("[paint-sync] copies at the write: %llu made, %llu used at a read (%llu of them waited for their submission)\n",
+                (unsigned long long)paint_copy_made, (unsigned long long)paint_copy_used, (unsigned long long)paint_copy_waited);
+            paint_copy_made = paint_copy_used = paint_copy_waited = 0;
+        }
+    }
+    if (need) {
         vk_end_pass();
         st.rt_dirty = true;
         VkCommandBuffer cb = vk_cmd();
@@ -9009,8 +9139,7 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         memcpy(e->bytes, out.ptr, size);
         e->frame = frame;
         e->epoch = paint_cpu_epoch;
-        static uint64_t gens;
-        e->gen = ++gens;
+        e->gen = ++paint_gens;
     }
     if (q->snapshot) {
         uint64_t span = q->guest_pitch * (b->height - 1) + row_bytes;

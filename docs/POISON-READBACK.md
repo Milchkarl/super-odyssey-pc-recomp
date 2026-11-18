@@ -140,3 +140,21 @@ How it was re-checked on game 1.0.0, scripted, about 2 minutes a case:
 - At 3840x2160 render and 120 FPS asked the fight ran at ~119 FPS either way; readbacks 236 -> 2 in 2 s.
 
 Not covered: clearing poison with Cappy, finishing the fight, other hardware, Linux / Steam Deck.
+
+## Clearing poison with Cappy, 2026-11-18 (the copy made where the map is written)
+
+While Cappy clears poison the GPU writes the map between the game's reads, so each read needs the GPU's bytes; it
+recorded a copy at the read and waited for everything queued. Now the map is copied out at the end of the submission
+that wrote it (exec.c paint_copy_at_submit), and a read takes that copy, waiting for that submission alone.
+
+- The owner's Wooded Kingdom recording with Cappy thrown every 1.5 s added at the poison (1.4.1, 4K render, 120 FPS
+  asked, RTX 4090): 101-112 FPS while clearing before, 118-119 after; the waits ("paint CPU feedback probe", ~150 a
+  second, ~0.75 ms each) are gone - none of the copies had to be waited for.
+- `ODYSSEY_PAINT_SYNC_VERIFY=1` also makes the copy at the read and compares: 3,978 equal, 0 different in that
+  replay; 2,040 and 271 equal, 0 different in the two 1.0.0 runs below.
+- 1.0.0, Spewart's arena (the recipe above, plus `4200:Y:10` every 120 frames to 5000, then `5100:STICK_UP:70`):
+  Cappy opens a path through the poison, Mario walks up it at 3 hearts; the same pictures and the same hearts as
+  with `ODYSSEY_PAINT_COPY_AT_WRITE=0 ODYSSEY_PAINT_SYNC_ALWAYS=1`. Standing still: 3 hearts. Walking into poison:
+  3 -> 2.
+
+Not covered: the Steam Deck (a map last written on the compute queue keeps the copy at the read), other GPUs.
