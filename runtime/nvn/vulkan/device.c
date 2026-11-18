@@ -1744,12 +1744,13 @@ static void present_brake(uint64_t now, bool interp) {
 // nvnSyncWait) - the extra frames missed their time in bursts: 20-28 ms frames, 80-110 FPS, a stutter. When 12 of the
 // last 120 frames take over 1.5x their period, the game plays at 60 for 2 s - an even 60 instead of an uneven 80-110 -
 // longer each time in a row (up to 20 s), and 30 s without: short pauses again. Frames already at 60 (loads, scenes
-// without extra-draw preparation) aren't counted. ODYSSEY_FRAME_BRAKE=0: off.
+// without extra-draw preparation) aren't counted. ODYSSEY_FRAME_BRAKE=1: on (off by default: on the power line the
+// switches to 60 felt worse to the owner than the uneven frames).
 static _Atomic uint64_t native_brake_until_ns;
 bool vk_native_brake(void) { return plat_now_ns() < atomic_load(&native_brake_until_ns); }
 static void native_brake(uint64_t now) {
     static int on = -1;
-    if (on < 0) { const char *e = getenv("ODYSSEY_FRAME_BRAKE"); on = !e || !*e || atoi(e) != 0; }
+    if (on < 0) { const char *e = getenv("ODYSSEY_FRAME_BRAKE"); on = e && *e && atoi(e) != 0; }  // (off: owner, 2026-11-17 - dropping to 60 felt worse than the stutter)
     static uint64_t last, last_brake_ns;
     static uint8_t slow[120];
     static int n, nslow;
