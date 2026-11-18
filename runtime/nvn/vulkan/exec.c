@@ -4805,7 +4805,7 @@ static void *pm_worker(void *arg) {
 
 // The game's RomFS contains NintendoWare BNSH and agl BAHS programs, some inside Yaz0/SARC containers.
 typedef struct { const uint8_t *code; uint32_t size; } PcStage;
-typedef struct { PcStage stages[2]; uint32_t local[3]; } PcProg;
+typedef struct { PcStage stages[2]; uint32_t local[3]; bool known; } PcProg;  // (known: compiled for the GPU, pc_add)
 
 enum { PC_SEEN_SIZE = 1 << 18, PC_ASSET_LIMIT = 512u << 20 };
 static PcProg *pc_progs;
@@ -4814,6 +4814,14 @@ static int pc_n, pc_cap, pc_bnsh, pc_bahs, pc_compute;
 static _Atomic int pc_next, pc_done, pc_items_n, pc_compute_translated;
 static FullPrepItem *pc_items;
 static long pc_huge_limit;
+// Which programs the GPU compile takes (as Odyssey Recomp 0.2.6 / 0.2.7 does, github.com/rwwo8/OdysseyRecomp, MIT): every
+// program is translated and its SPIR-V kept, but the driver compiles - a binary each, minutes on slower PCs, and most
+// of the cache - only the programs drawn before (the shipped list: known_programs.txt, and this player's own:
+// drawn_has), the compute programs, and the whole effects archive (EffectPtcl / EffectDataBase: a first box smashed
+// or enemy hit could freeze where no tour drew that effect). The rest compile if the game ever draws them.
+// ODYSSEY_PRECOMPILE_ALL=1: every program, as before.
+static bool pc_file_all;     // (the file being scanned is the effects archive)
+static int pc_all = -1, pc_known_n;
 
 static uint32_t pc_le32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static uint64_t pc_le64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8); return v; }
@@ -4842,6 +4850,15 @@ static bool pc_add(PcStage first, PcStage second, const uint32_t local[3]) {
     if (second.size) memcpy(code + first.size, second.code, second.size);
     PcProg *prog = &pc_progs[pc_n++];
     *prog = (PcProg){.stages = {{code, first.size}, {code + first.size, second.size}}};
+    if (pc_all < 0) pc_all = getenv("ODYSSEY_PRECOMPILE_ALL") && atoi(getenv("ODYSSEY_PRECOMPILE_ALL"));
+    if (local || pc_all || pc_file_all) prog->known = true;
+    else {  // (hashed as a draw hashes it: prog_code_hash, the first 2 KB of each stage up to its constants)
+        bool warm;
+        uint64_t ph = hash_words(0x9e3779b97f4a7c15ull, first.code, first.size < 2048 ? first.size : 2048);
+        ph = hash_words(ph, second.code, second.size < 2048 ? second.size : 2048);
+        prog->known = drawn_has(ph | 1, &warm);
+    }
+    if (prog->known) pc_known_n++;
     if (local) { memcpy(prog->local, local, sizeof prog->local); pc_compute++; }
     pc_seen[slot] = h;
     return true;
@@ -4987,6 +5004,7 @@ static bool pc_scan_asset(const uint8_t *data, size_t size, void *arg) {
     unsigned depth = *(const unsigned *)arg;
     if (size < 4) return true;
     unsigned next = depth + 1;
+    if (!depth) pc_file_all = !strncmp(romfs_visit_name, "EffectPtcl", 10) || !strncmp(romfs_visit_name, "EffectDataBase", 14);
     if (!memcmp(data, "Yaz0", 4)) {
         if (depth == 8 || size < 16 || data[4] >= PC_ASSET_LIMIT >> 24) return false;
         size_t n;
@@ -5041,6 +5059,11 @@ static void *pc_worker(void *arg) {
             if (cs) maxwell_free(cs);
             continue;
         }
+        // ODYSSEY_PRECOMPILE_TRANSLATE=known (tests): only the programs compiled for the GPU are translated here too; the
+        // rest are translated if the game sets them up (in the background, then saved: translations.bin)
+        static int tr_known = -1;
+        if (tr_known < 0) tr_known = getenv("ODYSSEY_PRECOMPILE_TRANSLATE") && !strcmp(getenv("ODYSSEY_PRECOMPILE_TRANSLATE"), "known");
+        if (tr_known && !pp->known) continue;
         ShaderKey fk = fkey;
         ShaderInfo *vi = maxwell_translate(stages[0].code, stages[0].size, STAGE_VERTEX, &vkey), *fi = NULL;
         if (vi && vi->msl) {
@@ -5055,7 +5078,7 @@ static void *pc_worker(void *arg) {
             uint64_t kv = vk_spirv_last_key;
             uint32_t *sf = sv ? vk_glsl_to_spirv(fi->msl, STAGE_FRAGMENT, "fs", &nf) : NULL;
             uint64_t kf = vk_spirv_last_key;
-            if (sv && sf) pc_items[atomic_fetch_add(&pc_items_n, 1)] = (FullPrepItem){.program = {{kv, kf}}, .huge = huge};
+            if (sv && sf && pp->known) pc_items[atomic_fetch_add(&pc_items_n, 1)] = (FullPrepItem){.program = {{kv, kf}}, .huge = huge};
             free(sv);
             free(sf);
         } else {
@@ -5090,6 +5113,8 @@ static bool precompile_collect(const char *out, int nt) {
     }
     LOG("[precompile] %d graphics and %d compute programs from %d BNSH and %d BAHS archives in %.1f s\n",
         pc_n - pc_compute, pc_compute, pc_bnsh, pc_bahs, (plat_now_ns() - t0) / 1e9);
+    LOG("[precompile] %d of them compiled for the GPU (drawn before, compute, effects)%s\n", pc_known_n,
+        pc_all > 0 ? " - ODYSSEY_PRECOMPILE_ALL: all" : "");
     if (!ok || !pc_n) {
         LOG("[precompile] %s\n", ok ? "no programs found" : "could not finish scanning game files");
         goto done;

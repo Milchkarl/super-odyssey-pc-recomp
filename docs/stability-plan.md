@@ -141,6 +141,19 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   but 330 ms freezes, and 8 GB after three kingdoms anyway). Note: `ODYSSEY_LOG_MEM=1` costs ~65 ms a stats line
   (heap walk) - no frame-time measurements with it.
 
+- **Shader preparation: only drawn shaders compiled for the GPU (#94, after Odyssey Recomp 0.2.6 / 0.2.7).** Every
+  program is still translated, but the driver compiles only those drawn before (the shipped list, now merged with
+  Odyssey Recomp's 197-stage list: 1,737 -> 3,470; and the player's own), the compute programs and the whole effects
+  archive. A new player's first start (empty game and driver caches, 16 GB settings, Cap -> Sand -> Metro -> Wooded),
+  all programs vs drawn only: 98.2 s -> 59.4 s before the start, 31,570 -> 6,833 programs compiled, cache 2.2 -> 1.7 GB,
+  RAM 8.4 -> 11.7 vs 8.2 -> 11.4 GB, worst frame 423 vs 460 ms, frames over 50 ms 9 vs 10, 60.2 vs 60.1 FPS.
+  `ODYSSEY_PRECOMPILE_ALL=1`: all, as before. Opt-in for tests: `ODYSSEY_PRECOMPILE_TRANSLATE=known` (translate only
+  those too: 44.0 s, cache 1.3 GB, the same stutter on this PC; it moves translations into kingdom loads, untested on
+  4 cores / the Deck). Next: the SPIR-V (919 MB in 17,065 files) into one compressed pack - zlib measured 3.4x.
+- **#94's RAM on 32 GB PCs:** their logs show warm-up Long (32 GB and up: a budget of half the RAM, up to 12 GB)
+  preparing 2,276-5,090 pipelines (30 s the first time) and area-shader preload running to its 8 GB budget: 8.6-10.2 GB
+  in RAM. With the other port's cache (nothing our warm-up could use): 6.3 GB, but a 1,634 ms frame. Not changed yet.
+
 ## Owner play card (after the automatic gates)
 At most 10 minutes: enter the Lake Kingdom pond painting at 165 FPS; listen to the title music for a minute; play a
 cutscene transition; turn FSR frame generation on and switch upscalers twice. The answer per item is fine / not fine.
