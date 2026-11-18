@@ -633,6 +633,9 @@ static void sample_modules(void) {
                 fprintf(m, "%llx %lx %s\n", (unsigned long long)(uintptr_t)mi.lpBaseOfDll, (unsigned long)mi.SizeOfImage, name);
         }
     if (m) fclose(m);
+    snprintf(path, sizeof path, "%s.funcs", getenv("ODYSSEY_SAMPLE"));
+    extern void rt_dump_host_fns(const char *path);
+    rt_dump_host_fns(path);
 }
 static DWORD WINAPI sample_main(LPVOID arg) {
     (void)arg;
