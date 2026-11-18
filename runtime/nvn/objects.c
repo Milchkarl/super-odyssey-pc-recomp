@@ -757,13 +757,17 @@ static uint64_t tex_desc_hash(const NvnTexture *t) {
 }
 
 // The host texture with n's description (n freed), or n itself, new. One more initialization of it.
-static _Atomic uint64_t g_tex_inits;  // (texture initializations so far: textures.c vk_tex_prefetch skips its scan when none)
+// (host textures that are new or came back into use so far: textures.c vk_tex_prefetch skips its scan when none, and
+// tex_trace_find keeps its answers. Not every initialization: Odyssey initializes textures it already has at every
+// frame - the same description, the same host texture - and counting those meant neither ever held, a walk of the
+// whole table at every present and at every fog / paint map read: 0.75% + 1.0% of the game's CPU time on a Steam
+// Deck in Cap Kingdom.)
+static _Atomic uint64_t g_tex_inits;
 uint64_t nvn_texture_inits(void) { return atomic_load(&g_tex_inits); }
 static NvnTexture *tex_by_desc(NvnTexture *n) {
-    atomic_fetch_add(&g_tex_inits, 1);
     static int off = -1;  // ODYSSEY_NO_TEX_DEDUP=1 (debug): every initialization its own host texture, as before
     if (off < 0) off = getenv("ODYSSEY_NO_TEX_DEDUP") != NULL;
-    if (off) { n->live = 1; tex_set_add(n); return n; }
+    if (off) { atomic_fetch_add(&g_tex_inits, 1); n->live = 1; tex_set_add(n); return n; }
     uint64_t h = tex_desc_hash(n);
     pthread_mutex_lock(&g_tex_lock);
     NvnTexture **head = &g_tex_desc[h & (TEX_DESC_BUCKETS - 1)], *t = *head;
@@ -774,6 +778,7 @@ static NvnTexture *tex_by_desc(NvnTexture *n) {
         t->desc_next = *head;
         *head = t;
     }
+    if (t == n || (t->live <= 0 && !t->backend)) atomic_fetch_add(&g_tex_inits, 1);  // (new, or back in use with nothing on the GPU)
     t->live++;
     t->release_at = 0;
     pthread_mutex_unlock(&g_tex_lock);
@@ -820,14 +825,18 @@ static void tex_process_releases(void) {
 
 // Live textures with guest storage the renderer hasn't touched yet (textures.c vk_tex_prefetch): up to max, a scan that
 // goes on where the last one stopped. (Textures are never freed, so the pointers stay valid.)
-int nvn_untouched_textures(NvnTexture **out, int max) {
+// max_bytes (0: any size): only textures whose storage is no larger - in play the prefetch leaves the large ones for
+// the next load, and returning them here kept its scan from ever finding "nothing to do": it walked part of the table
+// at every present (0.75% of the game's CPU time on a Steam Deck in Cap Kingdom).
+int nvn_untouched_textures(NvnTexture **out, int max, uint64_t max_bytes) {
     static size_t cursor;
     int n = 0;
     pthread_mutex_lock(&g_tex_lock);
     size_t k = 0;
     for (; g_tex_cap && k < g_tex_cap && n < max; k++) {
         NvnTexture *t = g_tex_set[(cursor + k) & (g_tex_cap - 1)];
-        if (t && !t->backend && !t->no_prefetch && t->live > 0 && t->addr && t->guest_obj && t->target != 10) out[n++] = t;
+        if (t && !t->backend && !t->no_prefetch && t->live > 0 && t->addr && t->guest_obj && t->target != 10 &&
+            (!max_bytes || !t->layout.fmt || tegra_total_size(&t->layout) <= max_bytes)) out[n++] = t;
     }
     cursor += k;
     pthread_mutex_unlock(&g_tex_lock);
@@ -836,6 +845,14 @@ int nvn_untouched_textures(NvnTexture **out, int max) {
 
 // (debug, ODYSSEY_TEX_TRACE) the most recently initialized host texture with that storage address
 NvnTexture *tex_trace_find(uint64_t addr) {
+    // (the fog and paint maps' CPU reads ask this several times a frame for the same few addresses, and each ask
+    // walked the whole texture table: 1.0% of the game's CPU time on a Steam Deck in Cap Kingdom. An answer holds
+    // while no texture has been initialized since - a newer one at that address would be the answer.)
+    static struct { uint64_t addr, inits; NvnTexture *t; } memo[8];
+    static unsigned memo_next;
+    uint64_t inits = atomic_load(&g_tex_inits);
+    for (int i = 0; i < 8; i++)
+        if (memo[i].t && memo[i].addr == addr && memo[i].inits == inits && memo[i].t->addr == addr && memo[i].t->backend) return memo[i].t;
     NvnTexture *best = NULL;
     pthread_mutex_lock(&g_tex_lock);
     for (size_t i = 0; i < g_tex_cap; i++) {
@@ -843,6 +860,7 @@ NvnTexture *tex_trace_find(uint64_t addr) {
         if (t && t->addr == addr && t->backend && (!best || t->debug_id > best->debug_id)) best = t;
     }
     pthread_mutex_unlock(&g_tex_lock);
+    if (best) { unsigned m = memo_next++ % 8; memo[m].addr = addr, memo[m].inits = inits, memo[m].t = best; }
     return best;
 }
 

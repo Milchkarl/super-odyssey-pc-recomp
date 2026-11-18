@@ -1050,7 +1050,7 @@ void vk_tex_prefetch(void) {
     static double budget = -1;
     if (budget < 0) { const char *e = getenv("ODYSSEY_TEX_PREFETCH"); budget = e ? atof(e) : 3.0; }
     if (budget <= 0) return;
-    extern int nvn_untouched_textures(NvnTexture **out, int max);
+    extern int nvn_untouched_textures(NvnTexture **out, int max, uint64_t max_bytes);
     extern uint64_t nvn_texture_inits(void);
     extern bool odyssey_scene_warming(void);  // (title, loading between stages, a stage's first 120 frames)
     bool loading = odyssey_scene_warming();
@@ -1062,7 +1062,7 @@ void vk_tex_prefetch(void) {
     uint64_t inits = nvn_texture_inits();
     if (inits == idle_inits && loading == idle_loading) return;
     NvnTexture *c[64];
-    int n = nvn_untouched_textures(c, 64);
+    int n = nvn_untouched_textures(c, 64, loading ? 0 : 256u << 10);  // (in play, small ones only: see below)
     if (!n) { idle_inits = inits, idle_loading = loading; return; }
     uint64_t t0 = SDL_GetTicksNS();
     static uint64_t done, total_ns;
