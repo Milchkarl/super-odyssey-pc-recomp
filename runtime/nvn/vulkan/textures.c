@@ -983,7 +983,7 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
     extern uint64_t g_upload_n;
     uint64_t n0 = g_upload_n;
     TexBackend *b = vk_tex_(t, for_render);
-    if (b && g_upload_n != n0) b->gfx_wseq = renderer_fence_seq();
+    if (b && g_upload_n != n0) b->gfx_wseq = renderer_fence_seq(), b->gpu_wgen++;
     return b;
 }
 static TexBackend *vk_tex_(NvnTexture *t, bool for_render) {
@@ -1065,6 +1065,7 @@ void vk_tex_prefetch(void) {
 void renderer_mark_gpu_owned(NvnTexture *t) {  // (the GPU writes it: in the graphics submission being recorded, or the compute queue's)
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
+    b->gpu_wgen++;
     if (!vk_recording_cq()) b->gfx_wseq = renderer_fence_seq();
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }

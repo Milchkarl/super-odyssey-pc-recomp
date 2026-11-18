@@ -15,6 +15,9 @@ typedef struct {
     uint64_t snapshot_capacity, guest_capacity, guest_pitch;
     uint32_t snapshot_width, snapshot_height;
     bool refresh_snapshot; // CPU filter starts after GPU drawing within the same present
+    uint64_t have_gen;     // in: the copy the caller's rows already hold (0: none); out (gen): the copy returned
+    uint64_t gen;
+    bool unchanged;        // out: gen == have_gen - the snapshot was not filled, the caller's rows are it
 } RqCpuTexel;
 bool rq_enabled(void);                            // (ODYSSEY_RENDER_THREAD=0: no; macOS: no)
 bool rq_on_thread(void);                          // the caller is the render thread

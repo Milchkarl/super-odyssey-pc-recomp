@@ -131,6 +131,7 @@ typedef struct TexBackend {
     bool shadow;            // a shadow map drawn at shadow_factor() times its size (textures.c tex_shadow_map)
     bool shared;            // usable from the compute queue too (CONCURRENT: small images, exec.c "compute queue")
     uint64_t gfx_wseq;      // the graphics submission that last wrote it (drawn, copied, stored, uploaded)
+    uint32_t gpu_wgen;      // counts every recorded write to it, on either queue (the paint map's readback: exec.c)
     uint64_t touched_frame, frame_cleared;
     uint32_t level_gen;
     float sx, sy;

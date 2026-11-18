@@ -8837,14 +8837,14 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         !nvn_linear_rows_fit(q->guest_capacity, q->guest_pitch, row_bytes, b->height) ||
         !nvn_linear_rows_fit(q->snapshot_capacity, row_bytes, row_bytes, b->height))) return;
     typedef struct { VkBuffer buf; VmaAllocation mem; uint8_t *ptr; uint64_t cap, seq, size; } Slot;
-    typedef struct { uint64_t id, frame, size, epoch; uint8_t *bytes; Slot slot[3]; uint64_t issued_frame, have_seq; } Cache;
+    typedef struct { uint64_t id, frame, size, epoch, wseq, gen; uint8_t *bytes; Slot slot[3]; uint64_t issued_frame, have_seq; } Cache;
     static Cache cache[8];
     static unsigned next;
     Cache *e = NULL;
     for (int i = 0; i < 8; i++) if (cache[i].id == t->debug_id) { e = &cache[i]; break; }
     if (!e) {
         e = &cache[next++ % 8];
-        e->id = t->debug_id; e->frame = UINT64_MAX; e->issued_frame = UINT64_MAX; e->have_seq = 0;
+        e->id = t->debug_id; e->frame = UINT64_MAX; e->issued_frame = UINT64_MAX; e->have_seq = 0; e->wseq = UINT64_MAX; e->gen = 0;
         for (int i = 0; i < 3; i++) e->slot[i].seq = 0, e->slot[i].size = 0;
     }
     uint64_t frame = renderer_present_count(), size = (uint64_t)b->width * b->height * fi->bpb;
@@ -8912,11 +8912,46 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         // costs at most one ripple request for a frame or two.
         for (int i = 0; i < 3; i++) if (e->slot[i].seq > done && e->slot[i].size == size) return;
     }
-    if (q->refresh_snapshot || e->frame != frame || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
+    if (bytes == 4) {  // ODYSSEY_LOG_PAINT_SYNC=1: what each paint map readback finds changed (tests)
+        static int lg = -1;
+        static uint64_t n, n_refresh, n_frame, n_epoch, n_gpu, n_none, t_ns, last_wseq[8], last_frame_logged;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_PAINT_SYNC") != NULL;
+        if (lg) {
+            int ci = (int)(e - cache);
+            bool will = q->refresh_snapshot || e->frame != frame || e->size != size || e->epoch != paint_cpu_epoch;  // (asked, before the check below)
+            bool gpu = b->gpu_wgen != last_wseq[ci];
+            n++;
+            if (will) {
+                if (q->refresh_snapshot) n_refresh++;
+                if (e->frame != frame) n_frame++;
+                if (e->epoch != paint_cpu_epoch) n_epoch++;
+                if (gpu) n_gpu++; else n_none++;
+            }
+            last_wseq[ci] = b->gpu_wgen;
+            if (frame - last_frame_logged >= 240) {
+                LOG("[paint-sync] 240 frames: %llu reads; readbacks asked by refresh %llu, new frame %llu, CPU edit %llu; the GPU had written the map before %llu of them, not before %llu\n",
+                    (unsigned long long)n, (unsigned long long)n_refresh, (unsigned long long)n_frame, (unsigned long long)n_epoch, (unsigned long long)n_gpu, (unsigned long long)n_none);
+                n = n_refresh = n_frame = n_epoch = n_gpu = n_none = t_ns = 0; last_frame_logged = frame;
+            }
+        }
+    }
+    // The paint map (4-byte texels: the Wooded Kingdom's poison, PaintObj) is read every frame while Mario is near
+    // it, and each frame's first read copied the map back and waited for the GPU to finish everything queued: in the
+    // owner's recording (Wooded Kingdom, 4K, 120 FPS asked) the game thread waited there for half of every frame and
+    // the game ran at ~51 FPS for as long as he stood there. The map itself rarely changes: in that recording the
+    // GPU had not written it since the last copy before ~90-100% of those readbacks. A copy is still the map while
+    // nothing recorded has written the texture since (gpu_wgen: drawn, copied, stored, uploaded - on either queue) and the CPU has not
+    // handed edits back (paint_cpu_epoch). ODYSSEY_PAINT_SYNC_ALWAYS=1: a readback every frame, as before.
+    static int paint_always = -1;
+    if (paint_always < 0) paint_always = getenv("ODYSSEY_PAINT_SYNC_ALWAYS") && atoi(getenv("ODYSSEY_PAINT_SYNC_ALWAYS"));
+    bool stale = e->frame != frame;
+    if (bytes == 4 && !paint_always && stale && e->frame != UINT64_MAX && e->wseq == b->gpu_wgen) stale = false;
+    if (q->refresh_snapshot || stale || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
         vk_end_pass();
         st.rt_dirty = true;
         VkCommandBuffer cb = vk_cmd();
         vk_full_barrier(cb);
+        e->wseq = b->gpu_wgen;  // (what the copy holds: writes up to here)
         VkSpan out = vk_readback(size);
         VkBufferImageCopy cp = {.bufferOffset = out.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .imageExtent = {b->width, b->height, 1}};
@@ -8928,11 +8963,17 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         memcpy(e->bytes, out.ptr, size);
         e->frame = frame;
         e->epoch = paint_cpu_epoch;
+        static uint64_t gens;
+        e->gen = ++gens;
     }
     if (q->snapshot) {
         uint64_t span = q->guest_pitch * (b->height - 1) + row_bytes;
         if (!paint_register_shared(t, span)) return;
-        memcpy(q->snapshot, e->bytes, size);
+        // (the caller's rows already hold this copy: PaintObj's attack sensor asks ~28 times a frame, and each ask
+        // copied the 553 KB map here and again into the game's rows)
+        q->gen = e->gen;
+        q->unchanged = !paint_always && e->gen && q->have_gen == e->gen;
+        if (!q->unchanged) memcpy(q->snapshot, e->bytes, size);
         q->snapshot_width = b->width; q->snapshot_height = b->height;
     }
     memcpy(&q->value, e->bytes + ((uint64_t)q->y * b->width + q->x) * fi->bpb + q->component * bytes, bytes);
