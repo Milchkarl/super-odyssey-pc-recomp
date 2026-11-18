@@ -9517,6 +9517,16 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
 }
 
 // Inside the window image's rendering (device.c vk_frame_begin): the game image into (vx, vy, vw, vh).
+// HUD sharpening: the game's HUD art is made for 720 lines; on a larger picture its enlarged text and icons are soft.
+// The layer is sharpened when it is composited (shaders.c hud_over.frag): nothing below 900 lines, rising to the full
+// strength at 1440 and above. ODYSSEY_HUD_SHARPEN=<0..1>: the full strength (0: off; 0.6 by default).
+static float hud_sharpness(uint32_t oh) {
+    static float full = -1;
+    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); full = e && *e ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
+    if (oh < 900 || full <= 0) return 0;
+    float t = ((float)oh - 900.0f) / 540.0f;
+    return full * (t > 1 ? 1 : t < 0.15f ? 0.15f : t);
+}
 // The HUD layer over the (upscaled) picture, at the layer's size (begin_hud_pass); then whether the next frames use it.
 // The picture is the window texture's bytes (sRGB: the game copies its picture in through an sRGB view), the layer
 // linear (as the game's picture): mixed in linear light.
@@ -9528,7 +9538,7 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
         vk_frame_suspend();
         TexBackend *out = post_image(8, ow, oh);
         VkImageView in[3] = {src, post_view(layer)};
-        float pc[8] = {1.0f / ow, 1.0f / oh};
+        float pc[8] = {1.0f / ow, 1.0f / oh, hud_sharpness(oh), (float)oh / 720.0f * 0.75f};  // (.w: the radius, pixels)
         post_pass(cb, "hud_over.frag", in, 2, out, pc, false);
         vk_full_barrier(cb);
         vk_frame_resume();
@@ -9541,7 +9551,8 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
 #else
     bool temporal = false;
 #endif
-    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1);
+    // (also for its sharpening, where the picture is large enough for it: hud_sharpness)
+    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || hud_sharpness(oh) > 0);
     if (on != hud.on || (on && (ow != hud.w || oh != hud.h)))
         LOG("[hud] layer %s (%ux%u, the picture %ux%u%s)\n", on ? "on" : "off", ow, oh, b->width, b->height, temporal ? ", temporal" : "");
     hud.on = on;
