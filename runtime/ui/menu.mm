@@ -2021,23 +2021,141 @@ bool menu_sidebar_focused(void) { return g_sidebar_was; }
 void menu_focus_sidebar(void) { g_focus_tab = -100, g_focus_frames = 0; }
 float menu_hint_bar_height(float scale) { return ImGui::GetFontSize() * 0.8f + 30 * scale; }
 static float hint_bar_height(float scale) { return menu_hint_bar_height(scale); }
-static void key_cap(ImDrawList *dl, ImVec2 &at, const char *key, const char *what, float scale) {
+// The hint bar's icons (0.4.5, owner 2026-11-18: "actual icons that match the controller or the thing being used"),
+// drawn here - no artwork is shipped: a controller's face buttons as discs (Xbox: the letter in its colour;
+// PlayStation: the cross / circle shapes; Switch: a light disc with the letter, as the game's own icons), its
+// shoulder buttons as bumper shapes, Menu / Options / Plus; the keyboard's keys as key caps, the arrows as arrows.
+// One token of a hint ("LB", "Cross", "Left", "Enter"...): draws it at `at` in a box `h` high, returns its width.
+// ODYSSEY_MENU_HINTS=pad0 / pad1 / pad2 / keys: the bar as with a Switch / Xbox / PlayStation controller or the keyboard (tests).
+static int hint_force(void) {
+    static int v = -2;
+    if (v == -2) {
+        const char *e = getenv("ODYSSEY_MENU_HINTS");
+        v = !e ? -1 : !strcmp(e, "keys") ? 3 : !strncmp(e, "pad", 3) && e[3] >= '0' && e[3] <= '2' ? e[3] - '0' : -1;
+    }
+    return v;
+}
+static float hint_icon(ImDrawList *dl, ImVec2 at, float h, const char *tok, bool pad, int fam, float scale) {
     ImFont *f = ImGui::GetFont();
-    float fs = ImGui::GetFontSize() * 0.8f, padx = 9 * scale, h = fs + 10 * scale;
-    ImVec2 ks = f->CalcTextSizeA(fs, FLT_MAX, 0, key), ws = f->CalcTextSizeA(fs, FLT_MAX, 0, tr(what));
-    float kw = fmaxf(ks.x + 2 * padx, h);
-    dl->AddRectFilled(at, ImVec2(at.x + kw, at.y + h), theme_u32(kSurfaceHoverV), 6 * scale);
-    dl->AddRect(at, ImVec2(at.x + kw, at.y + h), theme_u32(kTextV, 0.25f), 6 * scale, 0, fmaxf(1, scale));
-    dl->AddText(f, fs, ImVec2(at.x + (kw - ks.x) * 0.5f, at.y + (h - fs) * 0.5f), kText, key);
-    dl->AddText(f, fs, ImVec2(at.x + kw + 8 * scale, at.y + (h - fs) * 0.5f), kTextDim, tr(what));
-    at.x += kw + 8 * scale + ws.x + 26 * scale;
+    const ImU32 dark = IM_COL32(22, 22, 26, 255), light = IM_COL32(236, 236, 240, 255), rim = IM_COL32(236, 236, 240, 90);
+    float r = h * 0.5f, th = fmaxf(1.5f, h * 0.085f);
+    ImVec2 c(at.x + r, at.y + r);
+    auto letter = [&](const char *t, ImVec2 mid, float size, ImU32 col) {
+        ImVec2 ts = f->CalcTextSizeA(size, FLT_MAX, 0, t);
+        dl->AddText(f, size, ImVec2(mid.x - ts.x * 0.5f, mid.y - size * 0.5f), col, t);
+    };
+    if (pad) {
+        bool a = !strcmp(tok, "A") || !strcmp(tok, "Cross"), b = !strcmp(tok, "B") || !strcmp(tok, "Circle");
+        if (a || b) {  // a face button
+            if (fam == 2) {  // PlayStation: the shape, in its colour
+                ImU32 col = a ? IM_COL32(124, 178, 232, 255) : IM_COL32(255, 102, 102, 255);
+                dl->AddCircleFilled(c, r, dark, 32);
+                dl->AddCircle(c, r - th * 0.3f, rim, 32, fmaxf(1, th * 0.6f));
+                float q = r * 0.42f;
+                if (a) {
+                    dl->AddLine(ImVec2(c.x - q, c.y - q), ImVec2(c.x + q, c.y + q), col, th);
+                    dl->AddLine(ImVec2(c.x - q, c.y + q), ImVec2(c.x + q, c.y - q), col, th);
+                } else {
+                    dl->AddCircle(c, r * 0.5f, col, 24, th);
+                }
+            } else if (fam == 1) {  // Xbox: a dark disc, the letter in the button's colour
+                ImU32 col = a ? IM_COL32(120, 200, 80, 255) : IM_COL32(236, 80, 70, 255);
+                dl->AddCircleFilled(c, r, dark, 32);
+                dl->AddCircle(c, r - th * 0.3f, col, 32, fmaxf(1, th * 0.6f));
+                letter(a ? "A" : "B", c, h * 0.68f, col);
+            } else {  // Switch: a light disc, the letter dark
+                dl->AddCircleFilled(c, r, light, 32);
+                letter(a ? "A" : "B", c, h * 0.68f, dark);
+            }
+            return h;
+        }
+        if (!strcmp(tok, "Menu") || !strcmp(tok, "Options")) {  // three lines: in a disc (Xbox), in a pill (PlayStation)
+            float w = fam == 2 ? h * 0.72f : h, x0 = at.x;
+            if (fam == 2) {
+                dl->AddRectFilled(ImVec2(x0, at.y), ImVec2(x0 + w, at.y + h), dark, w * 0.5f);
+                dl->AddRect(ImVec2(x0, at.y), ImVec2(x0 + w, at.y + h), rim, w * 0.5f, 0, fmaxf(1, th * 0.6f));
+            } else {
+                dl->AddCircleFilled(c, r, dark, 32);
+                dl->AddCircle(c, r - th * 0.3f, rim, 32, fmaxf(1, th * 0.6f));
+            }
+            float mx = x0 + w * 0.5f, q = w * 0.24f;
+            for (int k = -1; k <= 1; k++)
+                dl->AddLine(ImVec2(mx - q, c.y + k * h * 0.17f), ImVec2(mx + q, c.y + k * h * 0.17f), light, fmaxf(1, th * 0.8f));
+            return w;
+        }
+        if (!strcmp(tok, "Plus")) {
+            dl->AddCircleFilled(c, r, light, 32);
+            float q = r * 0.5f;
+            dl->AddLine(ImVec2(c.x - q, c.y), ImVec2(c.x + q, c.y), dark, th * 1.2f);
+            dl->AddLine(ImVec2(c.x, c.y - q), ImVec2(c.x, c.y + q), dark, th * 1.2f);
+            return h;
+        }
+        // a shoulder button: a bumper, rounder on its outer top corner
+        bool left = tok[0] == 'L';
+        ImDrawFlags outer = left ? ImDrawFlags_RoundCornersTopLeft : ImDrawFlags_RoundCornersTopRight;
+        float fs = h * 0.6f, w = fmaxf(f->CalcTextSizeA(fs, FLT_MAX, 0, tok).x + h * 0.6f, h * 1.25f);
+        ImU32 fill = fam == 0 ? light : dark, ink = fam == 0 ? dark : light;
+        ImVec2 p0(at.x, at.y + h * 0.1f), p1(at.x + w, at.y + h * 0.9f);
+        dl->AddRectFilled(p0, p1, fill, h * 0.14f);
+        dl->AddRectFilled(p0, p1, fill, h * 0.4f, outer);
+        if (fam != 0) dl->AddRect(p0, p1, rim, h * 0.4f, outer, fmaxf(1, th * 0.6f));
+        letter(tok, ImVec2(at.x + w * 0.5f, c.y), fs, ink);
+        return w;
+    }
+    // the keyboard: a key cap; arrows and Enter as pictures
+    int arrow = !strcmp(tok, "Left") ? 0 : !strcmp(tok, "Right") ? 1 : !strcmp(tok, "Up") ? 2 : !strcmp(tok, "Down") ? 3 : -1;
+    bool enter = !strcmp(tok, "Enter");
+    float fs = h * 0.62f, tw = arrow >= 0 ? 0 : f->CalcTextSizeA(fs, FLT_MAX, 0, tok).x;
+    float w = arrow >= 0 ? h : fmaxf(tw + h * 0.56f + (enter ? h * 0.62f : 0), h);
+    ImVec2 p1(at.x + w, at.y + h);
+    dl->AddRectFilled(ImVec2(at.x, at.y + h * 0.08f), p1, IM_COL32(236, 236, 240, 70), h * 0.2f);  // (the cap's side, below)
+    dl->AddRectFilled(at, ImVec2(p1.x, p1.y - h * 0.1f), theme_u32(kSurfaceHoverV), h * 0.2f);
+    dl->AddRect(at, ImVec2(p1.x, p1.y - h * 0.1f), theme_u32(kTextV, 0.35f), h * 0.2f, 0, fmaxf(1, scale));
+    ImVec2 m(at.x + w * 0.5f, at.y + h * 0.45f);
+    if (arrow >= 0) {
+        float q = h * 0.2f, k = q * 0.7f;
+        ImVec2 t0, t1, t2;
+        if (arrow == 0) t0 = ImVec2(m.x - q, m.y), t1 = ImVec2(m.x + k, m.y - q), t2 = ImVec2(m.x + k, m.y + q);
+        else if (arrow == 1) t0 = ImVec2(m.x + q, m.y), t1 = ImVec2(m.x - k, m.y + q), t2 = ImVec2(m.x - k, m.y - q);
+        else if (arrow == 2) t0 = ImVec2(m.x, m.y - q), t1 = ImVec2(m.x + q, m.y + k), t2 = ImVec2(m.x - q, m.y + k);
+        else t0 = ImVec2(m.x, m.y + q), t1 = ImVec2(m.x - q, m.y - k), t2 = ImVec2(m.x + q, m.y - k);
+        dl->AddTriangleFilled(t0, t1, t2, kText);
+    } else {
+        dl->AddText(f, fs, ImVec2(enter ? at.x + h * 0.28f : m.x - tw * 0.5f, m.y - fs * 0.5f), kText, tok);
+        if (enter) {  // the return arrow: down, then left
+            float x1 = p1.x - h * 0.3f, x0 = x1 - h * 0.34f, y0 = m.y - h * 0.18f, y1 = m.y + h * 0.1f, q = h * 0.11f;
+            dl->AddLine(ImVec2(x1, y0), ImVec2(x1, y1), kText, th * 0.8f);
+            dl->AddLine(ImVec2(x1, y1), ImVec2(x0, y1), kText, th * 0.8f);
+            dl->AddTriangleFilled(ImVec2(x0 - q * 0.6f, y1), ImVec2(x0 + q, y1 - q), ImVec2(x0 + q, y1 + q), kText);
+        }
+    }
+    return w;
+}
+// One hint: its icons (the key string's parts, "LB / RB" -> two icons), then what they do.
+static void key_cap(ImDrawList *dl, ImVec2 &at, const char *key, const char *what, float scale) {
+    ImGuiContext *g = ImGui::GetCurrentContext();
+    bool pad = hint_force() >= 0 ? hint_force() < 3 : g->NavInputSource == ImGuiInputSource_Gamepad;
+    int fam = !pad ? 0 : hint_force() >= 0 ? hint_force() : input_pad_family();
+    ImFont *f = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.8f, h = fs + 10 * scale;
+    char buf[64];
+    snprintf(buf, sizeof buf, "%s", key);
+    for (char *t = buf; t && *t;) {
+        char *sep = strstr(t, " / ");
+        if (sep) *sep = 0;
+        at.x += hint_icon(dl, at, h, t, pad, fam, scale) + (sep ? 5 * scale : 0);
+        t = sep ? sep + 3 : NULL;
+    }
+    ImVec2 ws = f->CalcTextSizeA(fs, FLT_MAX, 0, tr(what));
+    dl->AddText(f, fs, ImVec2(at.x + 8 * scale, at.y + (h - fs) * 0.5f), kTextDim, tr(what));
+    at.x += 8 * scale + ws.x + 26 * scale;
 }
 // mode: 0 the menu in game, 1 the start page's settings, 2 the start page's home (Play / Settings / Exit)
 void menu_hint_bar(float scale, int mode);
 static void hint_bar(float scale, bool in_game) { menu_hint_bar(scale, in_game ? 0 : 1); }
 void menu_hint_bar(float scale, int mode) {
     ImGuiContext *g = ImGui::GetCurrentContext();
-    bool pad = g->NavInputSource == ImGuiInputSource_Gamepad;
+    bool pad = hint_force() >= 0 ? hint_force() < 3 : g->NavInputSource == ImGuiInputSource_Gamepad;
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImVec2 at = ImGui::GetCursorScreenPos();
     float w = ImGui::GetContentRegionAvail().x;
@@ -2045,11 +2163,11 @@ void menu_hint_bar(float scale, int mode) {
     at.y += 14 * scale;
     const char *back = g_sidebar_focused || !g->NavCursorVisible ? (mode == 0 ? "Close" : "Back") : "Back";
     if (mode == 2) {  // (home: the buttons only)
-        int fam = input_pad_family();
+        int fam = hint_force() >= 0 && hint_force() < 3 ? hint_force() : input_pad_family();
         if (pad) key_cap(dl, at, fam == 2 ? "Cross" : "A", "Select", scale), key_cap(dl, at, fam == 2 ? "Options" : fam == 1 ? "Menu" : "Plus", "Play", scale);
         else key_cap(dl, at, "Up / Down", "Move", scale), key_cap(dl, at, "Enter", "Select", scale);
     } else if (pad) {
-        int fam = input_pad_family();
+        int fam = hint_force() >= 0 && hint_force() < 3 ? hint_force() : input_pad_family();
         const char *ok = fam == 2 ? "Cross" : "A", *no = fam == 2 ? "Circle" : "B";
         const char *lr = fam == 2 ? "L1 / R1" : fam == 1 ? "LB / RB" : "L / R";
         key_cap(dl, at, lr, "Category", scale);
