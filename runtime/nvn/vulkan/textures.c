@@ -1019,13 +1019,22 @@ void vk_tex_prefetch(void) {
     if (budget < 0) { const char *e = getenv("ODYSSEY_TEX_PREFETCH"); budget = e ? atof(e) : 3.0; }
     if (budget <= 0) return;
     extern int nvn_untouched_textures(NvnTexture **out, int max);
-    NvnTexture *c[64];
-    int n = nvn_untouched_textures(c, 64);
-    if (!n) return;
-    uint64_t t0 = SDL_GetTicksNS();
-    static uint64_t done, total_ns;
+    extern uint64_t nvn_texture_inits(void);
     extern bool odyssey_scene_warming(void);  // (title, loading between stages, a stage's first 120 frames)
     bool loading = odyssey_scene_warming();
+    // A whole scan that found nothing to upload is not repeated until a texture is initialized or a load starts: in play
+    // it walked the whole texture table at every present for nothing - 3.7% of the render thread in Metro at 120 FPS
+    // (the large textures it leaves for loads came back every time)
+    static uint64_t idle_inits = ~0ull;
+    static bool idle_loading;
+    uint64_t inits = nvn_texture_inits();
+    if (inits == idle_inits && loading == idle_loading) return;
+    NvnTexture *c[64];
+    int n = nvn_untouched_textures(c, 64);
+    if (!n) { idle_inits = inits, idle_loading = loading; return; }
+    uint64_t t0 = SDL_GetTicksNS();
+    static uint64_t done, total_ns;
+    uint64_t done_before = done;
     for (int i = 0; i < n; i++) {
         NvnTexture *t = c[i];
         if (tex_scalable(t) || renderer_format_is_depth(t->format) || !t->layout.fmt || !t->layout.fmt->bpb) {
@@ -1044,6 +1053,8 @@ void vk_tex_prefetch(void) {
         if ((SDL_GetTicksNS() - t0) / 1e6 >= budget) break;
     }
     total_ns += SDL_GetTicksNS() - t0;
+    if (n < 64 && done == done_before) idle_inits = inits, idle_loading = loading;  // (the whole table seen: nothing to do)
+    else idle_inits = ~0ull;
     static uint64_t logged;
     if (done >= logged + 500) {
         logged = done;

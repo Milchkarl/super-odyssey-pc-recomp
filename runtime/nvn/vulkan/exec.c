@@ -1137,6 +1137,7 @@ static void dq_publish(void) {
     if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
 }
 static VkDescriptorSet dq_alloc(Sub *s, VkDescriptorSetLayout layout);
+static uint64_t hash_words(uint64_t h, const void *p, size_t n);
 
 typedef struct { uint32_t binding, type; union { VkDescriptorImageInfo ii; VkDescriptorBufferInfo bi; }; } DqWrite;
 
@@ -1181,9 +1182,37 @@ static void dq_run(DqHdr *h) {
     case DQ_SETW: {  // allocate and write a descriptor set: the draw's set `slot`
         struct { Sub *s; VkDescriptorSetLayout layout; uint32_t slot, n; } *a = (void *)p;
         DqWrite *dw = (DqWrite *)(p + sizeof *a);
+        uint32_t n = a->n < MAX_BIND ? a->n : MAX_BIND;
+        // A set with exactly this content written earlier in the same submission (its pools are reset only when the
+        // submission is recycled: Sub.seq changes) is bound again instead of allocated and written: an object drawn in
+        // several passes (depth, shadow, colour) binds the same buffers and textures. ODYSSEY_SET_CACHE=0: off.
+        static int cache_on = -1;
+        if (cache_on < 0) { const char *e = getenv("ODYSSEY_SET_CACHE"); cache_on = !e || !*e || atoi(e) != 0; }
+        static struct { uint64_t h, seq; Sub *s; VkDescriptorSet ds; } setc[8192];
+        static uint64_t hits, total;
+        uint64_t h = 0;
+        uint32_t ci = 0;
+        if (cache_on) {
+            uint64_t k[4] = {(uint64_t)(uintptr_t)a->layout, n, 0, 0};
+            h = hash_words(0x5e75e75e75e75e75ull, k, 16);
+            for (uint32_t i = 0; i < n; i++) {
+                bool img = dw[i].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || dw[i].type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                k[0] = (uint64_t)dw[i].binding << 32 | dw[i].type;
+                if (img) k[1] = (uint64_t)(uintptr_t)dw[i].ii.sampler, k[2] = (uint64_t)(uintptr_t)dw[i].ii.imageView, k[3] = dw[i].ii.imageLayout;
+                else k[1] = (uint64_t)(uintptr_t)dw[i].bi.buffer, k[2] = dw[i].bi.offset, k[3] = dw[i].bi.range;
+                h = hash_words(h, k, sizeof k);
+            }
+            h |= 1;
+            ci = (uint32_t)(h ^ (h >> 32)) & 8191;
+            total++;
+            if (setc[ci].h == h && setc[ci].s == a->s && setc[ci].seq == a->s->seq && setc[ci].ds) {
+                slot_set[a->slot & 1] = setc[ci].ds;
+                if (++hits % 200000 == 0) LOG("[vk] descriptor sets reused: %.1f%% of %llu\n", 100.0 * hits / total, (unsigned long long)total);
+                break;
+            }
+        }
         VkDescriptorSet ds = dq_alloc(a->s, a->layout);
         VkWriteDescriptorSet w[MAX_BIND];
-        uint32_t n = a->n < MAX_BIND ? a->n : MAX_BIND;
         for (uint32_t i = 0; i < n; i++) {
             w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds,
                                           .dstBinding = dw[i].binding, .descriptorCount = 1, .descriptorType = dw[i].type};
@@ -1193,6 +1222,7 @@ static void dq_run(DqHdr *h) {
         }
         if (n) (vkUpdateDescriptorSets)(g_vk.dev, n, w, 0, NULL);
         slot_set[a->slot & 1] = ds;
+        if (cache_on) setc[ci].h = h, setc[ci].s = a->s, setc[ci].seq = a->s->seq, setc[ci].ds = ds;
         break;
     }
     case DQ_BINDSETS: {
@@ -7793,7 +7823,17 @@ static void draw_(CmdRec *r, bool indexed) {
         uint64_t fs = st.program->stages[1].code_addr;
         if (fs != last_fs) {
             last_fs = fs;
-            last_hash = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0;
+            // (cached per program object and code address: hashed byte by byte at every change of fragment shader it was
+            // ~2% of the render thread in Metro, where nearly every draw changes it)
+            static struct { uint64_t fs, word; const void *prog; uint64_t hash; } fsc[1024];
+            uint32_t slot = (uint32_t)((fs >> 4) * 0x9E3779B97F4A7C15ull >> 54) & 1023;
+            uint64_t word = 0;
+            if (fs) memcpy(&word, (const void *)(uintptr_t)(fs + 0x30), 8);  // (and the code's first word: reused memory)
+            if (fs && fsc[slot].fs == fs && fsc[slot].prog == st.program && fsc[slot].word == word) last_hash = fsc[slot].hash;
+            else {
+                last_hash = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0;
+                fsc[slot].fs = fs, fsc[slot].word = word, fsc[slot].prog = st.program, fsc[slot].hash = last_hash;
+            }
         }
         static uint64_t skip[16];
         static int nskip = -1;

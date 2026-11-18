@@ -64,6 +64,10 @@ static bool unprepared_scene(void) {
 int odyssey_native_hz(void) {
     if (!odyssey_native_120_enabled()) return 60;
     if (unprepared_scene()) return 60;
+#ifndef __APPLE__
+    extern bool vk_native_brake(void);  // (vulkan/device.c: frames missing their time above 60 - a few seconds at 60)
+    if (vk_native_brake()) return 60;
+#endif
     return settings_fps_hz(g_settings.frame_rate);
 }
 

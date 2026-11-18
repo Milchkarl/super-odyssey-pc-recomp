@@ -1738,6 +1738,44 @@ static void present_brake(uint64_t now, bool interp) {
     if (backoff > 120 && total_frames > last_brake + 1800) backoff = 120;
 }
 
+// The native frame rate's brake (frame rates above 60: odyssey_120.c's extra draws). Where the game's code and the
+// translation of its lists together take longer than a frame - the New Donk City power lines at 120 FPS: ~2,400 draws,
+// ~14 ms of the game's code and ~9 ms of translation, back to back (the game waits for each frame's translation:
+// nvnSyncWait) - the extra frames missed their time in bursts: 20-28 ms frames, 80-110 FPS, a stutter. When 12 of the
+// last 120 frames take over 1.5x their period, the game plays at 60 for 2 s - an even 60 instead of an uneven 80-110 -
+// longer each time in a row (up to 20 s), and 30 s without: short pauses again. Frames already at 60 (loads, scenes
+// without extra-draw preparation) aren't counted. ODYSSEY_FRAME_BRAKE=0: off.
+static _Atomic uint64_t native_brake_until_ns;
+bool vk_native_brake(void) { return plat_now_ns() < atomic_load(&native_brake_until_ns); }
+static void native_brake(uint64_t now) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_FRAME_BRAKE"); on = !e || !*e || atoi(e) != 0; }
+    static uint64_t last, last_brake_ns;
+    static uint8_t slow[120];
+    static int n, nslow;
+    static uint64_t backoff_ns = 2000000000ull;
+    extern int odyssey_native_hz(void);
+    int hz = odyssey_native_hz();
+    uint64_t prev = last;
+    last = now;
+    if (!on || !prev || now <= prev || hz <= 60 || vk_native_brake()) return;
+    double d = (double)(now - prev), period = 1e9 / hz;
+    int k = n++ % 120;
+    bool late = d > period * 1.5;
+    nslow += late - slow[k];
+    slow[k] = late;
+    if (backoff_ns > 2000000000ull && now > last_brake_ns + 30000000000ull) backoff_ns = 2000000000ull;
+    if (nslow >= 12) {
+        atomic_store(&native_brake_until_ns, now + backoff_ns);
+        LOG("[frame-rate] %d of the last %d frames took over %.1f ms: %d FPS for %.0f s\n", nslow, n < 120 ? n : 120,
+            period * 1.5 / 1e6, 60, backoff_ns / 1e9);
+        last_brake_ns = now;
+        backoff_ns = backoff_ns * 2 > 20000000000ull ? 20000000000ull : backoff_ns * 2;
+        memset(slow, 0, sizeof slow);
+        n = nslow = 0;
+    }
+}
+
 static void backend_present_locked(NvnTexture *t, bool handed);
 void backend_present(NvnTexture *t) {
     plat_heap_check("present");
@@ -1764,6 +1802,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     TexBackend *b = fd.b, *game_img = fd.game_img;
     b->presented = true;
     present_brake(present_ns, fd.game_w != NULL);
+    native_brake(present_ns);
     static const float black[4] = {0, 0, 0, 1};
     uint64_t t0 = SDL_GetTicksNS();
     pcache_autosave();
