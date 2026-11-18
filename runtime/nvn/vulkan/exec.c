@@ -8946,6 +8946,38 @@ void renderer_cpu_texel(RqCpuTexel *q) {
     if (paint_always < 0) paint_always = getenv("ODYSSEY_PAINT_SYNC_ALWAYS") && atoi(getenv("ODYSSEY_PAINT_SYNC_ALWAYS"));
     bool stale = e->frame != frame;
     if (bytes == 4 && !paint_always && stale && e->frame != UINT64_MAX && e->wseq == b->gpu_wgen) stale = false;
+    // ODYSSEY_PAINT_SYNC_VERIFY=1 (tests): each readback left out is made all the same and compared with the copy
+    // kept - "[paint-verify]" counts those that differ (none may) and logs the first.
+    static int paint_verify = -1;
+    if (paint_verify < 0) paint_verify = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+    if (paint_verify && bytes == 4 && e->frame != frame && !stale && !q->refresh_snapshot && e->size == size && e->epoch == paint_cpu_epoch && e->bytes) {
+        static uint64_t n_same, n_diff, n_gen_seen, last_log;
+        static uint64_t last_gen;
+        vk_end_pass();
+        st.rt_dirty = true;
+        VkCommandBuffer vcb = vk_cmd();
+        vk_full_barrier(vcb);
+        VkSpan vout = vk_readback(size);
+        VkBufferImageCopy vcp = {.bufferOffset = vout.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                 .imageExtent = {b->width, b->height, 1}};
+        vkCmdCopyImageToBuffer(vcb, b->image, VK_IMAGE_LAYOUT_GENERAL, vout.buf, 1, &vcp);
+        wait_why = "paint verify";
+        renderer_flush();
+        if (!memcmp(e->bytes, vout.ptr, size)) n_same++;
+        else {
+            uint64_t nd = 0, first = 0;
+            for (uint64_t i = 0; i < size; i++) if (e->bytes[i] != ((const uint8_t *)vout.ptr)[i]) { if (!nd) first = i; nd++; }
+            if (n_diff++ < 8) LOG("[paint-verify] DIFFERENT: texture %llx frame %llu: %llu bytes differ, the first at %llu (kept gen %llu)\n",
+                                  (unsigned long long)q->addr, (unsigned long long)frame, (unsigned long long)nd, (unsigned long long)first, (unsigned long long)e->gen);
+        }
+        if (e->gen != last_gen) last_gen = e->gen, n_gen_seen++;
+        e->frame = frame;  // (once a frame, as the readback it stands for)
+        if (frame - last_log >= 600) {
+            last_log = frame;
+            LOG("[paint-verify] so far: %llu left-out readbacks equal to the kept copy, %llu different; %llu copies made in between\n",
+                (unsigned long long)n_same, (unsigned long long)n_diff, (unsigned long long)n_gen_seen);
+        }
+    }
     if (q->refresh_snapshot || stale || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
         vk_end_pass();
         st.rt_dirty = true;
