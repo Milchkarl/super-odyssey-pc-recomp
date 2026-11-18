@@ -2986,8 +2986,10 @@ static VkPipeline clear_pipeline(int index, int kind, uint32_t mask, bool depth,
     return p;
 }
 
+static bool shadow_pass_extra(bool is_clear);
 static void clear(int index, int kind, const void *color, uint32_t mask, bool depth, float dval, bool stencil, uint32_t sval,
                   uint32_t smask) {
+    if (shadow_pass_extra(true)) return;
     if ((depth || stencil) && in_pass && pass_depth_sampled) { vk_end_pass(); st.rt_dirty = true; }  // (direct depth reads)
     begin_pass();
     if (depth || stencil) pass_depth_written = true;
@@ -7683,6 +7685,33 @@ static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
 // since, gets that layer copied in instead: the same bytes the draw would write. Only this program for now
 // (REPEAT_FS). ODYSSEY_REPEAT_DRAWS=0: off.
 #define REPEAT_FS 0x6005e82f2a61e98bull
+// Frame rates above 60: the game draws a gameplay tick twice or more (hle/odyssey_120.c's extra draws), the shadow maps
+// each time. (render thread) g_extra_frame: the lists being run are an extra draw's (rqueue.c RQ_EXTRA_FRAME).
+// ODYSSEY_LOG_SHADOW=1: per 600 frames, the shadow maps' draws in first and extra draws, and which layers.
+// ODYSSEY_SHADOW_REUSE=1: an extra draw's shadow map draws and clears are left out - the maps keep what the tick's
+// first draw rendered.
+static bool g_extra_frame;
+void renderer_extra_frame(bool on) { g_extra_frame = on; }
+static bool shadow_pass_extra(bool is_clear) {
+    NvnTexture *d = st.rt.ncolor ? NULL : st.rt.depth;
+    if (!d || d->width != d->height) return false;
+    static int log = -1, reuse = -1;
+    if (log < 0) log = getenv("ODYSSEY_LOG_SHADOW") != NULL;
+    if (reuse < 0) { const char *e = getenv("ODYSSEY_SHADOW_REUSE"); reuse = e && atoi(e) != 0; }
+    if (log) {
+        static uint64_t n[2][2], layers[2], last;
+        n[g_extra_frame][is_clear]++;
+        if (st.rt.has_dview) layers[g_extra_frame] |= 1ull << (st.rt.dview.min_layer & 63);
+        uint64_t f = renderer_present_count();
+        if (f >= last + 600) {
+            LOG("[shadow] 600 frames: first draws %llu draws %llu clears (layers %llx); extra draws %llu draws %llu clears (layers %llx); target %ux%u" "%s",
+                (unsigned long long)n[0][0], (unsigned long long)n[0][1], (unsigned long long)layers[0], (unsigned long long)n[1][0],
+                (unsigned long long)n[1][1], (unsigned long long)layers[1], d->width, d->height, "\n");
+            memset(n, 0, sizeof n); layers[0] = layers[1] = 0; last = f;
+        }
+    }
+    return reuse && g_extra_frame;
+}
 static uint64_t g_write_gen;  // anything else that may have written a texture since (draws, clears, copies, dispatches)
 static struct { uint64_t key, gen; NvnTexture *tex; uint32_t level, layer; bool valid; } g_repeat;
 static uint64_t repeat_key(Prog *pr, CmdRec *r, bool indexed) {
@@ -7860,6 +7889,7 @@ static void draw_(CmdRec *r, bool indexed) {
         if (g_debug_frame && getenv("ODYSSEY_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
     }
+    if (shadow_pass_extra(false)) return;
     if (repeat_draw(pr, r, indexed)) return;
     if (g_interp_log) {  // (frame interpolation, runtime/nvn/interp.c: the draw's identity across frames)
         // the draw arguments (not the index buffer's address: dynamic geometry's buffers move every frame), the programs
