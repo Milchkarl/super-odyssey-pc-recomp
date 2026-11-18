@@ -62,6 +62,7 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
+    .hud_sharpen = true,
     .antialias = AA_FXAA,
     .rumble = true,
     .rumble_strength = 100,
@@ -355,6 +356,7 @@ void settings_load(void) {
             g_settings.dlss_rcas_sharpness = n < 0 ? 0 : n > 100 ? 100 : n;
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
+        else if (!strcmp(key, "hud_sharpen")) g_settings.hud_sharpen = atoi(val) != 0;
         else if (!strcmp(key, "aspect")) {
             g_settings.aspect = ASPECT_16_9;
             for (int i = 0; i < ASPECT_COUNT; i++) if (!strcmp(val, ASPECT_NAMES[i])) g_settings.aspect = i;
@@ -491,6 +493,7 @@ void settings_save(void) {
     fprintf(f, "dlss_rcas_sharpness = %d\n", g_settings.dlss_rcas_sharpness);
     fprintf(f, "fsr1_sharpness = %d\n", g_settings.fsr1_sharpness);
     fprintf(f, "deband = %d\n", g_settings.deband);
+    fprintf(f, "hud_sharpen = %d\n", g_settings.hud_sharpen);
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : 0]);
     fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
     fprintf(f, "game_dynres = %d\n", g_settings.game_dynres);

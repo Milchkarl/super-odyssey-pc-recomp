@@ -1115,11 +1115,59 @@ static void tab_graphics(void) {
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
                "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
                "Costs almost nothing. Off: the picture exactly as on the Switch.");
+    opt_toggle("Sharper HUD and menus", &g_settings.hud_sharpen, true,
+               "The game's HUD, text and menus are drawn from artwork made for the Switch's 720 lines; enlarged on a "
+               "bigger screen their edges turn soft. On: they are sharpened on screens of 900 lines and more "
+               "(nothing below - a Steam Deck's screen stays as it is), the more the bigger the screen, without "
+               "adding outlines or halos. It makes edges crisper, not more detailed. Off: as the game draws them. "
+               "Changes at once.");
 #endif
     opt_end();
 }
 
-// Performance: frame rate, the overlays, and the shaders (stutter)
+// Overlay (a page of its own since 0.4.4, owner 2026-11-18): the FPS counter and the performance overlay
+static void tab_overlay(void) {
+    float scale = ImGui::GetFontSize() / 34;
+    opt_begin("##overlay", scale);
+    opt_section("Frame rate counter");
+    opt_toggle("Show FPS", &g_settings.show_fps, false, "Shows the frame rate in the top right corner.");
+    opt_section("Performance overlay");
+    opt_toggle("Performance overlay", &g_settings.performance_overlay, false,
+               "Shows the frame rate and frame times with a graph, GPU / CPU / memory use, temperatures and power where "
+               "your PC reports them, the upscaler and resolution, and Mario's position. Hidden while this menu is open. "
+               "Choose its parts below.");
+    {
+        static const char *const corners[OVERLAY_CORNER_COUNT] = {"Top right", "Top left", "Bottom right", "Bottom left"};
+        static const char *const sizes[3] = {"Small", "Medium", "Large"};
+        if (!g_settings.performance_overlay) opt_disable_next();
+        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_TOP_RIGHT,
+                   "The corner of the picture the performance overlay sits in.");
+        if (!g_settings.performance_overlay) opt_disable_next();
+        opt_choice("Overlay size", &g_settings.overlay_size, sizes, 3, 1, "The size of the performance overlay's text.");
+        float opacity = (float)g_settings.overlay_opacity;
+        if (!g_settings.performance_overlay) opt_disable_next();
+        if (opt_slider("Overlay background", &opacity, 0, 100, 10, 80, "%g%%",
+                       "How solid the overlay's background is. 0% shows only the text."))
+            g_settings.overlay_opacity = (int)(opacity + 0.5f);
+        struct { const char *label; bool *on; const char *help; } parts[] = {
+            {"Show GPU", &g_settings.overlay_gpu, "GPU use, temperature, power draw, video memory and clock speed. "
+             "Temperature, power and clock need an NVIDIA card, or Linux with an AMD or Intel one."},
+            {"Show CPU", &g_settings.overlay_cpu, "CPU use, the game's own share of it, and on Linux the CPU's temperature."},
+            {"Show memory", &g_settings.overlay_ram, "The PC's memory in use, and the game's own."},
+            {"Show frame time graph", &g_settings.overlay_graph, "A line of the last frames' times: flat when the game runs evenly, a spike at each hitch."},
+            {"Show hardware names", &g_settings.overlay_hardware, "The names of the graphics card and the processor."},
+            {"Show upscaler and resolution", &g_settings.overlay_render, "The upscaler and anti-aliasing in use, and the game's internal resolution next to its size on screen."},
+            {"Show Mario's position", &g_settings.overlay_position, "Mario's position in the kingdom, in metres. Useful for bug reports."},
+        };
+        for (auto &part : parts) {
+            if (!g_settings.performance_overlay) opt_disable_next();
+            opt_toggle(part.label, part.on, true, part.help);
+        }
+    }
+    opt_end();
+}
+
+// Performance: frame rate and the shaders (stutter)
 static void tab_performance(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##performance", scale);
@@ -1186,40 +1234,6 @@ static void tab_performance(void) {
         g_settings.frame_rate = order[pos];
     }
 #endif
-    opt_section("Overlay");
-    opt_toggle("Show FPS", &g_settings.show_fps, false, "Shows the frame rate in the top right corner.");
-    opt_toggle("Performance overlay", &g_settings.performance_overlay, false,
-               "Shows the frame rate and frame times with a graph, GPU / CPU / memory use, temperatures and power where "
-               "your PC reports them, the upscaler and resolution, and Mario's position. Hidden while this menu is open. "
-               "Choose its parts below.");
-    {
-        static const char *const corners[OVERLAY_CORNER_COUNT] = {"Top right", "Top left", "Bottom right", "Bottom left"};
-        static const char *const sizes[3] = {"Small", "Medium", "Large"};
-        if (!g_settings.performance_overlay) opt_disable_next();
-        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_TOP_RIGHT,
-                   "The corner of the picture the performance overlay sits in.");
-        if (!g_settings.performance_overlay) opt_disable_next();
-        opt_choice("Overlay size", &g_settings.overlay_size, sizes, 3, 1, "The size of the performance overlay's text.");
-        float opacity = (float)g_settings.overlay_opacity;
-        if (!g_settings.performance_overlay) opt_disable_next();
-        if (opt_slider("Overlay background", &opacity, 0, 100, 10, 80, "%g%%",
-                       "How solid the overlay's background is. 0% shows only the text."))
-            g_settings.overlay_opacity = (int)(opacity + 0.5f);
-        struct { const char *label; bool *on; const char *help; } parts[] = {
-            {"Show GPU", &g_settings.overlay_gpu, "GPU use, temperature, power draw, video memory and clock speed. "
-             "Temperature, power and clock need an NVIDIA card, or Linux with an AMD or Intel one."},
-            {"Show CPU", &g_settings.overlay_cpu, "CPU use, the game's own share of it, and on Linux the CPU's temperature."},
-            {"Show memory", &g_settings.overlay_ram, "The PC's memory in use, and the game's own."},
-            {"Show frame time graph", &g_settings.overlay_graph, "A line of the last frames' times: flat when the game runs evenly, a spike at each hitch."},
-            {"Show hardware names", &g_settings.overlay_hardware, "The names of the graphics card and the processor."},
-            {"Show upscaler and resolution", &g_settings.overlay_render, "The upscaler and anti-aliasing in use, and the game's internal resolution next to its size on screen."},
-            {"Show Mario's position", &g_settings.overlay_position, "Mario's position in the kingdom, in metres. Useful for bug reports."},
-        };
-        for (auto &part : parts) {
-            if (!g_settings.performance_overlay) opt_disable_next();
-            opt_toggle(part.label, part.on, true, part.help);
-        }
-    }
     opt_section("Discord");
     opt_toggle("Discord activity", &g_settings.discord_presence, false,
                "Shows Super Odyssey PC Recomp, the kingdom you're in and the time played on your Discord profile, while "
@@ -1860,14 +1874,15 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
 static void tabs_body(float scale, void (*prelaunch)(float)) {
     // (id: the page; -1 = Prelaunch)
     struct Tab { const char *name; int id; bool on; };
-    Tab tabs[12];
+    Tab tabs[16];
     int ntabs = 0;
     if (prelaunch) tabs[ntabs++] = {"Prelaunch", -1, true};
     // (ids: the pages below; 5-7 were Link's Awakening's and stay unused, so ODYSSEY_MENU_TAB numbers keep meaning;
     // the old Video page is Display (0), Graphics (3) and Performance (4) now)
     static const char *names[] = {"Display", "Audio", "Mods", "Graphics", "Performance", NULL, NULL, NULL, "Controls", "Quit",
-                                  "Updates", "Language"};
-    static const int order[] = {0, 3, 4, 1, 8, 11, 2, 10, 9};  // Display, Graphics, Performance, Audio, Controls, Language, Mods, Updates, Quit
+                                  "Updates", "Language", "Overlay"};
+    // Display, Graphics, Performance, Overlay, Audio, Controls, Language, Mods, Updates, Quit
+    static const int order[] = {0, 3, 4, 12, 1, 8, 11, 2, 10, 9};
     for (int i : order)
         if (i != 9 || !prelaunch) tabs[ntabs++] = {names[i], i, true};
     int cur = 0;  // g_tab / g_tab_request hold ids
@@ -1982,6 +1997,7 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     case 0: tab_display(); break;
     case 3: tab_graphics(); break;
     case 4: tab_performance(); break;
+    case 12: tab_overlay(); break;
     case 1: tab_audio(); break;
     case 2: tab_mods(scale); break;
     case 8: tab_about(); break;

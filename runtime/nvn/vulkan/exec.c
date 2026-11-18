@@ -9521,9 +9521,11 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
 // The layer is sharpened when it is composited (shaders.c hud_over.frag): nothing below 900 lines, rising to the full
 // strength at 1440 and above. ODYSSEY_HUD_SHARPEN=<0..1>: the full strength (0: off; 0.6 by default).
 static float hud_sharpness(uint32_t oh) {
+    // (Graphics > Sharper HUD and menus: settings hud_sharpen; the variable, when set, decides instead)
     static float full = -1;
-    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); full = e && *e ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
-    if (oh < 900 || full <= 0) return 0;
+    static bool env;
+    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); env = e && *e; full = env ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
+    if (oh < 900 || full <= 0 || (!env && !g_settings.hud_sharpen)) return 0;
     float t = ((float)oh - 900.0f) / 540.0f;
     return full * (t > 1 ? 1 : t < 0.15f ? 0.15f : t);
 }

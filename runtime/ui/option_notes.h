@@ -46,6 +46,8 @@ static const OptionNote k_option_notes[] = {
      "Game (the default, as on the Switch). 16x for sharper ground at almost no cost."},
     {"Texture detail", "Sharper surface textures in the distance.", "Switch (the default, as on the Switch)."},
     {"Shadow quality", "Sharper, steadier shadow edges.", "Switch (the default). High or Ultra on a fast graphics card."},
+    {"Sharper HUD and menus", "Crisper edges on the game's HUD, text and menus on large screens.",
+     "On (the default). Off if the HUD looks too hard to you."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
     // ---- Performance
     {"Early frame hand-off", "Lets the game start its next frame while the graphics card finishes the last one, for more FPS.",
