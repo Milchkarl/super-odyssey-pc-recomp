@@ -1121,10 +1121,21 @@ typedef struct { uint32_t op, size; VkCommandBuffer cb; } DqHdr;  // (size: the 
 #define DQ_RING (16u << 20)
 static uint8_t *dq_ring;
 static _Atomic uint64_t dq_w, dq_r;  // bytes written / consumed (positions mod DQ_RING)
+static uint64_t dq_wl, dq_pub;  // (the queueing thread, under the render lock) bytes added / published as dq_w
+static int dq_batch = -1;       // (ODYSSEY_DQ_BATCH=0: every packet published at once, as before)
 static bool dq_on;                   // the thread runs (decided once)
 static pthread_mutex_t dq_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t dq_cond = PTHREAD_COND_INITIALIZER;
 static _Atomic int dq_sleeping;
+// (the queueing thread) what it added becomes visible to the recording thread - a sequentially consistent store: see
+// dq_main's sleep
+static void dq_publish(void) {
+    if (dq_batch < 0) { const char *e = getenv("ODYSSEY_DQ_BATCH"); dq_batch = !e || !*e || atoi(e) != 0; }
+    if (dq_wl == dq_pub) return;
+    dq_pub = dq_wl;
+    atomic_store(&dq_w, dq_wl);
+    if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
+}
 static VkDescriptorSet dq_alloc(Sub *s, VkDescriptorSetLayout layout);
 
 typedef struct { uint32_t binding, type; union { VkDescriptorImageInfo ii; VkDescriptorBufferInfo bi; }; } DqWrite;
@@ -1269,6 +1280,8 @@ static void dq_sync(void) {
             plat_print_backtrace();
         }
     }
+    // (the queueing thread: what it added but hasn't published yet, first)
+    if (atomic_load_explicit(&dq_producer, memory_order_relaxed) == (uint64_t)(uintptr_t)pthread_self()) dq_publish();
     uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
     int spin = 0;
     uint64_t t0 = 0;
@@ -1294,30 +1307,36 @@ static void dq_sync(void) {
     }
 }
 
-// (render thread) room for a packet of `size` payload bytes; dq_push publishes it
+// (render thread) room for a packet of `size` payload bytes; dq_push adds it
 static void *dq_begin(uint32_t op, VkCommandBuffer cb, uint32_t size) {
     atomic_store_explicit(&dq_producer, (uint64_t)(uintptr_t)pthread_self(), memory_order_relaxed);
     uint32_t total = (uint32_t)((sizeof(DqHdr) + size + 7) & ~7u);
-    uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
+    uint64_t w = dq_wl;
     uint32_t at = (uint32_t)(w % DQ_RING);
     if (at + total > DQ_RING) {  // (no wrap inside a packet: the rest of the ring is skipped)
         uint32_t rest = DQ_RING - at;
+        if (w + rest + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) dq_publish();  // (before waiting)
         while (w + rest + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) SDL_CPUPauseInstruction();
         DqHdr *k = (DqHdr *)(dq_ring + at);
         k->op = DQ_SKIP, k->size = rest;
         w += rest, at = 0;
-        atomic_store_explicit(&dq_w, w, memory_order_release);
+        dq_wl = w;
     }
+    if (w + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) dq_publish();  // (before waiting)
     while (w + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) SDL_CPUPauseInstruction();
     DqHdr *h = (DqHdr *)(dq_ring + at);
     h->op = op, h->size = total, h->cb = cb;
     return h + 1;
 }
+// The packet is added to the queue; the recording thread sees it once published: every DQ_PUBLISH bytes, at a sync and
+// at the end of each frame's lists (backend_execute). Publishing each packet - a sequentially consistent store, ~10 a
+// draw - cost 7.8% of the render thread at ~2,300 draws a frame (Metro, 120 FPS): each store also took the cache line
+// back from the recording thread polling it.
+#define DQ_PUBLISH 16384u
 static void dq_push(void) {
-    uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
-    DqHdr *h = (DqHdr *)(dq_ring + w % DQ_RING);
-    atomic_store(&dq_w, w + h->size);  // (sequentially consistent: see dq_main's sleep)
-    if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
+    DqHdr *h = (DqHdr *)(dq_ring + dq_wl % DQ_RING);
+    dq_wl += h->size;
+    if (dq_wl - dq_pub >= DQ_PUBLISH || !dq_batch) dq_publish();
 }
 
 // The draw path's calls: queued while dq_mode, else made here (the macros sync first)
@@ -9867,6 +9886,7 @@ void backend_execute(uint64_t handle) {
     if (setups != seen_setups) seen_setups = setups, quiet_since = frame;
     if (prefetch && game_is_odyssey() && frame - quiet_since < 600) prefetch_programs(handle, 0);
     exec_list(handle, 0);
+    if (dq_on) dq_publish();  // (the frame's last packets: nothing waits unpublished between frames)
     PROF_ADD(prof_exec);
     if (prof) cum_exec += SDL_GetTicksNS() - prof_t0_;
     static int sync_submit = -1;

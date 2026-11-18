@@ -300,6 +300,8 @@ static void add_cflags(Args *a, const Tools *t) {
     char own[128];
     for (char *f = strtok_r(buf, " ", &save); f; f = strtok_r(NULL, " ", &save)) {
         if (march && !strncmp(f, "-march=", 7)) snprintf(own, sizeof own, "-march=%s", march), f = own;
+        if (!strcmp(f, "-O1") && getenv("ODYSSEY_GAME_OPT") && (!strcmp(getenv("ODYSSEY_GAME_OPT"), "2") || !strcmp(getenv("ODYSSEY_GAME_OPT"), "3")))
+            f = !strcmp(getenv("ODYSSEY_GAME_OPT"), "2") ? "-O2" : "-O3";
         if (t->zig && !strncmp(f, "-march=", 7)) {
             char cpu[128];
             snprintf(cpu, sizeof cpu, "-mcpu=%s", f + 7);
@@ -317,7 +319,10 @@ static void add_cflags(Args *a, const Tools *t) {
     // The optimization level the flags ask for: zig cc turns -O1 into clang's -O2 (its own "release" level). -O2 adds
     // loop-load elimination, which with LICM took most of the time on the biggest files (clang -ftime-report on a
     // Steam Deck); -O1 is what the project's own build (make, clang -O1) uses and was tested with.
-    if (t->zig) add(a, "-Xclang"), add(a, "-O1");
+    // (ODYSSEY_GAME_OPT=2 / 3, tests: the game code at that level instead - a run-time comparison)
+    static const char *opt;
+    if (!opt) { const char *e = getenv("ODYSSEY_GAME_OPT"); opt = e && (!strcmp(e, "2") || !strcmp(e, "3")) ? (!strcmp(e, "2") ? "-O2" : "-O3") : "-O1"; }
+    if (t->zig) add(a, "-Xclang"), add(a, opt);
 }
 
 // The longest function in a generated C file, in lines: a function starts at a line that begins with a name and ends
