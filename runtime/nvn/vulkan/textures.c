@@ -546,11 +546,43 @@ static uint64_t hash_full(const uint8_t *p, uint64_t n) {
     return h ^ (h >> 31);
 }
 
+// A texture's bytes sampled: has it changed since the last look? (Without the OS's write tracking - Linux - every
+// texture in use is sampled like this every 8th frame; a change the samples miss is caught by the full hash, at the
+// latest 120 frames later.) 1024 words spread evenly, in two chains: it was 4096 single bytes in one FNV chain -
+// 4096 cache lines touched and 4096 multiplies in a row for every texture over 256 KB, 3.5% of all the CPU time a
+// Steam Deck spent on the game in Cap Kingdom (perf, 2026-11-18). ODYSSEY_TEX_SAMPLE_OLD=1: as before (tests).
 static uint64_t fnv_sample(const uint8_t *p, uint64_t n) {
-    uint64_t h = 1469598103934665603ull;
-    uint64_t step = n > 4096 ? n / 4096 : 1;
-    for (uint64_t i = 0; i < n; i += step) { h ^= p[i]; h *= 1099511628211ull; }
-    return h ^ n;
+    static int old = -1;
+    if (old < 0) old = getenv("ODYSSEY_TEX_SAMPLE_OLD") != NULL;
+    if (old) {
+        uint64_t h = 1469598103934665603ull;
+        uint64_t step = n > 4096 ? n / 4096 : 1;
+        for (uint64_t i = 0; i < n; i += step) { h ^= p[i]; h *= 1099511628211ull; }
+        return h ^ n;
+    }
+    uint64_t h0 = 0x9E3779B97F4A7C15ull ^ n, h1 = 0xC2B2AE3D27D4EB4Full, words = n / 8;
+    if (words <= 1024) {  // (small: every word)
+        uint64_t i = 0;
+        for (; i + 2 <= words; i += 2) {
+            uint64_t v[2];
+            memcpy(v, p + i * 8, 16);
+            h0 = (h0 ^ v[0]) * 0x100000001B3ull; h0 ^= h0 >> 29;
+            h1 = (h1 ^ v[1]) * 0x100000001B3ull; h1 ^= h1 >> 29;
+        }
+        for (uint64_t k = i * 8; k < n; k++) h0 = (h0 ^ p[k]) * 0x100000001B3ull;
+    } else {
+        // (the stride in 16.16 words, so the 1024 samples reach from the first word to the last)
+        uint64_t step = ((words - 1) << 16) / 1023;
+        for (uint64_t k = 0; k < 1024; k += 2) {
+            uint64_t v0, v1;
+            memcpy(&v0, p + ((k * step) >> 16) * 8, 8);
+            memcpy(&v1, p + (((k + 1) * step) >> 16) * 8, 8);
+            h0 = (h0 ^ v0) * 0x100000001B3ull; h0 ^= h0 >> 29;
+            h1 = (h1 ^ v1) * 0x100000001B3ull; h1 ^= h1 >> 29;
+        }
+    }
+    uint64_t h = h0 ^ (h1 * 0x9E3779B97F4A7C15ull);
+    return h ^ (h >> 31);
 }
 
 static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
