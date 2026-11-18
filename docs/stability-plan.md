@@ -154,6 +154,16 @@ volume at 0, both monitors kept dark while tests run, nothing pushed or posted w
   preparing 2,276-5,090 pipelines (30 s the first time) and area-shader preload running to its 8 GB budget: 8.6-10.2 GB
   in RAM. With the other port's cache (nothing our warm-up could use): 6.3 GB, but a 1,634 ms frame. Not changed yet.
 
+- **RAM and cache, second round (all measured, local commits f95e78b, b94d9e3, 75153c7):** warm-up Auto 1 GB on every
+  PC; only our tours' warm flags; SPIR-V in one zstd pack (old caches move into it); no pipeline binaries on NVIDIA.
+  Totals, RTX 4090: a new player 98 s -> 51 s before the start, cache 2.2 GB -> 0.7 GB, RAM 8.4 -> 11.7 GB became
+  4.6 -> 6.1 GB; this PC's own settings at 120 FPS through six kingdoms 14.7 -> 15.6 GB became 5.8 -> 6.6 GB, FPS and
+  hitches the same. AMD iGPU: binaries make no RAM difference, kept. Not adopted: not loading our pipeline cache
+  (another ~1 GB less, but NVIDIA's own cache holds 1 GB by default - too little for a play-through). Blocked: SMOL-V
+  (a further ~2x on disk per its author) - downloading and building it was refused by the session's safety check.
+  Next for RAM: what is left is ~3.2 GB of game memory and ~2.5 GB of driver objects; the step beyond is
+  VK_EXT_shader_object (no pipeline objects at all), a renderer rewrite.
+
 ## Owner play card (after the automatic gates)
 At most 10 minutes: enter the Lake Kingdom pond painting at 165 FPS; listen to the title music for a minute; play a
 cutscene transition; turn FSR frame generation on and switch upscalers twice. The answer per item is fine / not fine.

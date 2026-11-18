@@ -117,6 +117,14 @@ Players reported the frame rate falling after a while. On Linux and the Steam De
 - **Shaders built whole when the game sets them up:** each costs about 4 MB of driver memory, and the boot set up
   ~1,450 at once. Only those a scene needs in its first frames ("warm") still are; the rest at their first draw, from
   binaries on disk: about 2 GB less with the same stutter.
+- **Pipeline binaries cost NVIDIA memory:** a shader library created from a saved `VK_KHR_pipeline_binary` held
+  far more driver memory than the same library from a pipeline cache. Turning binaries off on NVIDIA (the preparation
+  fills the pipeline cache instead, as on GPUs without binaries): a new player 6.0 -> 9.1 GB became 4.6 -> 6.1 GB, the
+  120 FPS routes 9.3 -> 12.4 GB became 5.8 -> 6.6 GB, with the same frame rate and no more stutter. On an AMD GPU the
+  same switch changed nothing (4.1 -> 4.8 GB either way), so other GPUs keep them.
+- **One packed shader cache:** the SPIR-V (17,000-54,000 files, 0.9-4.7 GB) went into one zstd file, ~4.3x smaller
+  (Odyssey Recomp's design); with only the shaders a run through the game draws compiled before the first start
+  (their list merged with ours), a first start's preparation went from 98 s to 51 s and its cache from 2.2 GB to 0.7 GB.
 - **Measure, don't guess:** a memory trace every half second from launch (`ODYSSEY_MEM_TRACE=1`) showed which step of
   the start-up each gigabyte came from; three plausible suspects (bulk set-ups, shaders never drawn, preloading) turned
   out to cost almost nothing.
