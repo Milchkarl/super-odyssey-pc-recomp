@@ -3759,7 +3759,9 @@ void renderer_program_hint(NvnProgram *np, bool bulk) {
     if ((on == 3 || (on == 1 && g_settings.shader_known_only && !getenv("ODYSSEY_PREWARM"))) && !known) return;
     ShaderKey vkey, fkey;
     base_keys(&vkey, &fkey);
-    program_for(np, &vkey, &fkey, warm || (known && !bulk && known_whole) ? PF_AHEAD_WARM : PF_AHEAD);
+    static int warm_whole = -1;  // (ODYSSEY_PREWARM_WARM=0, tests: warm programs too get their libraries at their first draw)
+    if (warm_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_WARM"); warm_whole = e ? atoi(e) != 0 : 1; }
+    program_for(np, &vkey, &fkey, (warm && warm_whole) || (known && !bulk && known_whole) ? PF_AHEAD_WARM : PF_AHEAD);
 }
 
 static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
