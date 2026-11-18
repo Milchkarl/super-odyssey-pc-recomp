@@ -2058,6 +2058,7 @@ void ui_window_init(void) {
     create_swapchain();
     vk_exec_init();
     vk_shaders_init();
+    vk_shader_cache_migrate();  // (cache/spirv into cache/shaders.pack, in the background)
     vk_pipeline_prewarm(!recovering_pipeline_cache);
     vk_start_ok();
 }
