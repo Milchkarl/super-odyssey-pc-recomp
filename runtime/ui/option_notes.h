@@ -53,7 +53,7 @@ static const OptionNote k_option_notes[] = {
     {"Multithreaded rendering", "Uses one more CPU core to feed the graphics card, for more FPS.",
      "Auto (the default): on with NVIDIA cards, off with AMD and Intel ones and on the Steam Deck."},
     {"Frame rate", "How many frames a second the game draws. The Switch draws 60.",
-     "60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily."},
+     "60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC."},
     {"Show FPS", "A small frame rate counter in the corner.", "Off (the default)."},
     {"Performance overlay", "Frame rate, frame times, and how busy the graphics card, CPU and memory are.",
      "Off (the default). On to find out why a scene is slow."},

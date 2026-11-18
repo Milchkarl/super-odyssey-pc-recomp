@@ -404,7 +404,7 @@ On (the default). Off if objects flicker. ||| 켜기(기본값). 물체가 깜�
 Uses one more CPU core to feed the graphics card, for more FPS. ||| CPU 코어를 하나 더 써서 그래픽 카드에 일을 넘겨 FPS를 높입니다.
 Auto (the default): on with NVIDIA cards, off with AMD and Intel ones and on the Steam Deck. ||| 자동(기본값): NVIDIA 카드에서는 켜기, AMD와 Intel 카드 및 Steam Deck에서는 끄기.
 How many frames a second the game draws. The Switch draws 60. ||| 게임이 1초에 그리는 프레임 수입니다. Switch는 60입니다.
-60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. ||| 60 FPS(기본값, Switch와 같음). PC가 안정적으로 유지하면 화면의 주사율.
+60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC. ||| 60 FPS(기본값, Switch와 같음). PC가 안정적으로 유지하면 화면의 주사율. 60을 넘으면 가장 복잡한 곳(높은 곳에서 본 뉴 동크 시티)에서는 어떤 PC에서도 프레임이 떨어질 수 있습니다.
 A small frame rate counter in the corner. ||| 구석에 작은 프레임 레이트 표시를 띄웁니다.
 Frame rate, frame times, and how busy the graphics card, CPU and memory are. ||| 프레임 레이트, 프레임 시간, 그리고 그래픽 카드·CPU·메모리 사용량입니다.
 Off (the default). On to find out why a scene is slow. ||| 끄기(기본값). 장면이 느린 이유를 찾을 때 켜기.
