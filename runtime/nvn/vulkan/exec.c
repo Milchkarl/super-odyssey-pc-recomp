@@ -5061,10 +5061,15 @@ static void *pc_worker(void *arg) {
             if (cs) maxwell_free(cs);
             continue;
         }
-        // ODYSSEY_PRECOMPILE_TRANSLATE=known (tests): only the programs compiled for the GPU are translated here too; the
-        // rest are translated if the game sets them up (in the background, then saved: translations.bin)
+        // Only the programs compiled for the GPU are translated here too; the rest are translated if the game sets them
+        // up (in the background, then saved: translations.bin). A first start, RTX 4090: 59 -> 44 s; Steam Deck: ~370 ->
+        // 193 s, cache 455 -> 254 MB; the Deck's Cap Kingdom bench and the PC's kingdom route the same (FPS, hitches).
+        // ODYSSEY_PRECOMPILE_TRANSLATE=all: every program, as before.
         static int tr_known = -1;
-        if (tr_known < 0) tr_known = getenv("ODYSSEY_PRECOMPILE_TRANSLATE") && !strcmp(getenv("ODYSSEY_PRECOMPILE_TRANSLATE"), "known");
+        if (tr_known < 0) {
+            const char *e = getenv("ODYSSEY_PRECOMPILE_TRANSLATE");
+            tr_known = !(e && !strcmp(e, "all")) && pc_all <= 0;
+        }
         if (tr_known && !pp->known) continue;
         ShaderKey fk = fkey;
         ShaderInfo *vi = maxwell_translate(stages[0].code, stages[0].size, STAGE_VERTEX, &vkey), *fi = NULL;

@@ -42,6 +42,8 @@ uint64_t vk_spirv_source_key(const char *src, int stage) {
 }
 
 #include <zstd.h>
+#include <SDL3/SDL_thread.h>
+#include <SDL3/SDL_timer.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -176,11 +178,11 @@ bool vk_spirv_cache_available(void) {
 }
 
 _Atomic bool vk_spirv_cache_failed;  // a SPIR-V couldn't be written: what is stored can't be counted on (exec.c modules)
-static void cache_store(uint64_t h, const uint32_t *spv, size_t nwords) {
+static void cache_store_at(uint64_t h, const uint32_t *spv, size_t nwords, int level) {
     size_t cap = ZSTD_compressBound(nwords * 4);
     uint8_t *buf = malloc(sizeof(PackRec) + cap);
     if (!buf) { vk_spirv_cache_failed = true; return; }
-    size_t packed = ZSTD_compress(buf + sizeof(PackRec), cap, spv, nwords * 4, PACK_LEVEL);
+    size_t packed = ZSTD_compress(buf + sizeof(PackRec), cap, spv, nwords * 4, level);
     if (ZSTD_isError(packed)) { free(buf); vk_spirv_cache_failed = true; return; }
     PackRec r = {0x314B5053, (uint32_t)nwords, h, (uint32_t)packed, 0};
     r.check = pk_check(buf + sizeof(PackRec), packed);
@@ -205,11 +207,15 @@ static void cache_store(uint64_t h, const uint32_t *spv, size_t nwords) {
     free(buf);  // (the index learns it at its next scan: its offset is the file's)
     if (!ok) vk_spirv_cache_failed = true;
 }
+static void cache_store(uint64_t h, const uint32_t *spv, size_t nwords) { cache_store_at(h, spv, nwords, PACK_LEVEL); }
 
 // (game process, once, in the background) the modules of cache/spirv moved into the pack, the folder removed: a cache
 // from before the pack stays valid and shrinks ~4x. A module is in the pack before its file goes (cache_load).
+// (low priority, a pause between files and zstd level 3 - 3.9x instead of 4.3x for a third of the CPU time: on a Steam
+// Deck the move at full speed beside the game cost frames of 26-51 ms)
 static void *migrate_thread(void *a) {
     (void)a;
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
     DIR *dir = opendir("cache/spirv");
     if (!dir) return NULL;
     unsigned moved = 0;
@@ -224,8 +230,9 @@ static void *migrate_thread(void *a) {
             size_t n;
             uint32_t *d = legacy_load(key, &n);
             if (!d) continue;
-            cache_store(key, d, n);
+            cache_store_at(key, d, n, 3);
             free(d);
+            SDL_Delay(2);
             if (vk_spirv_cache_failed || !pk_lookup(key).key) break;  // (couldn't write: the files stay)
             moved++;
         }
