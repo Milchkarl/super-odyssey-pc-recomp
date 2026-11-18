@@ -95,7 +95,7 @@ if [ -n "$DECK" ] && timeout 15 $SSH "$DECK" true 2>/dev/null; then
     grep -q "normal: window: *0x" "$WORK/deck.log" || { echo "no window on the Deck at a first start"; exit 1; }
     grep -q "still running after 120" "$WORK/deck.log" || { echo "the Deck's 2-minute run ended early"; exit 1; }
     grep -q "errors in the log: 0" "$WORK/deck.log" || { echo "the Deck's run logged an error"; exit 1; }
-    timeout 60 $SCP "$DECK:/run/media/deck/SN01T/Super Odyssey/game/build/window.png" "$(cygpath -m "$WORK/deck.png")" || true
+    timeout 60 $SCP "$DECK:/run/media/deck/SN01T/sopr-fonttest/build/window.png" "$(cygpath -m "$WORK/deck.png")" || true
     echo "ok; look at $WORK/deck.png"
 else
     echo "WARNING: the Steam Deck isn't reachable - the Linux build is covered only by the catalog probe below"
