@@ -1191,6 +1191,68 @@ void input_native_tick_end(void) { tick_input_active = false; input_cappy_tick_e
 
 static int32_t clamp_axis(int32_t v) { return v > 32767 ? 32767 : v < -32767 ? -32767 : v; }
 
+// A ride recorded once and replayed by scripts (docs/perf-plan-heavy-views.md): ODYSSEY_INPUT_RECORD=<file> writes
+// what the game is given at each poll of player 1's pad - buttons and both sticks as the game gets them (keyboard,
+// mouse camera and controller already combined) - keyed to the stage's gameplay tick (odyssey_stage_ticks) and the
+// poll's number within it; ODYSSEY_INPUT_REPLAY=<file> gives the game exactly that instead, from the first stage tick
+// on (before it - the title screen - the usual input applies), and ends the game 2 s after the recording's last tick.
+// Both log Mario's position once a second ("[ride] tick N pos x y z"): a replay that follows the ride shows the same
+// positions. Not recorded: motion, player 2.
+typedef struct { uint32_t tick, poll; uint64_t buttons; int32_t ax[4]; } RideRec;
+static void ride_io(uint64_t *b, int32_t ax[4]) {
+    static int mode = -1;  // 0 none, 1 record, 2 replay
+    static FILE *out;
+    static RideRec *recs;
+    static size_t nrec, cur;
+    static uint64_t last_tick, poll, end_tick;
+    extern uint64_t odyssey_stage_ticks(void);
+    extern bool odyssey_player_position(float p[3]);
+    if (mode < 0) {
+        const char *r = getenv("ODYSSEY_INPUT_RECORD"), *p = getenv("ODYSSEY_INPUT_REPLAY");
+        mode = 0;
+        if (p && *p) {
+            FILE *f = fopen(p, "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                nrec = sz > 0 ? (size_t)sz / sizeof *recs : 0;
+                recs = malloc(nrec * sizeof *recs + 1);
+                if (recs && fread(recs, sizeof *recs, nrec, f) == nrec && nrec) mode = 2, end_tick = recs[nrec - 1].tick;
+                fclose(f);
+            }
+            LOG("[ride] replay %s: %s (%zu polls, %llu ticks)\n", p, mode == 2 ? "loaded" : "could not be read", nrec, (unsigned long long)end_tick);
+        } else if (r && *r) {
+            out = fopen(r, "wb");
+            if (out) mode = 1;
+            LOG("[ride] recording to %s%s\n", r, out ? "" : ": could not be opened");
+        }
+    }
+    if (!mode) return;
+    uint64_t tick = odyssey_stage_ticks();
+    if (!tick) return;
+    if (tick != last_tick) {
+        last_tick = tick, poll = 0;
+        float pos[3];
+        if (tick % 60 == 0 && odyssey_player_position(pos)) LOG("[ride] tick %llu pos %.0f %.0f %.0f\n", (unsigned long long)tick, pos[0], pos[1], pos[2]);
+        if (mode == 1 && tick % 30 == 0) fflush(out);
+        if (mode == 2 && tick == end_tick + 1) LOG("[ride] the recording ended at tick %llu\n", (unsigned long long)end_tick);
+        if (mode == 2 && tick > end_tick + 120) { extern void vk_exit_now(void); LOG("[ride] replay done\n"); vk_exit_now(); }
+    } else poll++;
+    if (mode == 1) {
+        RideRec rec = {(uint32_t)tick, (uint32_t)poll, *b, {ax[0], ax[1], ax[2], ax[3]}};
+        fwrite(&rec, sizeof rec, 1, out);
+        return;
+    }
+    while (cur < nrec && recs[cur].tick < tick) cur++;
+    *b = 0, ax[0] = ax[1] = ax[2] = ax[3] = 0;
+    if (cur >= nrec || recs[cur].tick != tick) return;  // (a tick without polls in the recording, or past its end)
+    size_t i = cur;
+    while (i + 1 < nrec && recs[i + 1].tick == tick && recs[i].poll < poll) i++;
+    *b = recs[i].buttons;
+    memcpy(ax, recs[i].ax, sizeof recs[i].ax);
+}
+
 // NpadFullKeyState / NpadHandheldState / NpadJoy*State share this layout (0x28 bytes):
 // {int64 sampling, u64 buttons, AnalogStick L {x,y}, AnalogStick R {x,y}, u32 attributes}
 static void fill_state(Cpu *c) {
@@ -1237,6 +1299,10 @@ static void fill_state(Cpu *c) {
     if (ry > 16000) b |= 1ull << 21;
     if (rx > 16000) b |= 1ull << 22;
     if (ry < -16000) b |= 1ull << 23;
+    {   int32_t ax[4] = {lx, ly, rx, ry};
+        ride_io(&b, ax);
+        lx = ax[0], ly = ax[1], rx = ax[2], ry = ax[3];
+    }
     *(uint64_t *)(s + 8) = b;
     static uint64_t last_b;
     if (b != last_b && (getenv("ODYSSEY_INPUT") || getenv("ODYSSEY_HOST_INPUT")))
