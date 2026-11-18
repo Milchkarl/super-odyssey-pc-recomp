@@ -1599,6 +1599,9 @@ static bool frame_placement(float v[4], float pv[8]) {
     else {
         int a = g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : ASPECT_16_9;
         double k = a == ASPECT_FILL ? (fabs(win - 1.0) > 0.005 ? win : 1.0) : ASPECT_K[a];
+        // (a fixed shape within 3% of the window's is the window's: 21:9 is 64:27 = 2.37, a 3840x1600 screen 2.40 - the
+        // picture was 3793 wide with bars at the sides, #93)
+        if (a != ASPECT_FILL && fabs(k / win - 1.0) < 0.03) k = fabs(win - 1.0) > 0.005 ? win : 1.0;
         odyssey_wide_want((float)k);
     }
     OutScale os;
