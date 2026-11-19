@@ -329,7 +329,6 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     if (!p || off >= p->size) return;
     uint64_t capacity = p->size - off;
     if (capacity > 4 * 1024 * 1024) capacity = 4 * 1024 * 1024;
-    void *snapshot = malloc(capacity);
     // (the copy the rows at an address hold: asked again within a frame, the renderer returns "unchanged" and
     // nothing is copied - a CPU edit handed back, or a refresh, makes a new copy with a new number)
     static struct { uint64_t addr, gen, ticket; } held[8];
@@ -350,6 +349,10 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     bool same_queue = ticket_on && rq_enabled() && !refresh && hi >= 0 && held[hi].gen && held[hi].ticket &&
                       rq_last_ticket() == held[hi].ticket;
     if (same_queue && !ticket_verify) { tk_skipped++; return; }
+    // (allocated only now. 0.4.8 allocated it above and returned here without freeing it: up to 4 MB at each ask left
+    // out, ~39 a frame near poison - never touched, so not in RAM, but committed: 22 -> 57 GB in three minutes in the
+    // Wooded Kingdom on a 16 GB PC, then "out of host memory for commands" (#75, crash report 2026-11-19))
+    void *snapshot = malloc(capacity);
     RqCpuTexel q = {.addr = p->storage + off, .components = 1, .component_bytes = 4,
         .snapshot = snapshot, .snapshot_capacity = capacity, .guest_capacity = p->size - off,
         .guest_pitch = G(uint32_t, td, 0x4c), .refresh_snapshot = refresh, .have_gen = hi >= 0 && !refresh ? held[hi].gen : 0};
