@@ -1110,6 +1110,15 @@ static void tab_graphics(void) {
                    "stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the "
                    "Switch. Applies from the next area loaded.", false);
     }
+    {
+        static const char *dd[] = {"Switch", "High", "Very high"};
+        opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
+                   "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
+                   "simpler versions and fade out farther away. High: twice the Switch's distances, Very high: four "
+                   "times. Faraway objects then also keep moving, as they do near you. Costs CPU and GPU time in "
+                   "large kingdoms. The landscape itself is unchanged. Switch: as on the Switch. Changes at once.",
+                   false);
+    }
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
                "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
