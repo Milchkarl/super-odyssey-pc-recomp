@@ -169,10 +169,15 @@ static void boot(const char *root) {
 // to the log lines around it shows which step of the start-up it came from
 static int mem_trace(void *arg) {
     (void)arg;
-    uint64_t t0 = plat_now_ns();
+    uint64_t t0 = plat_now_ns(), last = 0;
     for (;;) {
+        uint64_t c = plat_private_bytes();
         LOG("[memtrace] %.1f s: %llu MB in RAM, %llu MB committed\n", (plat_now_ns() - t0) / 1e9,
-            (unsigned long long)(plat_resident_bytes() >> 20), (unsigned long long)(plat_private_bytes() >> 20));
+            (unsigned long long)(plat_resident_bytes() >> 20), (unsigned long long)(c >> 20));
+#ifdef _WIN32
+        extern void plat_mem_map_log(void);  // (what it is made of, each time it moved by 150 MB)
+        if (c > last + (150ull << 20) || c + (150ull << 20) < last) { plat_mem_map_log(); last = c; }
+#endif
         SDL_Delay(500);
     }
     return 0;
