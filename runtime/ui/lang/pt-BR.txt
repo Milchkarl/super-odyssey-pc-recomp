@@ -453,3 +453,25 @@ The game's HUD, text and menus are drawn from artwork made for the Switch's 720 
 Crisper edges on the game's HUD, text and menus on large screens. ||| Bordas mais definidas no HUD, nos textos e nos menus do jogo em telas grandes.
 On (the default). Off if the HUD looks too hard to you. ||| Ligado (o padrão). Desligue se o HUD parecer duro demais.
 Frame rate counter ||| Contador de quadros
+Gyro sensitivity ||| Sensibilidade do giroscópio
+How far turning the controller turns what the game aims with motion (first-person views, aiming Cappy). 100% is the controller's own movement. ||| Quanto girar o controle gira o que o jogo mira com movimento (visões em primeira pessoa, mirar o Cappy). 100% é o movimento real do controle.
+Shake threshold ||| Limite de chacoalhada
+Jolts smaller than this are not passed on to the game, so the controller's own rumble (hidden moons nearby) or bumping it doesn't throw Cappy. Raise it until rumble no longer throws; real shakes then need to be a little stronger. Off passes everything on, as the Switch does. ||| Trancos menores que isto não são passados ao jogo, então a vibração do próprio controle (luas escondidas por perto) ou uma batida não arremessam o Cappy. Aumente até a vibração não arremessar mais; chacoalhadas de verdade precisam então ser um pouco mais fortes. Desligado passa tudo, como no Switch.
+Sticks ||| Analógicos
+Left stick deadzone ||| Zona morta do analógico esquerdo
+Right stick deadzone ||| Zona morta do analógico direito
+How far a stick moves before it counts. Raise it if Mario, the camera or the map pointer moves on its own (the map's pointer drifting away from what you select is a sign of it). The default is 5%. ||| Quanto um analógico precisa se mover antes de contar. Aumente se o Mario, a câmera ou o cursor do mapa se moverem sozinhos (o cursor do mapa saindo do que você seleciona é um sinal disso). O padrão é 5%.
+Left stick range ||| Alcance do analógico esquerdo
+Right stick range ||| Alcance do analógico direito
+How much of a full tilt the stick's end gives. Above 100% a full tilt comes before the stick's end (a worn or small stick that doesn't reach it); below 100% the stick's end gives less than a full tilt. ||| Quanto de uma inclinação total o fim do analógico dá. Acima de 100%, a inclinação total vem antes do fim do analógico (um analógico gasto ou pequeno que não chega lá); abaixo de 100%, o fim do analógico dá menos que uma inclinação total.
+Now: left %3.0f%%, right %3.0f%% of a full tilt ||| Agora: esquerdo %3.0f%%, direito %3.0f%% de uma inclinação total
+5% (the default). Higher if Mario moves on his own. ||| 5% (o padrão). Mais alto se o Mario se mover sozinho.
+5% (the default). Higher if the camera or the map pointer drifts on its own. ||| 5% (o padrão). Mais alto se a câmera ou o cursor do mapa se moverem sozinhos.
+Compile shaders now ||| Compilar shaders agora
+The shaders need compiling (a new install or an update that changed them). Do it now and play later, or press Play and choose then. ||| Os shaders precisam ser compilados (uma instalação nova ou uma atualização que os mudou). Faça agora e jogue depois, ou aperte Jogar e escolha na hora.
+Compile, play later ||| Compilar, jogar depois
+What is compiled so far is kept; the rest is made while you play. When it is done you are back on the start page. ||| O que já foi compilado é mantido; o resto é feito enquanto você joga. Quando terminar, você volta à tela inicial.
+Bloom quality ||| Qualidade do bloom
+The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, and stretches it over the screen; its edges along bright sky and lights then show small steps, more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail stays the game's (it isn't drawn at a higher resolution). Costs almost nothing. Switch: as on the Switch. Changes at once. ||| O jogo desenha seu brilho (bloom, raios de luz) como uma imagem pequena, com um quarto da largura da imagem, e a estica sobre a tela; as bordas ao longo do céu claro e das luzes mostram então pequenos degraus, mais visíveis ao lado de uma imagem nítida em alta resolução. Alta: o brilho é esticado com um filtro mais suave, então essas bordas se desfazem por igual. O brilho mantém a forma e a intensidade do jogo, e seus detalhes continuam os do jogo (não é desenhado em resolução maior). Custa quase nada. Switch: como no Switch. Muda na hora.
+Smoother edges on the glow around bright sky and lights. ||| Bordas mais suaves no brilho em volta do céu claro e das luzes.
+Switch (the default, as on the Switch). High at high resolutions. ||| Switch (o padrão, como no Switch). Alta em resoluções altas.
