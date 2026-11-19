@@ -2454,6 +2454,8 @@ int ui_run(void) {
             }
             extern bool input_user_blocked(const SDL_Event *e);
             if (input_user_blocked(&e)) continue;  // scripted test runs: the real keyboard / mouse / pads do nothing (as metal.m)
+            extern bool input_motion_only_event(const SDL_Event *e);
+            if (input_motion_only_event(&e)) continue;  // (the Steam Deck's own controller under Steam Input: its gyro only)
             if (menu_handle_event(&e)) continue;
             input_handle_event(&e);
         }

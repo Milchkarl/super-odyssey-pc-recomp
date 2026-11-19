@@ -37,6 +37,89 @@ static _Atomic int32_t key_lx, key_ly, key_rx, key_ry, pad_lx, pad_ly, pad_rx, p
 static uint8_t keys_down[BIND_KEY_CODE_COUNT];  // (keys, then the mouse buttons: input_bind.h)
 static _Atomic bool shake_pad_down;  // (the shake button: event thread -> hid_sixaxis_states)
 static SDL_Gamepad *pad;
+// ---- The Steam Deck's gyro with Steam Input on (#68, #89, #100). Steam gives the game its virtual controller
+// (0x28de/0x11ff: buttons and sticks as the player set them up in Steam) and hides the Deck's own controller
+// (0x28de/0x1205) through SDL_GAMECONTROLLER_IGNORE_DEVICES - and the virtual one has no motion sensors, so the game
+// never saw the gyro ("motion: none on this controller", the owner's Deck 2026-11-19). input_steam_motion_prepare
+// (main.c, before SDL looks at controllers) takes the Deck's controller off that list; it is then opened for its
+// gyro and accelerometer only: its buttons and sticks are dropped (input_motion_only_event), the virtual one keeps
+// playing. With Steam Input off for the game there is no virtual controller and the Deck's is used as usual.
+// ODYSSEY_DECK_GYRO=0: off (Steam's list as it was).
+static bool steam_motion_unhidden;
+static SDL_JoystickID motion_src_id;  // the controller whose sensors feed the game's motion (pad's, or the Deck's own)
+void input_steam_motion_prepare(void) {
+#ifdef __linux__
+    const char *ig = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES"), *off = getenv("ODYSSEY_DECK_GYRO");
+    if (!ig || !strstr(ig, "0x28de/0x1205") || !getenv("SteamVirtualGamepadInfo") || (off && !strcmp(off, "0"))) return;
+    char out[4096] = "", tok[64];
+    const char *p = ig;
+    while (*p) {
+        size_t n = strcspn(p, ",");
+        snprintf(tok, sizeof tok, "%.*s", (int)(n < sizeof tok ? n : sizeof tok - 1), p);
+        if (strcmp(tok, "0x28de/0x1205") && tok[0] && strlen(out) + strlen(tok) + 2 < sizeof out) {
+            if (out[0]) strcat(out, ",");
+            strcat(out, tok);
+        }
+        p += n + (p[n] == ',');
+    }
+    setenv("SDL_GAMECONTROLLER_IGNORE_DEVICES", out, 1);
+    steam_motion_unhidden = true;
+    LOG("[input] Steam Input: the Steam Deck's own controller opened for its gyro (Steam's virtual controller has none)\n");
+#endif
+}
+// Under Steam Input the Deck's motion sensor sends zeros (not even gravity) when the Steam layout doesn't use the gyro:
+// Steam has set the controller's IMU mode off. Ask it for raw gyro and accelerometer again - the feature report SDL's
+// Steam Controller driver sends (SETTING_IMU_MODE, 48 = SEND_RAW_ACCEL | SEND_RAW_GYRO) - on the controller's own
+// interface (2). At most every 2 s, and only while the readings stay all zero.
+static void steam_deck_imu_on(void) {
+#ifdef __linux__
+    static uint64_t last;
+    uint64_t now = plat_now_ns();
+    if (last && now - last < 2000000000ull) return;
+    last = now;
+    SDL_hid_device_info *list = SDL_hid_enumerate(0x28de, 0x1205), *d;
+    SDL_hid_device *h = NULL;
+    for (d = list; d && !h; d = d->next) if (d->interface_number == 2) h = SDL_hid_open_path(d->path);
+    SDL_hid_free_enumeration(list);
+    if (!h) { LOG("[input] motion: the Steam Deck's controller could not be opened to turn its motion sensor on\n"); return; }
+    unsigned char buf[65] = {0, 0x87, 3, 48, 0x18, 0x00};
+    int rc = SDL_hid_send_feature_report(h, buf, sizeof buf);
+    SDL_hid_get_feature_report(h, buf, sizeof buf);  // (a report may linger after a settings change, as SDL does)
+    SDL_hid_close(h);
+    static int logged;
+    if (logged++ < 4) LOG("[input] motion: asked the Steam Deck's controller for raw gyro and accelerometer (%d)\n", rc);
+#endif
+}
+// The Deck's own controller while Steam's virtual one is there: motion only
+// (Steam's virtual controller reports the Deck's own ids, 28de:1205, from virtualgamepadinfo.txt: it is told apart by
+// its Steam handle, which only Steam's virtual controllers have)
+static bool steam_virtual_id(SDL_JoystickID id) {
+    SDL_Gamepad *g = SDL_GetGamepadFromID(id);
+    if (!g) g = SDL_OpenGamepad(id);
+    return g && SDL_GetGamepadSteamHandle(g) != 0;
+}
+static bool motion_only_id(SDL_JoystickID id) {
+    if (!steam_motion_unhidden || SDL_GetGamepadVendorForID(id) != 0x28de || SDL_GetGamepadProductForID(id) != 0x1205 ||
+        steam_virtual_id(id))
+        return false;
+    int n = 0;
+    bool virt = false;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    for (int i = 0; i < n; i++) virt |= ids[i] != id && steam_virtual_id(ids[i]);
+    SDL_free(ids);
+    return virt;
+}
+// (device.c / setup.mm event loops, before the menus) its buttons, sticks and touchpads: not a second controller
+bool input_motion_only_event(const SDL_Event *e) {
+    if (!steam_motion_unhidden) return false;
+    switch (e->type) {
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: return motion_only_id(e->gbutton.which);
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: return motion_only_id(e->gaxis.which);
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN: case SDL_EVENT_GAMEPAD_TOUCHPAD_UP: case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+        return motion_only_id(e->gtouchpad.which);
+    default: return false;
+    }
+}
 static atomic_uint primary_id;
 static uint32_t style_events[8]; // readable guest handles, checked again when signaling
 uint32_t input_primary_id(void) { return atomic_load(&primary_id); }
@@ -597,10 +680,27 @@ int input_motion_calibration(void) {
 
 static void motion_open(void) {
     bool a = false, g = false;
-    if (pad) {
-        a = SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL) && SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_ACCEL, true);
-        g = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) && SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
+    SDL_Gamepad *src = pad;
+    // (Steam's virtual controller: it lists a gyro and an accelerometer but sends zeros - the owner's Deck 2026-11-19)
+    bool virt = pad && SDL_GetGamepadSteamHandle(pad) != 0;
+    if (pad && (virt || !SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO)) && steam_motion_unhidden) {
+        int n = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n);
+        for (int i = 0; i < n; i++)
+            if (motion_only_id(ids[i])) {
+                SDL_Gamepad *d = SDL_GetGamepadFromID(ids[i]);
+                if (!d) d = SDL_OpenGamepad(ids[i]);
+                if (d && SDL_GamepadHasSensor(d, SDL_SENSOR_GYRO)) { src = d; break; }
+            }
+        SDL_free(ids);
     }
+    if (src) {
+        a = SDL_GamepadHasSensor(src, SDL_SENSOR_ACCEL) && SDL_SetGamepadSensorEnabled(src, SDL_SENSOR_ACCEL, true);
+        g = SDL_GamepadHasSensor(src, SDL_SENSOR_GYRO) && SDL_SetGamepadSensorEnabled(src, SDL_SENSOR_GYRO, true);
+    }
+    motion_src_id = src ? SDL_GetGamepadID(src) : 0;
+    if (src && src != pad) LOG("[input] motion: from %s (the Steam Deck's own controller; Steam Input's has no gyro)\n",
+                               SDL_GetGamepadName(src));
     pthread_mutex_lock(&motion_lock);
     mot.on = a || g;
     memset(mot.accel, 0, sizeof mot.accel);
@@ -645,7 +745,9 @@ static void rotate_dir(float *R, const float w[3]) {
 }
 
 static void motion_event(const SDL_GamepadSensorEvent *e) {
-    if (!pad || SDL_GetGamepadID(pad) != e->which) return;
+    if (!pad || !motion_src_id || motion_src_id != e->which) return;
+    if (e->sensor == SDL_SENSOR_ACCEL && motion_src_id != SDL_GetGamepadID(pad) && !e->data[0] && !e->data[1] && !e->data[2])
+        steam_deck_imu_on();  // (the Deck's own controller under Steam Input, its sensor switched off by Steam)
     const float G = SDL_STANDARD_GRAVITY, TURN = 6.28318531f;
     pthread_mutex_lock(&motion_lock);
     // SDL: x right, y up, z toward the player (m/s^2, rad/s). The Switch: x = -x, y = z, z = -y (a mirror: the
@@ -711,8 +813,11 @@ static void motion_event(const SDL_GamepadSensorEvent *e) {
     if (log < 0) log = getenv("ODYSSEY_LOG_MOTION") != NULL;
     if (log && plat_now_ns() - logged > 1000000000ull) {
         logged = plat_now_ns();
-        LOG("[input] motion: accel %.2f %.2f %.2f G, gyro %.3f %.3f %.3f turns/s\n", mot.accel[0], mot.accel[1],
-            mot.accel[2], mot.gyro[0], mot.gyro[1], mot.gyro[2]);
+        LOG("[input] motion: accel %.2f %.2f %.2f G, gyro %.3f %.3f %.3f turns/s; sticks raw L %d %d R %d %d -> game L %d %d R %d %d (%s)\n",
+            mot.accel[0], mot.accel[1], mot.accel[2], mot.gyro[0], mot.gyro[1], mot.gyro[2],
+            pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) : 0, pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) : 0,
+            pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) : 0, pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) : 0,
+            (int)pad_lx, (int)pad_ly, (int)pad_rx, (int)pad_ry, pad ? SDL_GetGamepadName(pad) : "no controller");
     }
     pthread_mutex_unlock(&motion_lock);
 }
@@ -815,10 +920,19 @@ HLE_FUNC("_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19
 // The active controller: the first one found, then whichever one a button was last pressed on (a second controller
 // takes over at its first press; its icons and motion follow)
 static void use_pad(SDL_Gamepad *p) {
-    if (!p || p == pad || SDL_GetGamepadID(p) == input_cappy_id()) return;
+    if (!p || p == pad || SDL_GetGamepadID(p) == input_cappy_id() || motion_only_id(SDL_GetGamepadID(p))) return;
     pad = p;
     atomic_store(&primary_id, SDL_GetGamepadID(p));
-    LOG("[input] gamepad: %s\n", SDL_GetGamepadName(pad));
+    LOG("[input] gamepad: %s (%04x:%04x%s)\n", SDL_GetGamepadName(pad), SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad),
+        SDL_GetGamepadSteamHandle(pad) ? ", Steam Input" : "");
+    if (steam_motion_unhidden) {  // (what SDL lists: Steam's virtual controller and the Deck's own)
+        int n = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n);
+        for (int i = 0; i < n; i++)
+            LOG("[input]   listed: %s (%04x:%04x)%s%s\n", SDL_GetGamepadNameForID(ids[i]), SDL_GetGamepadVendorForID(ids[i]),
+                SDL_GetGamepadProductForID(ids[i]), steam_virtual_id(ids[i]) ? " Steam Input" : "", motion_only_id(ids[i]) ? " - gyro only" : "");
+        SDL_free(ids);
+    }
     note_family();
     motion_open();
 }
@@ -855,6 +969,11 @@ void input_handle_event(const SDL_Event *e) {
             SDL_Gamepad *p = SDL_GetGamepadFromID(e->gdevice.which);
             if (!p) p = SDL_OpenGamepad(e->gdevice.which);
             if (!pad) use_pad(p);
+            else if (steam_motion_unhidden) {
+                // (the order SDL lists them in varies: the Deck's own controller taken first gives way to Steam's)
+                if (motion_only_id(SDL_GetGamepadID(pad))) { pad = NULL; use_pad(p); }
+                else motion_open();
+            }
         }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -870,6 +989,7 @@ void input_handle_event(const SDL_Event *e) {
         } else {
             SDL_Gamepad *p = SDL_GetGamepadFromID(e->gdevice.which);
             if (p) SDL_CloseGamepad(p);
+            if (e->gdevice.which == motion_src_id) motion_open();
         }
         recompute_pad();
         break;

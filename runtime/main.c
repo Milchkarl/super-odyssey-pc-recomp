@@ -187,6 +187,7 @@ int main(int argc, char **argv) {
 #else
     setvbuf(stderr, NULL, _IOLBF, 0);
 #endif
+    { extern void input_steam_motion_prepare(void); input_steam_motion_prepare(); }  // (before SDL sees controllers)
     const char *root = "extracted";  // (in the data root)
     bool build_romfs = false;
     const char *prepare = NULL;

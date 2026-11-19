@@ -569,6 +569,7 @@ static void row(const char *label, const std::string &value, const char *empty, 
 // Every start shows the settings first (the menu's tabs on the card), then Play or Exit - the settings that only take
 // effect at the next start (memory use, warm-up...) can be set before the game is there. "Show at start" turns it off;
 // the menu in play (F1, the controller's Select + Start) keeps every setting. Test runs and --play go straight in.
+extern "C" bool input_motion_only_event(const SDL_Event *e);  // runtime/hle/input.c
 static std::atomic<bool> g_config{false};
 static std::atomic<int> g_config_result{0};  // 1: Play, 2: Exit
 bool setup_config_shown(void) { return g_config.load(); }
@@ -935,7 +936,7 @@ bool config_run(void) {
             if (e.type == SDL_EVENT_QUIT) result = 2;
             else {
                 if (e.type == SDL_EVENT_GAMEPAD_ADDED && !SDL_GetGamepadFromID(e.gdevice.which)) SDL_OpenGamepad(e.gdevice.which);
-                menu_handle_event(&e);
+                if (!input_motion_only_event(&e)) menu_handle_event(&e);  // (the Deck's own controller under Steam Input: gyro only)
             }
         }
         menu_apply_window_requests(w);
