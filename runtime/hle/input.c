@@ -644,6 +644,38 @@ static void motion_push(uint64_t now) {
         memcpy(f + 3, mot.gyro, 12);
         memcpy(f + 6, mot.angle, 12);
         memcpy(f + 9, mot.dir, 36);
+        // Left and right the other way round, as one consistent mirror (#53): looking around through binoculars turned
+        // the view left when the controller turned right - up and down were right (the owner's Steam Deck 2026-11-19,
+        // and the reporter's DualSense and Direwolf 3). Invert gyro Y fixed the direction but felt jerky: flipping one
+        // turn rate alone isn't a rotation, and the gravity correction fought it. Here the whole frame the game gets is
+        // mirrored across its y axis: the accelerometer's y, the turn rates and angles about x and z, and the
+        // orientation conjugated (M R M, M = diag(1, -1, 1)) - still a rotation, so nothing fights. (Across x instead -
+        // the first try on the Deck - fixed left / right but turned up / down the other way and tilted the view while
+        // turning: the binoculars look along the game's x axis.)
+        // ODYSSEY_MOTION_MIRROR=0: as before.
+        // (Mirrors were tried first on the Deck: across x - up / down reversed, turning tilted the view; across y -
+        // turning wobbled up and down, and the flipped accelerometer made every movement throw Cappy.) Now only the
+        // orientation is converted, the way Switch emulators hand it to games (yuzu MotionInput::GetOrientation: its
+        // orientation starts turned half a turn about z; the quaternion's parts reordered x' = -y, y' = -x, z' = -w,
+        // w' = -z; its matrix taken by columns; the z cross terms negated). Worked through, that is the transpose
+        // mirrored across y: D = My R^T My, My = diag(1, -1, 1) - turning about the controller's long axis (left /
+        // right with it held up, as through binoculars) the other way, the rest unchanged, at rest the identity as
+        // before. The accelerometer and the turn rates stay as they were.
+        // NOT SOLVED - off by default, the motion the game gets is as before. On the owner's Deck (2026-11-19), with
+        // the binoculars, the tries gave: x mirror (accel x, rates y z, dir M R M) - up/down reversed, turning tilted;
+        // y mirror (accel y, rates x z, dir) - left/right right but wobbling, and every move threw Cappy; dir only
+        // My R^T My - as before (left/right reversed, smooth); Mz R^T Mz - left/right right, up/down reversed;
+        // My R My - up/down right, left/right jumpy; rate about y only (try 6) - the two directions swapped and a
+        // throw at the start. ODYSSEY_MOTION_MIRROR=1 with ODYSSEY_MOTION_TRY=6/7/8 for the next round.
+        static int conv = -1;
+        if (conv < 0) { const char *e = getenv("ODYSSEY_MOTION_MIRROR"); conv = e && atoi(e) != 0; }
+        if (conv) {
+            static int mode = -1;  // (ODYSSEY_MOTION_TRY=<n>: which flip, while it is tested on the Deck)
+            if (mode < 0) mode = getenv("ODYSSEY_MOTION_TRY") ? atoi(getenv("ODYSSEY_MOTION_TRY")) : 6;
+            if (mode == 6) f[4] = -f[4];  // the turn rate about the long axis only
+            else if (mode == 7) f[5] = -f[5];  // the turn rate about the face's axis only
+            else if (mode == 8) f[4] = -f[4], f[7] = -f[7];  // ... and its angle
+        }
     } else {
         f[2] = -1;  // (no motion: a controller lying still, so the game sees no shake)
         f[9] = f[13] = f[17] = 1;
