@@ -321,6 +321,12 @@ static bool fog_f16_map_reader(uint64_t lr) {
     return main && !memcmp(main->build_id, v100, sizeof v100);
 }
 
+// ODYSSEY_PAINT_PRIO=0: paint map asks and CPU-edit hand-backs wait behind everything queued, as before (rqueue.c rq_ask)
+static bool paint_prio_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_PAINT_PRIO"); on = !e || atoi(e) != 0; }
+    return on;
+}
 static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     if (td < GUEST_LO || td >= GUEST_HI - 0x50) return;
     uint64_t pool = G(uint64_t, td, 0), off = G(uint32_t, td, 8);
@@ -359,7 +365,37 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     uint64_t ticket = 0;
 #ifndef __APPLE__
     if (snapshot) {
-        if (rq_enabled()) { ticket = rq_push(RQ_CPU_TEXEL, &q, 0); rq_wait(ticket); }
+        if (rq_enabled() && paint_prio_on()) {
+            if (ticket_verify) q.have_gen = 0;  // (the bytes themselves, to compare below)
+            ticket = rq_ask(RQ_CPU_TEXEL, &q);
+            if (ticket_verify) {  // (the same ask behind everything queued, as before: it must return the same map)
+                static uint64_t pv_same, pv_diff, pv_n;
+                void *snap2 = malloc(capacity);
+                RqCpuTexel q2 = {.addr = p->storage + off, .components = 1, .component_bytes = 4, .snapshot = snap2,
+                    .snapshot_capacity = capacity, .guest_capacity = p->size - off, .guest_pitch = G(uint32_t, td, 0x4c),
+                    .refresh_snapshot = refresh};
+                if (snap2) {
+                    rq_wait(rq_push(RQ_CPU_TEXEL, &q2, 0));
+                    uint64_t n = (uint64_t)q.snapshot_width * 4 * q.snapshot_height;
+                    bool same = q.valid == q2.valid && (!q.valid || (q.snapshot_width == q2.snapshot_width &&
+                                q.snapshot_height == q2.snapshot_height && n <= capacity && !q.unchanged && !q2.unchanged && !memcmp(snapshot, snap2, n)));
+                    if (same) pv_same++;
+                    else if (pv_diff++ < 40) {
+                        uint64_t nd = 0, first = 0;
+                        if (q.valid && q2.valid && n <= capacity)
+                            for (uint64_t k = 0; k < n; k++) if (((uint8_t *)snapshot)[k] != ((uint8_t *)snap2)[k]) { if (!nd) first = k; nd++; }
+                        LOG("[paint-verify] DIFFERENT (the ask ahead of the queue): %llx reader %u refresh %d valid %d/%d unchanged %d/%d gen %llu/%llu %ux%u, %llu bytes differ (first at %llu), ticket %llu, queue now %llu | ahead: path %u writes %u kept %u frame %llu | behind: path %u writes %u kept %u frame %llu\n",
+                            (unsigned long long)q.addr, reader, refresh, q.valid, q2.valid, q.unchanged, q2.unchanged, (unsigned long long)q.gen, (unsigned long long)q2.gen,
+                            q.snapshot_width, q.snapshot_height, (unsigned long long)nd, (unsigned long long)first, (unsigned long long)ticket, (unsigned long long)rq_last_ticket(),
+                            q.dbg_path, q.dbg_wgen, q.dbg_wseq, (unsigned long long)q.dbg_frame, q2.dbg_path, q2.dbg_wgen, q2.dbg_wseq, (unsigned long long)q2.dbg_frame);
+                    }
+                    if (++pv_n % 2000 == 0)
+                        LOG("[paint-verify] asks ahead of the queue: %llu the same map as behind it, %llu different\n",
+                            (unsigned long long)pv_same, (unsigned long long)pv_diff);
+                    free(snap2);
+                }
+            }
+        } else if (rq_enabled()) { ticket = rq_push(RQ_CPU_TEXEL, &q, 0); rq_wait(ticket); }
         else { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(&q); }
     }
 #endif
@@ -442,7 +478,25 @@ NVN(nvnMemoryPoolMap) {
             RqCpuTexel q = {.addr = p->storage + off, .x = x, .y = y, .components = 1, .component_bytes = 4};
 #ifndef __APPLE__
             if (valid && (paint_feedback || count <= 64 || !(count % 2000))) {
-                if (rq_enabled()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
+                // (ahead of what is queued, as the row asks - rq_ask: behind everything, each of these single texel reads
+                // waited for the render thread to finish the frame's lists - 12% of the game thread's time in the
+                // slowest stretch of the owner's Wooded Kingdom recording on a Steam Deck)
+                if (rq_enabled() && !rq_on_thread() && paint_prio_on()) {
+                    rq_ask(RQ_CPU_TEXEL, &q);
+                    static int verify = -1;
+                    if (verify < 0) verify = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+                    if (verify) {  // (the same ask behind everything queued must give the same texel)
+                        static uint64_t same, diff;
+                        RqCpuTexel q2 = {.addr = q.addr, .x = x, .y = y, .components = 1, .component_bytes = 4};
+                        rq_wait(rq_push(RQ_CPU_TEXEL, &q2, 0));
+                        if (q.valid == q2.valid && (!q.valid || q.value == q2.value)) same++;
+                        else if (diff++ < 16) LOG("[paint-verify] DIFFERENT (a texel asked ahead of the queue): %llx %u,%u valid %d/%d %08x/%08x\n",
+                                                  (unsigned long long)q.addr, x, y, q.valid, q2.valid, q.value, q2.value);
+                        if ((same + diff) % 2000 == 0)
+                            LOG("[paint-verify] texels asked ahead of the queue: %llu the same as behind it, %llu different\n",
+                                (unsigned long long)same, (unsigned long long)diff);
+                    }
+                } else if (rq_enabled()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
                 else { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(&q); }
             }
 #endif
@@ -522,8 +576,12 @@ NVN(nvnMemoryPoolFlushMappedRange) {
     NvnPool *p = HOST(NvnPool, A(0));
 #ifndef __APPLE__
     if (p->paint_cpu_shared && A(1) <= p->size && A(2) <= p->size - A(1)) {
-        RqPaintWrite w = {p->storage + A(1), A(2)};
-        if (rq_enabled() && !rq_on_thread()) rq_wait(rq_push(RQ_PAINT_WRITE, &w, 0));
+        RqPaintWrite w = {p->storage + A(1), A(2), 0};
+        // (not waited for: it runs in its place in the queue, and the next ask about the map is not run before it
+        // and its upload - rq_ask. Waiting made the game thread wait for the whole queue again.)
+        RqPaintWrite *hw = rq_enabled() && !rq_on_thread() && paint_prio_on() && getenv("ODYSSEY_PAINT_SYNC_VERIFY") == NULL ? malloc(sizeof *hw) : NULL;
+        if (hw) { *hw = w; hw->heap = 1; rq_push(RQ_PAINT_WRITE, hw, 0); }
+        else if (rq_enabled() && !rq_on_thread()) rq_wait(rq_push(RQ_PAINT_WRITE, &w, 0));
         else { extern void renderer_paint_cpu_written(uint64_t, uint64_t); renderer_paint_cpu_written(w.addr, w.size); }
     }
 #endif

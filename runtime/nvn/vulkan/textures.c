@@ -1021,7 +1021,15 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
     extern uint64_t g_upload_n;
     uint64_t n0 = g_upload_n;
     TexBackend *b = vk_tex_(t, for_render);
-    if (b && g_upload_n != n0) b->gfx_wseq = renderer_fence_seq(), b->gpu_wgen++;
+    if (b && g_upload_n != n0) {
+        b->gfx_wseq = renderer_fence_seq(), b->gpu_wgen++;
+        extern bool rq_paint_window(void), renderer_paint_texture(const NvnTexture *t);
+        static int v = -1, n;
+        if (v < 0) v = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+        if (v && rq_paint_window() && renderer_paint_texture(t) && n++ < 12)
+            LOG("[paint-verify] MISSED UPLOAD: texture %llx %ux%u obj %p gpu_owned %d paint_map %d pending %d for_render %d\n", (unsigned long long)t->addr, t->width, t->height,
+                (void *)t, b->gpu_owned, b->paint_map, b->paint_cpu_pending, for_render);
+    }
     return b;
 }
 static TexBackend *vk_tex_(NvnTexture *t, bool for_render) {
@@ -1107,6 +1115,15 @@ void renderer_mark_gpu_owned(NvnTexture *t) {  // (the GPU writes it: in the gra
     if (!vk_recording_cq()) b->gfx_wseq = renderer_fence_seq();
     else b->cq_wgen = b->gpu_wgen;
     if (b->paint_map && !vk_recording_cq()) { extern void vk_paint_map_written(void); vk_paint_map_written(); }
+    {   // ODYSSEY_PAINT_SYNC_VERIFY=1: a paint map written by an item the ask ahead of the queue went in front of
+        extern bool rq_paint_window(void);
+        static int v = -1, n;
+        if (v < 0) v = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+        extern bool renderer_paint_texture(const NvnTexture *t);
+        if (v && renderer_paint_texture(t) && rq_paint_window() && n++ < 12)
+            LOG("[paint-verify] MISSED WRITER: texture %llx %ux%u obj %p from renderer_mark_gpu_owned%+lld (cq %d)\n", (unsigned long long)t->addr, t->width, t->height, (void *)t,
+                (long long)((intptr_t)__builtin_return_address(0) - (intptr_t)&renderer_mark_gpu_owned), vk_recording_cq());
+    }
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }

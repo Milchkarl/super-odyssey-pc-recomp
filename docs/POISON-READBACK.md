@@ -181,3 +181,37 @@ GAME_ENV: the bench warps to Cap Kingdom otherwise). FPS in the 2 s windows of t
   game also runs extra ticks to keep its speed (ODYSSEY_GAMEPLAY_CATCHUP), which adds to it.
 - `ODYSSEY_PAINT_SYNC_VERIFY=1` on the Deck: 2,873 copies at the write and 1,954 left-out readbacks equal, none
   different; on Windows also the left-out asks (0 wrong) and the 1.0.0 Spewart runs (Cappy's path, 3 -> 2 in poison).
+
+## Steam Deck, 2026-11-19 (asks answered ahead of the queue and inside a list)
+
+The same recording, Handheld mode, 60 FPS asked, 2 s windows of the ride (38 windows a run):
+
+| Build | FPS |
+| --- | --- |
+| 0.4.8 / 0.4.9 | 36-61, median 52, mean 51.6; 18 windows under 50 |
+| + asks run ahead of what is queued (`rq_ask`), between two lists | 32-61, median 55, mean 52.3; 16 under 50 |
+| + answered inside the running list once nothing left in it writes a paint map | 38-61, median 60, mean 55.3; 8-11 under 50 |
+| + the single texel reads (getColorFromLinearTexture) the same way | 45-61, median 60, mean 58.9-59.1; 1-3 under 50 |
+
+- A profile of the game thread with call stacks (`ODYSSEY_SAMPLE_STACK=1`) showed where the time went: 27% of it in the
+  wait of `rq_ask`, although no queued item was left to wait for - the render thread looked at a waiting ask only
+  between two queued lists, and one list is most of a frame (2.3 ms waited an ask, four or five asks a frame).
+- Inside a list (exec.c `paint_ask_poll`): the commands of the running list that write a paint map (it as a colour
+  target, cleared, copied or downsampled into) are counted for the whole list and as they run; the ask is answered
+  between two commands once none is left, no paint map is the colour target and no CPU edit waits for its upload.
+  Only when nothing else queued before the ask draws or uploads, and not with the recording thread on (NVIDIA).
+  `ODYSSEY_PAINT_MID=0`: between lists only. `ODYSSEY_PAINT_PRIO=0`: behind everything queued, as 0.4.9.
+- Then 12% of the game thread was the single texel reads, each still waiting behind everything queued: they ask
+  ahead too now. (Their first version counted the list again at every ask - hundreds a frame - and ran 14-61 FPS;
+  the count is made once a list.)
+- Checks on the Deck, none different: `ODYSSEY_PAINT_SYNC_VERIFY=1` - 76,000 row asks and 58,000 texel asks the same
+  as the same ask behind everything queued (only ~2,000 of them inside a list: the check's own wait empties the
+  queue); `ODYSSEY_PAINT_MID_VERIFY=1` (full speed) - 55,000 answers given inside a list the same when asked again
+  at the end of that list. Cap Kingdom's benchmark walk: 59-61 FPS as before.
+- What is left in the slowest stretch (frames ~1420-1650 of the ride, 45-50 FPS for 2-3 windows): the labeling
+  pass's refresh asks that need a new copy from the GPU (~1-3 ms each) and asks that wait for the map's own passes
+  later in the list - 14% of the game thread there.
+
+Not covered: the 1.0.0 Spewart fight with these changes (its test copy was offline), a played session on the Deck,
+other hardware.
+
