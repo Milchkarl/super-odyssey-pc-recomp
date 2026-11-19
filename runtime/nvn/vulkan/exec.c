@@ -7351,6 +7351,30 @@ static float bloom_high(void) {
     return on ? (env == 2 ? 2.0f : 1.0f) : 0.0f;
 }
 
+// The distant view's smooth enlargement (maxwell/translate.c farSample) follows Bloom quality High;
+// ODYSSEY_FARVIEW_QUALITY=0/1 overrides (tests); 2 = a B-spline (softer), 3 = decoded but bilinear.
+// ODYSSEY_FARVIEW_SEQ=<frame>,<mode>,<mode>,... (tests): those modes in turn, each for two frames from that frame
+// on - an A/B of the same view.
+static float farview_mode(float bq) {
+    static int env = -2, nseq;
+    static long seq_at;
+    static int seq[8];
+    if (env == -2) {
+        env = getenv("ODYSSEY_FARVIEW_QUALITY") ? atoi(getenv("ODYSSEY_FARVIEW_QUALITY")) : -1;
+        const char *e = getenv("ODYSSEY_FARVIEW_SEQ");
+        if (e) {
+            seq_at = atol(e);
+            for (const char *c = strchr(e, ','); c && nseq < 8; c = strchr(c + 1, ',')) seq[nseq++] = atoi(c + 1);
+        }
+    }
+    if (nseq) {
+        extern uint64_t renderer_present_count(void);
+        uint64_t f = renderer_present_count();
+        if (f >= (uint64_t)seq_at) return (float)seq[((f - (uint64_t)seq_at) / 2) % (uint64_t)nseq];
+    }
+    return env >= 0 ? (float)env : bq > 0 ? 1.0f : 0.0f;
+}
+
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[8], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
                                  const VkImageView *storage_views) {
@@ -7405,8 +7429,11 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             bi[n] = ubo_span(vk_transient_copy(gmap_tab, sizeof gmap_tab, 256), sizeof gmap_tab);
         } else if (b->binding == 18) {
             // .z: bloom quality High (only the recognised composite reads it: maxwell/translate.c bloomUp)
-            float bq = sg ? bloom_high() : 0.0f;
-            for (int t = 0; t < si->ntex && t < 64; t++) { rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; }
+            // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
+            float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
+            for (int t = 0; t < si->ntex && t < 64; t++) {
+                rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
+            }
             bi[n] = ubo_span(copy_dedupe(sg ? DEDUPE_RSCALE_F : DEDUPE_RSCALE_V, rs, sizeof rs, 256), sizeof rs);
         } else {
             float zero[8] = {0};

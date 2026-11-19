@@ -46,7 +46,7 @@ static const OptionNote k_option_notes[] = {
      "Game (the default, as on the Switch). 16x for sharper ground at almost no cost."},
     {"Texture detail", "Sharper surface textures in the distance.", "Switch (the default, as on the Switch)."},
     {"Shadow quality", "Sharper, steadier shadow edges.", "Switch (the default). High or Ultra on a fast graphics card."},
-    {"Bloom quality", "Smoother edges on the glow around bright sky and lights.",
+    {"Bloom quality", "Smoother edges on the glow around bright sky and lights, and a smoother far horizon.",
      "Switch (the default, as on the Switch). High at high resolutions."},
     {"Draw distance", "Objects and detailed models appear from farther away.",
      "Switch (the default, as on the Switch). High on a fast PC."},

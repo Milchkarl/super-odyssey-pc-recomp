@@ -1144,8 +1144,10 @@ static void tab_graphics(void) {
                    "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
                    "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
                    "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
-                   "stays the game's (it isn't drawn at a higher resolution). Costs almost nothing. Switch: as on the "
-                   "Switch. Changes at once.", false);
+                   "stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon "
+                   "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
+                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as "
+                   "on the Switch. Changes at once.", false);
         static const char *dd[] = {"Switch", "High", "Very high"};
         opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
                    "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
