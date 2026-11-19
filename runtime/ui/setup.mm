@@ -584,6 +584,9 @@ enum { PREP_NONE, PREP_ASK, PREP_RUN, PREP_DONE };
 static std::atomic<int> g_prep{PREP_NONE}, g_prep_phase{0}, g_prep_done{0}, g_prep_total{0}, g_prep_code{0};
 static volatile int g_prep_cancel;
 static bool g_prep_stay;  // "Compile, play later" (#101): back to the start page when it is done, not into the game
+// (#101, second comment) the start page's own "Compile shaders" button: shown while a full preparation is due, so a
+// player sees it before pressing Play and can get the game ready without starting it
+static bool g_prep_due_home;
 static uint64_t g_prep_t0, g_prep_phase_t0;
 static int g_prep_last_phase = -1;
 static void prep_page_progress(int phase, int done, int total) {
@@ -685,6 +688,9 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
     float bh = ImGui::GetFontSize() + 2 * 14 * scale;
     // the left column: the buttons, centred in the card's height
     float stack = bh * 1.35f + 2 * (bh + 14 * scale) + 70 * scale;
+#ifndef __APPLE__
+    if (g_prep_due_home) stack += bh + 14 * scale + ImGui::GetFontSize() * 2.6f;
+#endif
     float y0 = c0.y + fmaxf(pad * 3.2f, (cardh - stack) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(c0.x + pad * 1.6f, y0));
     ImGui::BeginGroup();
@@ -693,6 +699,16 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
     ImGui::PopFont();
     if (g_cfg_focus == 1) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
     ImGui::Dummy(ImVec2(0, 6 * scale));
+#ifndef __APPLE__
+    if (g_prep_due_home) {  // (compiles, then this page again: Play starts at once)
+        if (plain_button("Compile shaders now", scale, ImVec2(bw, bh))) { g_prep_stay = true; prep_start(); }
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + bw);
+        ImGui::TextColored(kTextDimV, "%s", tr("The shaders need compiling (a new install or an update that changed them). "
+                                               "Do it now and play later, or press Play and choose then."));
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, 6 * scale));
+    }
+#endif
     if (plain_button("Settings", scale, ImVec2(bw, bh))) { g_cfg_settings = true; menu_focus_sidebar(); }
     if (g_cfg_focus == 2) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
     if (plain_button("Exit", scale, ImVec2(bw, bh))) g_config_result = 2;
@@ -887,6 +903,9 @@ bool config_run(void) {
     ui_window_init();
 #ifndef __APPLE__
     if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)
+#ifndef __APPLE__
+    g_prep_due_home = prep_due;
+#endif
 #endif
     SDL_Window *w = ui_window();
     LOG("[config] the configuration page before the game\n");
@@ -978,6 +997,7 @@ bool config_run(void) {
         if (g_prep.load() == PREP_DONE && !result) {
             if (g_prep_stay && !quit_after) {  // (compiled, not played: the start page again, Play starts the game)
                 g_prep_stay = false, g_prep = PREP_NONE, g_cfg_settings = false, g_cfg_focus = 1;
+                g_prep_due_home = g_prep_code.load() != 0;  // (stopped: still due, the button stays)
                 LOG("[config] shader compilation ended (code %d); back on the start page (play later)\n", g_prep_code.load());
             } else result = quit_after ? 2 : 1;
         }
