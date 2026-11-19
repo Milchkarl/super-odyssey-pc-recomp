@@ -3568,7 +3568,13 @@ static void translate_program(void *arg) {
             uint64_t want = wants[k];
             if (!want || (p->code[0] != want && p->code[1] != want)) continue;
             const ShaderInfo *si = p->code[0] == want ? p->vi : p->fi;
-            LOG("[glsl] %s %llx:\n%s\n", p->code[0] == want ? "vs" : "fs", (unsigned long long)want, si && si->msl ? si->msl : "(none)");
+            int ix = p->code[0] == want ? 0 : 1;
+            // (the FNV-1a the translator recognises programs by: bytes 0x30 to the code's end, maxwell_code_extent)
+            size_t ext = maxwell_code_extent((const uint8_t *)(uintptr_t)p->code[ix], p->cmax[ix], ix ? STAGE_FRAGMENT : STAGE_VERTEX);
+            uint64_t h = 1469598103934665603ull;
+            for (size_t i = 0x30; i < ext; i++) h = (h ^ ((const uint8_t *)(uintptr_t)p->code[ix])[i]) * 1099511628211ull;
+            LOG("[glsl] %s %llx (max %#llx, extent %#zx, hash %016llx):\n%s\n", ix ? "fs" : "vs", (unsigned long long)want,
+                (unsigned long long)p->cmax[ix], ext, (unsigned long long)h, si && si->msl ? si->msl : "(none)");
             wants[k] = 0;  // (once)
         }
     }
@@ -7328,6 +7334,22 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
 // pre_ii: texture descriptors already resolved by the caller (draw: fragment textures, needed earlier for the
 // viewport decision), or NULL.
 static float g_mirror_w;  // mirror mode's composite: its render target width (rscale[65].x; 0 otherwise)
+// Bloom quality (settings bloom_quality; ODYSSEY_BLOOM_QUALITY=0/1 overrides, for tests): 1 = the composite's smooth
+// enlargement of the glow images. A uniform, not a shader variant: changing it builds nothing.
+// ODYSSEY_BLOOM_FLIP_AT=<frame> (tests): the other quality from that frame on - an A/B of the same scene two frames apart.
+// ODYSSEY_BLOOM_QUALITY=2 (tests): the composite leaves the glow out (the difference to a frame with it is the glow).
+static float bloom_high(void) {
+    static int env = -2;
+    static long flip_at = -1;
+    if (env == -2) {
+        env = getenv("ODYSSEY_BLOOM_QUALITY") ? atoi(getenv("ODYSSEY_BLOOM_QUALITY")) : -1;
+        flip_at = getenv("ODYSSEY_BLOOM_FLIP_AT") ? atol(getenv("ODYSSEY_BLOOM_FLIP_AT")) : 0;
+    }
+    bool on = env >= 0 ? env > 0 : g_settings.bloom_quality;
+    extern uint64_t renderer_present_count(void);
+    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) on = !on;
+    return on ? (env == 2 ? 2.0f : 1.0f) : 0.0f;
+}
 
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[8], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
@@ -7382,7 +7404,9 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
         if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
             bi[n] = ubo_span(vk_transient_copy(gmap_tab, sizeof gmap_tab, 256), sizeof gmap_tab);
         } else if (b->binding == 18) {
-            for (int t = 0; t < si->ntex && t < 64; t++) { rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; }
+            // .z: bloom quality High (only the recognised composite reads it: maxwell/translate.c bloomUp)
+            float bq = sg ? bloom_high() : 0.0f;
+            for (int t = 0; t < si->ntex && t < 64; t++) { rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; }
             bi[n] = ubo_span(copy_dedupe(sg ? DEDUPE_RSCALE_F : DEDUPE_RSCALE_V, rs, sizeof rs, 256), sizeof rs);
         } else {
             float zero[8] = {0};

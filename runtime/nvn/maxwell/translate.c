@@ -79,6 +79,7 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool bloom_prefilter;
+    bool bloom_smooth;  // (the HDR composite: its quarter-resolution glow inputs read through a B-spline, bloomUp)
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
     bool uses_gmem_store;    // STG present: the gmem buffer is not readonly
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
@@ -684,7 +685,10 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
     }
     char e[2000], ex[300] = "";
     if (extra) snprintf(ex, sizeof ex, ", %s", extra);
-    if (c->bloom_prefilter && slot == 1 && type == TEXTYPE_2D && !t->shadow && lod_kind <= 1) {
+    if (c->bloom_smooth && slot <= 1 && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "bloomUp(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
+    } else if (c->bloom_prefilter && slot == 1 && type == TEXTYPE_2D && !t->shadow && lod_kind <= 1) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "bloomSample(t%d, %s, %s, rscale[%d].xy)", slot, P,
                  lod_kind == 1 ? lod : "0.0f", slot + 1);
@@ -2337,6 +2341,24 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    return color / (footprint.x * footprint.y);\n"
                "}\n");
     }
+    if (c->bloom_smooth) {
+        // Bloom quality High (settings bloom_quality: rscale[slot].z = 1): the composite enlarges the game's glow
+        // images (400x225 and smaller, whatever the screen's size) with a cubic B-spline - four bilinear taps -
+        // instead of one bilinear tap, whose steps showed as blocks around bright sky (#102). The screen-sized scene
+        // input is read as before; at Switch quality (z = 0) both are read as the game does.
+        sp(&s, "vec4 bloomUp(sampler2D src, vec2 uv, float lod, vec4 rs) {\n"
+               "    vec2 size = vec2(textureSize(src, int(lod)));\n"
+               "    if (rs.z < 0.5 || size.x > 480.0) return textureLod(src, uv, lod);\n"
+               "    if (rs.z > 1.5) return vec4(0.0);\n"  // (z = 2, tests: the glow left out - what is glow and what isn't)
+               "    vec2 p = uv * size - 0.5, i = floor(p), f = p - i, f2 = f * f, f3 = f2 * f;\n"
+               "    vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;\n"
+               "    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;\n"
+               "    vec2 g0 = w0 + w1, g1 = w2 + w3;\n"
+               "    vec2 a = (i - 0.5 + w1 / g0) / size, b = (i + 1.5 + w3 / g1) / size;\n"
+               "    return g0.y * (g0.x * textureLod(src, a, lod) + g1.x * textureLod(src, vec2(b.x, a.y), lod)) +\n"
+               "           g1.y * (g0.x * textureLod(src, vec2(a.x, b.y), lod) + g1.x * textureLod(src, b, lod));\n"
+               "}\n");
+    }
     bool tint = stage == STAGE_FRAGMENT && !dbg && (c->omap_target & 0x7) == 0x7 && (!key || key->rt_kind[0] == 0);
     if (tint) {
         sp(&s, "layout(std140, set = %d, binding = 19) uniform Tint { vec4 ltint[2]; };\n", set);
@@ -2562,6 +2584,13 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             uint64_t hash = 1469598103934665603ull;
             for (size_t i = 0x30; i < max_size; i++) hash = (hash ^ blob[i]) * 1099511628211ull;
             c->bloom_prefilter = hash == 0x98f060ff25e7822full;
+        }
+        // The HDR composite (scene + glow, tone mapped), by its code to its end (as the translation cache keys it)
+        if (c->glsl) {
+            size_t ext = maxwell_code_extent(blob, max_size, stage);
+            uint64_t hash = 1469598103934665603ull;
+            for (size_t i = 0x30; i < ext; i++) hash = (hash ^ blob[i]) * 1099511628211ull;
+            c->bloom_smooth = hash == 0xf42bcd0d74bc1d0eull || hash == 0x025c57bc1bfe1339ull;  // 1.4.1, 1.0.0
         }
         c->omap_target = *(const uint32_t *)(sph + 0x48);
         c->omap_depth = (*(const uint32_t *)(sph + 0x4C) >> 1) & 1;
