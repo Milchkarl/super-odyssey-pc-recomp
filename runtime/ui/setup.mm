@@ -41,6 +41,7 @@
 #include "steam_shortcut.h"
 
 extern "C" {
+#include "../diagnostics.h"
 #include "../gamebuild.h"
 #include "../gamelib.h"
 #include "../nxpkg.h"
@@ -681,6 +682,56 @@ bool menu_sidebar_focused(void);
 void menu_focus_sidebar(void);
 void menu_hint_bar(float scale, int mode);
 float menu_hint_bar_height(float scale);
+// The last session's crash (2026-11-19), at the next start: its reason, and the report's text copied or its file shown
+// for a bug report (on Linux / the Steam Deck the crash's own box can't have buttons, so this is where they are)
+static char g_crash_path[1200], g_crash_reason[256];
+static bool g_crash_notice;
+static int g_crash_action;  // 1 copied (see diagnostics_copy_status), 2 shown, 3 not shown
+static void crash_notice(float scale, float w) {
+    if (!g_crash_notice) return;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    float in = 20 * scale;
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + in, p0.y + in * 0.8f));
+    ImGui::BeginGroup();
+    ImGui::PushTextWrapPos(p0.x + w - in);
+    ImGui::TextColored(kAccentV, "%s", tr("THE GAME CRASHED LAST TIME"));
+    ImGui::TextWrapped("%s", g_crash_reason);
+    ImGui::Dummy(ImVec2(0, 4 * scale));
+    if (small_button("Copy report text", scale)) g_crash_action = diagnostics_copy_report(g_crash_path) ? 1 : -1;
+    ImGui::SameLine();
+    if (small_button("Show report file", scale)) g_crash_action = diagnostics_show_report(g_crash_path) ? 2 : 3;
+    ImGui::SameLine();
+    bool dismiss = small_button("Dismiss", scale);
+    const char *a = strrchr(g_crash_path, '/'), *b = strrchr(g_crash_path, '\\');
+    const char *name = a > b ? a + 1 : b ? b + 1 : g_crash_path;
+    char status[1400];
+    int copy = diagnostics_copy_status();
+    if (g_crash_action == 1 && copy > 0) snprintf(status, sizeof status, "%s", tr("Copied: paste it into the bug report (Ctrl+V)."));
+    else if (g_crash_action == 1 && copy == 0) snprintf(status, sizeof status, "%s", tr("Copying..."));
+    else if (g_crash_action == 1 || g_crash_action == -1)
+        snprintf(status, sizeof status, "%s %s", tr("Could not copy. Attach the file instead:"), g_crash_path);
+    else if (g_crash_action == 2) snprintf(status, sizeof status, "%s %s", tr("Its folder is open: attach the file"), name);
+    else if (g_crash_action == 3) snprintf(status, sizeof status, "%s %s", tr("The report file:"), g_crash_path);
+    else snprintf(status, sizeof status, "%s", tr("To report it: copy the report's text and paste it into the bug report, or "
+                                                 "attach the file."));
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
+    ImGui::TextWrapped("%s", status);
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    float y1 = ImGui::GetItemRectMax().y + in * 0.8f;
+    dl->ChannelsSetCurrent(0);
+    dl->AddRectFilled(p0, ImVec2(p0.x + w, y1), theme_u32(kSidebarV), 14 * scale);
+    dl->AddRect(p0, ImVec2(p0.x + w, y1), theme_u32(kAccentV, 0.6f), 14 * scale, 0, fmaxf(1, 1.5f * scale));
+    dl->ChannelsMerge();
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, y1 + 14 * scale));
+    ImGui::Dummy(ImVec2(w, 0));
+    if (dismiss) g_crash_notice = false;
+}
+
 static bool g_cfg_settings;      // the Settings view (else Home)
 static int g_cfg_focus = 1;      // put the cursor on Play (1) / Settings (2) next frame; 0: leave it
 static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float cardh, float pad) {
@@ -725,8 +776,9 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
     // the right column: the settings that matter most, at a glance (Settings changes them)
     float rx = c0.x + pad * 1.6f + colw + pad * 2.2f, rw = c0.x + cardw - pad * 1.6f - rx;
     if (rw > 260 * scale) {
-        ImGui::SetCursorScreenPos(ImVec2(rx, y0));
+        ImGui::SetCursorScreenPos(ImVec2(rx, g_crash_notice ? fminf(y0, c0.y + pad * 3.2f) : y0));
         ImGui::BeginGroup();
+        crash_notice(scale, rw);
         ImDrawList *dl = ImGui::GetWindowDrawList();
         ImVec2 b0 = ImGui::GetCursorScreenPos();
         float lh = ImGui::GetFontSize() * 1.75f;
@@ -900,7 +952,16 @@ bool config_run(void) {
 #endif
     LOG("[config] show at start %d, shaders to prepare %d%s\n", g_settings.config_at_start, prep_due,
         force ? " (ODYSSEY_CONFIG)" : "");
-    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due) return true;
+    {   // the last session crashed (its notice not shown yet): this page shows once for it, even when turned off
+        bool seen = true;
+        g_crash_notice = diagnostics_last_crash_info(g_crash_path, sizeof g_crash_path, g_crash_reason, sizeof g_crash_reason,
+                                                     &seen) && !seen;
+        if (g_crash_notice) {
+            LOG("[config] the last session crashed: %s (%s)\n", g_crash_reason, g_crash_path);
+            diagnostics_last_crash_seen();
+        }
+    }
+    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) return true;
     ui_window_init();
 #ifndef __APPLE__
     if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)
