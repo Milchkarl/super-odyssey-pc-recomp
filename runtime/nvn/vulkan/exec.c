@@ -2011,23 +2011,29 @@ const char *renderer_stats(void) {
 #define heap_held_bytes plat_heap_bytes
 #endif
         if (log_mem < 0) log_mem = getenv("ODYSSEY_LOG_MEM") != NULL;
+        extern uint64_t g_nvn_pool_heap_end;
+        extern _Atomic uint64_t g_nvn_pool_bytes;
+        extern uint64_t vk_gmem_size(void);
         if (hist_at == -2) hist_at = getenv("ODYSSEY_HEAP_HIST") ? atoi(getenv("ODYSSEY_HEAP_HIST")) : -1;
         if (log_mem) {
             extern uint64_t nvn_record_bytes(void);
             n = strlen(stats_text);
             snprintf(stats_text + n, sizeof stats_text - n,
-                     " (guest %llu, heaps %llu, held %llu) [jobs %d/%d, translate %d/%d, programs %d, records %llu MB]",
+                     " (guest %llu, heaps %llu, held %llu, pools %llu to %llu, import %llu) [jobs %d/%d, translate %d/%d, programs %d, records %llu MB]",
                      (unsigned long long)(plat_guest_bytes() >> 20), (unsigned long long)(plat_heap_bytes() >> 20),
                      (unsigned long long)(heap_held_bytes() >> 20),
+                     (unsigned long long)(g_nvn_pool_bytes >> 20),
+                     (unsigned long long)(g_nvn_pool_heap_end > HEAP_BASE ? (g_nvn_pool_heap_end - HEAP_BASE) >> 20 : 0),
+                     (unsigned long long)(vk_gmem_size() >> 20),
                      atomic_load(&dbg_qlen[0]), atomic_load(&dbg_qlen[1]), atomic_load(&dbg_qlen[2]),
                      atomic_load(&dbg_qlen[3]), atomic_load(&dbg_progs), (unsigned long long)(nvn_record_bytes() >> 20));
             for (uint32_t h = 0; h < mp->memoryHeapCount; h++) {  // (every heap: system memory ones too)
                 n = strlen(stats_text);
                 if (n >= sizeof stats_text - 64) break;
-                snprintf(stats_text + n, sizeof stats_text - n, " heap%u%s %.0f MB in %u blocks, %u allocs", h,
+                snprintf(stats_text + n, sizeof stats_text - n, " heap%u%s %.0f MB in %u blocks, %u allocs (%.0f MB)", h,
                          mp->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "(gpu)" : "(sys)",
                          bud[h].statistics.blockBytes / 1048576.0, bud[h].statistics.blockCount,
-                         bud[h].statistics.allocationCount);
+                         bud[h].statistics.allocationCount, bud[h].statistics.allocationBytes / 1048576.0);
             }
         }
         extern uint64_t renderer_present_count(void);
@@ -6510,6 +6516,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 static VkBuffer gmem_buf;
 static VkDeviceMemory gmem_mem;
 static uint64_t gmem_size;
+uint64_t vk_gmem_size(void) { return gmem_size; }  // (the stats line)
 static bool gmem_placed;  // (also declared above, gw_guard_on)
 
 // Optional real-device check before the heap is handed to the game.

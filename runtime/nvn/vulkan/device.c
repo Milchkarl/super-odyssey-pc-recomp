@@ -501,6 +501,13 @@ static void create_device(void) {
 
     VmaAllocatorCreateInfo ai = {.physicalDevice = g_vk.phys, .device = g_vk.dev, .instance = g_vk.inst,
                                  .vulkanApiVersion = VK_API_VERSION_1_3};
+    // Low memory: 64 MB blocks instead of VMA's 256 MB - less of them left empty (Wooded Kingdom, 1.4.1, an integrated
+    // GPU at 1280x720: 1760 MB of blocks for 1483 MB of images and buffers). ODYSSEY_VK_BLOCK_MB=<n> for tests.
+    {
+        const char *e = getenv("ODYSSEY_VK_BLOCK_MB");
+        uint64_t mb = e && *e ? (uint64_t)atoi(e) : settings_low_memory() ? 64 : 0;
+        if (mb) ai.preferredLargeHeapBlockSize = mb << 20;
+    }
     VK_CHECK(vmaCreateAllocator(&ai, &g_vk.vma));
 
     VkSemaphoreTypeCreateInfo st = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
