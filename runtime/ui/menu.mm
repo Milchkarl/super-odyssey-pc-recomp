@@ -1137,6 +1137,16 @@ static void tab_graphics(void) {
                    "stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the "
                    "Switch. Applies from the next area loaded.", false);
     }
+    {
+        static const char *bq[] = {"Switch", "High"};
+        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 2, 0,
+                   "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
+                   "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
+                   "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
+                   "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
+                   "stays the game's (it isn't drawn at a higher resolution). Costs almost nothing. Switch: as on the "
+                   "Switch. Changes at once.", false);
+    }
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
                "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
