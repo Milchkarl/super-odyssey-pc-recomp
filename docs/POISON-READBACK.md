@@ -212,6 +212,10 @@ The same recording, Handheld mode, 60 FPS asked, 2 s windows of the ride (38 win
   pass's refresh asks that need a new copy from the GPU (~1-3 ms each) and asks that wait for the map's own passes
   later in the list - 14% of the game thread there.
 
-Not covered: the 1.0.0 Spewart fight with these changes (its test copy was offline), a played session on the Deck,
-other hardware.
+- 1.0.0, Spewart's arena on Windows (the recipe above, RTX 4090): standing still 3 hearts; walking into the poison
+  3 -> 2; Cappy thrown seven times opens the path at 3 hearts, and the run ends in the same picture and hearts as
+  with `ODYSSEY_PAINT_PRIO=0`. `ODYSSEY_PAINT_SYNC_VERIFY=1`: 22,000 row asks and 70,000 texel asks the same, none
+  different; `ODYSSEY_PAINT_MID_VERIFY=1` (recording thread off, so answers are given inside a list): 35,000 the same.
+
+Not covered: a played session on the Deck, 1.0.0 on the Deck, other hardware.
 
