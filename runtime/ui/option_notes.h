@@ -48,6 +48,8 @@ static const OptionNote k_option_notes[] = {
     {"Shadow quality", "Sharper, steadier shadow edges.", "Switch (the default). High or Ultra on a fast graphics card."},
     {"Bloom quality", "Smoother edges on the glow around bright sky and lights.",
      "Switch (the default, as on the Switch). High at high resolutions."},
+    {"Draw distance", "Objects and detailed models appear from farther away.",
+     "Switch (the default, as on the Switch). High on a fast PC."},
     {"Sharper HUD and menus", "Crisper edges on the game's HUD, text and menus on large screens.",
      "On (the default). Off if the HUD looks too hard to you."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},

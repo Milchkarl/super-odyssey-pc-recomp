@@ -151,6 +151,8 @@ typedef struct {
     int shadow_quality;  // 0 as the Switch, 1 high (2x), 2 ultra (4x): shadow map size (nvn/vulkan/textures.c shadow_factor)
     int bloom_quality;   // 0 as the Switch, 1 high: the glow images enlarged with a smooth (B-spline) filter instead of
                          // bilinear (maxwell/translate.c bloomUp, set per draw in exec.c stage_set; ODYSSEY_BLOOM_QUALITY)
+    int draw_distance;   // 0 as the Switch, 1 high (2x), 2 very high (4x): actors, their detail models and fades
+                         // reach farther (runtime/hle/odyssey_draw.c; ODYSSEY_DRAW_DISTANCE=<factor> for tests)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
                          // more first-draw builds (exec.c renderer_program_hint; ODYSSEY_PREWARM=3). Off by default.
     bool skip_intro;     // no Joy-Con tips screen timer before the title (runtime/hle/odyssey_120.c; read at start)

@@ -1146,6 +1146,13 @@ static void tab_graphics(void) {
                    "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
                    "stays the game's (it isn't drawn at a higher resolution). Costs almost nothing. Switch: as on the "
                    "Switch. Changes at once.", false);
+        static const char *dd[] = {"Switch", "High", "Very high"};
+        opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
+                   "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
+                   "simpler versions and fade out farther away. High: twice the Switch's distances, Very high: four "
+                   "times. Faraway objects then also keep moving, as they do near you. Costs CPU and GPU time in "
+                   "large kingdoms. The landscape itself is unchanged. Switch: as on the Switch. Changes at once.",
+                   false);
     }
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
                "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
