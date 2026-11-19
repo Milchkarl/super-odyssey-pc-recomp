@@ -217,5 +217,17 @@ The same recording, Handheld mode, 60 FPS asked, 2 s windows of the ride (38 win
   with `ODYSSEY_PAINT_PRIO=0`. `ODYSSEY_PAINT_SYNC_VERIFY=1`: 22,000 row asks and 70,000 texel asks the same, none
   different; `ODYSSEY_PAINT_MID_VERIFY=1` (recording thread off, so answers are given inside a list): 35,000 the same.
 
-Not covered: a played session on the Deck, 1.0.0 on the Deck, other hardware.
+- The Deck through Steam in Gaming Mode (`deck-bench.sh LAUNCH=steam`, the 1.4.1 recording): 45-60 FPS, mean 59.1,
+  1 of 39 windows under 50; gamescope's own screenshot shows the HUD in place.
+- 1.0.0 on the Deck (a test copy in `/run/media/deck/SN01T/sopr-100`, game code built there in 897 s;
+  `~/sopr/bench/sp100.sh`): standing still 3 hearts, walking into the poison 3 -> 2, Cappy's path open at 3 hearts.
+  `ODYSSEY_PAINT_SYNC_VERIFY=1`: 112,000 texel asks the same, none different; `ODYSSEY_PAINT_MID_VERIFY=1`: 20,000
+  answers inside a list the same.
+- A trap in that test: later in the Cappy run the Deck's builds showed different hearts at the same frame (new 1,
+  `ODYSSEY_PAINT_PRIO=0` 2, three runs each), while Windows gave one picture for every setting. It is the fight's
+  timing, not the map: below 60 FPS the catch-up clock runs extra ticks, so Spewart's next attack falls on another
+  frame. With `ODYSSEY_GAMEPLAY_CATCHUP=0` both give the same picture and hearts at each of six frames
+  (5090-5470). Compare builds on the Deck with the catch-up clock off.
+
+Not covered: a session played by hand on the Deck, other hardware.
 
