@@ -726,6 +726,32 @@ static bool toggle(const char *label, bool *v) {
     return ch;
 }
 
+// A row with a label on the left and a slider on the right (owner 2026-11-19: "control over it, like Eden"): drag or
+// click with the mouse; with the keyboard or a controller, Left / Right step by `step` while the row is selected, and
+// A / Enter lets it be dragged. fmt: printf for the value (one %d), e.g. "%d%%".
+static bool slider(const char *label, int *value, int lo, int hi, int step, const char *fmt) {
+    ImGui::PushID(label);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(tr(label));
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
+    ImGui::SetNextItemWidth(-1);
+    bool changed = ImGui::SliderInt("##s", value, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
+        int v = *value;
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) v += step;
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) v -= step;
+        v = v < lo ? lo : v > hi ? hi : v;
+        if (v != *value) { *value = v; changed = true; }
+    }
+    ImGui::PopID();
+    if (const OptionNote *note = option_note(label)) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("%s %s", tr("Recommended:"), tr(note->recommended));
+        ImGui::PopTextWrapPos();
+    }
+    return changed;
+}
+
 extern "C" void renderer_get_scale(float *sx, float *sy);
 #ifndef __APPLE__
 extern "C" void vk_request_swapchain_remake(void);
@@ -733,6 +759,7 @@ extern "C" void vk_request_swapchain_remake(void);
 extern "C" void output_scale_preview(double dw, double dh, double want, int mode, double *w, double *h);
 extern "C" float odyssey_wide_shape(void);
 extern "C" int input_pad_family(void);  // runtime/hle/input.c
+extern "C" void input_stick_now(int right, float *x, float *y);  // runtime/hle/input.c
 extern "C" void input_motion_calibrate(void);
 extern "C" int input_motion_calibration(void);
 extern "C" double output_scale_dynamic_factor(void);
@@ -1661,6 +1688,19 @@ static void tab_about(void) {
     toggle("Invert gyro Y", &g_settings.motion_invert_y);
     hint("If a motion move goes the wrong way on your controller: X turns tilting forward / back the other way round, "
          "Y turning left / right.");
+    slider("Gyro sensitivity", &g_settings.motion_gyro_sens, 25, 400, 5, "%d%%");
+    hint("How far turning the controller turns what the game aims with motion (first-person views, aiming Cappy). "
+         "100% is the controller's own movement.");
+    {
+        int th = g_settings.motion_shake_threshold;
+        char fmt[32];
+        if (th) snprintf(fmt, sizeof fmt, "%d.%d G", th / 10, th % 10);  // (the slider's text: the value already in it)
+        else snprintf(fmt, sizeof fmt, "%s", tr("Off"));
+        slider("Shake threshold", &g_settings.motion_shake_threshold, 0, 20, 1, fmt);
+    }
+    hint("Jolts smaller than this are not passed on to the game, so the controller's own rumble (hidden moons nearby) "
+         "or bumping it doesn't throw Cappy. Raise it until rumble no longer throws; real shakes then need to be a "
+         "little stronger. Off passes everything on, as the Switch does.");
     {   // Calibrate gyro (runtime/hle/input.c input_motion_calibrate)
         int st = input_motion_calibration();
         ImGui::AlignTextToFramePadding();
@@ -1703,14 +1743,25 @@ static void tab_about(void) {
     }
     hint("The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Turn it off "
          "for no rumble at all; DualSense and Switch Pro controllers use their own motors through it.");
-    {
-        static const int pct[] = {0, 5, 10, 15, 20, 25, 30};
-        static const char *const names[] = {"Off", "5%", "10%", "15%", "20%", "25%", "30%"};
-        int i = 0;
-        for (int k = 0; k < 7; k++) if (pct[k] <= g_settings.stick_deadzone) i = k;
-        if (choice("Stick deadzone", &i, names, 7)) g_settings.stick_deadzone = pct[i];
+    ImGui::Spacing();
+    header("Sticks");
+    slider("Left stick deadzone", &g_settings.stick_deadzone_l, 0, 50, 1, "%d%%");
+    slider("Right stick deadzone", &g_settings.stick_deadzone_r, 0, 50, 1, "%d%%");
+    hint("How far a stick moves before it counts. Raise it if Mario, the camera or the map pointer moves on its own "
+         "(the map's pointer drifting away from what you select is a sign of it). The default is 5%.");
+    slider("Left stick range", &g_settings.stick_range_l, 50, 150, 5, "%d%%");
+    slider("Right stick range", &g_settings.stick_range_r, 50, 150, 5, "%d%%");
+    hint("How much of a full tilt the stick's end gives. Above 100% a full tilt comes before the stick's end (a worn or "
+         "small stick that doesn't reach it); below 100% the stick's end gives less than a full tilt.");
+    {   // what the game gets from each stick now (a check for drift and range)
+        float v[2][2];
+        input_stick_now(0, &v[0][0], &v[0][1]);
+        input_stick_now(1, &v[1][0], &v[1][1]);
+        char line[160];
+        snprintf(line, sizeof line, tr("Now: left %3.0f%%, right %3.0f%% of a full tilt"),
+                 100 * sqrtf(v[0][0] * v[0][0] + v[0][1] * v[0][1]), 100 * sqrtf(v[1][0] * v[1][0] + v[1][1] * v[1][1]));
+        ImGui::TextDisabled("%s", line);
     }
-    hint("How far a controller stick moves before it counts. Raise it if Mario or the camera drifts on their own.");
     ImGui::Spacing();
     header("Stick camera");
     camera_speed("Stick horizontal speed", &g_settings.stick_camera_x);

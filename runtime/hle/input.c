@@ -80,16 +80,25 @@ static void recompute_keyboard(void) {
     key_ry = (bound_key(g_bind_key[BIND_RS_UP]) - bound_key(g_bind_key[BIND_RS_DOWN])) * 32767;
 }
 
-// The Controls tab's stick deadzone (g_settings.stick_deadzone, percent): inside that circle a stick is at rest, the
-// travel outside it is stretched to the full range (round: a diagonal keeps its direction). The SDL gamepad is read
+// The Controls tab's stick deadzone and range (percent, each stick: input_bind.h stick_shape). The SDL gamepad is read
 // directly, so a deadzone set elsewhere (Steam Input's) doesn't apply.
-static void deadzone(int32_t *x, int32_t *y) {
-    float dz = g_settings.stick_deadzone / 100.0f;
-    if (dz <= 0) return;
-    float fx = *x / 32767.0f, fy = *y / 32767.0f, r = sqrtf(fx * fx + fy * fy);
-    if (r <= dz) { *x = *y = 0; return; }
-    float k = fminf((r - dz) / (1 - dz), 1) / r;
-    *x = (int32_t)lroundf(fx * k * 32767), *y = (int32_t)lroundf(fy * k * 32767);
+void stick_shape(float *x, float *y, bool right) {
+    float dz = (right ? g_settings.stick_deadzone_r : g_settings.stick_deadzone_l) / 100.0f;
+    float range = (right ? g_settings.stick_range_r : g_settings.stick_range_l) / 100.0f;
+    float r = sqrtf(*x * *x + *y * *y);
+    if (r <= dz || r <= 0) { *x = *y = 0; return; }
+    float m = fminf((r - dz) / (1 - dz), 1) * range;  // (the new length)
+    float k = (m > 1 ? 1 : m) / r;  // (a full tilt at most: the game's sticks go no further)
+    *x *= k, *y *= k;
+}
+// (the Controls tab) what the game gets from a controller stick now, -1..1 (0 without a controller)
+void input_stick_now(int right, float *x, float *y) {
+    *x = (right ? pad_rx : pad_lx) / 32767.0f, *y = (right ? pad_ry : pad_ly) / 32767.0f;
+}
+static void deadzone(int32_t *x, int32_t *y, bool right) {
+    float fx = *x / 32767.0f, fy = *y / 32767.0f;
+    stick_shape(&fx, &fy, right);
+    *x = (int32_t)lroundf(fx * 32767), *y = (int32_t)lroundf(fy * 32767);
 }
 
 // Controller buttons (and the triggers as buttons) -> Switch buttons through g_bind_pad; the sticks stay the sticks.
@@ -107,10 +116,10 @@ static void recompute_pad(void) {
     latch_presses(b & ~atomic_exchange(&pad_buttons, b));
     if (!pad || host_test) { pad_lx = test_lx, pad_ly = test_ly, pad_rx = pad_ry = 0; return; }
     int32_t x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX), y = -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
-    deadzone(&x, &y);
+    deadzone(&x, &y, false);
     pad_lx = x, pad_ly = y;
     x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX), y = -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
-    deadzone(&x, &y);
+    deadzone(&x, &y, true);
     pad_rx = x, pad_ry = y;
 }
 
@@ -520,6 +529,17 @@ static void motion_push(uint64_t now) {
     bool live = mot.on && g_settings.motion && !menu_input_captured();
     if (live) {
         memcpy(f, mot.accel, 12);
+        // Shake threshold (Controls, #107): the controller's own rumble (hidden moons) shook it hard enough for the game
+        // to throw Cappy. The jolt - what the accelerometer reads beyond gravity, where the orientation puts it - is
+        // passed on only past the threshold, less the threshold (a soft step, no jump at the edge).
+        float th = g_settings.motion_shake_threshold / 10.0f;
+        if (th > 0) {
+            float gv[3] = {-mot.dir[6], -mot.dir[7], -mot.dir[8]}, d[3], dn = 0;
+            for (int i = 0; i < 3; i++) d[i] = f[i] - gv[i], dn += d[i] * d[i];
+            dn = sqrtf(dn);
+            float k = dn > th ? (dn - th) / dn : 0;
+            for (int i = 0; i < 3; i++) f[i] = gv[i] + d[i] * k;
+        }
         memcpy(f + 3, mot.gyro, 12);
         memcpy(f + 6, mot.angle, 12);
         memcpy(f + 9, mot.dir, 36);
@@ -650,6 +670,9 @@ static void motion_event(const SDL_GamepadSensorEvent *e) {
         // a controller at rest reports 0 (the noise left after the offset, under 0.007 turns/s: as Switch emulators)
         if (mot.gyro[0] * mot.gyro[0] + mot.gyro[1] * mot.gyro[1] + mot.gyro[2] * mot.gyro[2] < 0.007f * 0.007f)
             memset(mot.gyro, 0, sizeof mot.gyro);
+        // Gyro sensitivity (Controls, #107): the turn rates the game gets, so aiming with motion turns more or less
+        if (g_settings.motion_gyro_sens != 100)
+            for (int i = 0; i < 3; i++) mot.gyro[i] = fmaxf(-5.0f, fminf(5.0f, mot.gyro[i] * g_settings.motion_gyro_sens / 100.0f));
         uint64_t t = e->sensor_timestamp;
         bool integrate = g_settings.motion && !menu_input_captured() && !mot.gate.blocked &&
                          (!mot.gate.resume_ns || plat_now_ns() - mot.gate.resume_ns >= 250000000ull);

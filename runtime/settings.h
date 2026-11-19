@@ -117,7 +117,13 @@ typedef struct {
     int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is
-    int stick_deadzone;  // percent of a controller stick's travel that counts as rest (runtime/hle/input.c), 0: none
+    // Each controller stick (runtime/hle/input.c stick_shape): the inner deadzone (percent of its travel that counts as
+    // rest, 0..50) and its range (percent, 50..150: at 100 the stick's end is a full tilt; above, a full tilt comes
+    // before the end; below, the end gives less). settings.ini's old stick_deadzone sets both deadzones.
+    int stick_deadzone_l, stick_deadzone_r;
+    int stick_range_l, stick_range_r;
+    int motion_gyro_sens;      // percent, 25..400: the gyro's turn rates as the game gets them (aiming with motion)
+    int motion_shake_threshold;  // tenths of a G, 0..20: smaller jolts than this are not passed on (rumble, #107)
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
     bool mouse_menus;    // in the game's menus, the mouse buttons are A / B (bound or not) and an unbound wheel the D-pad (hle/input.c, #64)
     int mouse_sensitivity;  // percent, 25..400 (runtime/hle/input.c mouse_stick)
