@@ -429,6 +429,8 @@ static bool test_event(const SDL_Event *e) {
         return e->gbutton.which == TEST_DEVICE || input_cappy_test_device(e->gbutton.which);
     case SDL_EVENT_GAMEPAD_ADDED: case SDL_EVENT_GAMEPAD_REMOVED: return input_cappy_test_device(e->gdevice.which);
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: return input_cappy_test_device(e->gaxis.which);
+    case SDL_EVENT_MOUSE_MOTION: return e->motion.which == TEST_DEVICE;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: return e->button.which == TEST_DEVICE;
     default: return false;
     }
 }
@@ -949,6 +951,8 @@ static _Atomic int32_t script_lx, script_ly, script_rx, script_ry;
 // "frame:sdlpad:<button>:frames" / "frame:sdlkey:<key>:frames" hold a controller button / key as real events (down
 //   at frame, up `frames` later): they reach menus and the on-screen keyboard first, as a player's would.
 // "frame:shot:<name>" saves the window (game + menus) to build/<name>.png.
+// "frame:sdlclick:<x>/<y>:frames" moves the pointer to window point x, y and holds the left mouse button there (down at
+//   frame, up `frames` later) as real events - a player's click on the overlay menu (#108).
 // ODYSSEY_BIND_TEST="frame:pad|key:<input>:<host>,..." starts a rebind capture of <input> (bind_* name: a, zl,
 //   ls_up...) at that frame (the Controls tab shows it waiting) and presses <host> 90 frames later ("esc" cancels,
 //   "wait" lets it time out); "frame:reset:pad|key" resets to the defaults.
@@ -975,6 +979,23 @@ static void test_push(uint64_t frame, unsigned long start, unsigned long len, co
     }
     if (!strcmp(dev, "sdlkey")) {
         if (frame == start || frame == start + len) push_key(SDL_GetScancodeFromName(arg), SDL_KMOD_NONE, frame == start);
+        return;
+    }
+    if (!strcmp(dev, "sdlclick")) {
+        float x = 0, y = 0;
+        if (sscanf(arg, "%f/%f", &x, &y) != 2 || (frame != start && frame != start + len)) return;
+        extern SDL_Window *ui_window(void);
+        SDL_WindowID wid = ui_window() ? SDL_GetWindowID(ui_window()) : 0;
+        if (frame == start) {
+            e.type = SDL_EVENT_MOUSE_MOTION;
+            e.motion.which = TEST_DEVICE, e.motion.windowID = wid, e.motion.x = x, e.motion.y = y;
+            SDL_PushEvent(&e);
+            memset(&e, 0, sizeof e);
+        }
+        e.type = frame == start ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+        e.button.which = TEST_DEVICE, e.button.windowID = wid, e.button.button = SDL_BUTTON_LEFT, e.button.down = frame == start;
+        e.button.clicks = 1, e.button.x = x, e.button.y = y;
+        SDL_PushEvent(&e);
         return;
     }
     if (!strcmp(dev, "sdlpad")) {
@@ -1024,10 +1045,10 @@ static void host_test_frame(uint64_t frame) {
         char *save = NULL;
         for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             unsigned long start = 0, len = 10;
-            char dev[8] = "", name[400] = "";
-            if (sscanf(tok, "%lu:%7[a-z]:%399[^:]:%lu", &start, dev, name, &len) < 3) continue;
+            char dev[12] = "", name[400] = "";
+            if (sscanf(tok, "%lu:%11[a-z]:%399[^:]:%lu", &start, dev, name, &len) < 3) continue;
             if (!strcmp(dev, "type") || !strcmp(dev, "sdlpad") || !strcmp(dev, "sdlkey") || !strcmp(dev, "shot") ||
-                !strcmp(dev, "quit")) {
+                !strcmp(dev, "quit") || !strcmp(dev, "sdlclick")) {
                 test_push(frame, start, len, dev, name);
                 continue;
             }
