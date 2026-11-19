@@ -583,6 +583,7 @@ extern "C" void vk_prepare_skip_this_start(void);
 enum { PREP_NONE, PREP_ASK, PREP_RUN, PREP_DONE };
 static std::atomic<int> g_prep{PREP_NONE}, g_prep_phase{0}, g_prep_done{0}, g_prep_total{0}, g_prep_code{0};
 static volatile int g_prep_cancel;
+static bool g_prep_stay;  // "Compile, play later" (#101): back to the start page when it is done, not into the game
 static uint64_t g_prep_t0, g_prep_phase_t0;
 static int g_prep_last_phase = -1;
 static void prep_page_progress(int phase, int done, int total) {
@@ -623,10 +624,12 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
                            "that changes them, or when you ask for it in the menu."));
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, 18 * scale));
-        if (accent_button("Compile now", scale)) prep_start();
+        if (accent_button("Compile now", scale)) { g_prep_stay = false; prep_start(); }
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
         ImGui::SameLine(0, 16 * scale);
-        if (accent_button("Later", scale)) { vk_prepare_skip_this_start(); g_prep = PREP_DONE; }
+        if (accent_button("Compile, play later", scale)) { g_prep_stay = true; prep_start(); }
+        ImGui::SameLine(0, 16 * scale);
+        if (accent_button("Later", scale)) { g_prep_stay = false; vk_prepare_skip_this_start(); g_prep = PREP_DONE; }
     } else {
         int ph = g_prep_phase.load(), d = g_prep_done.load(), n = g_prep_total.load();
         uint64_t now = SDL_GetTicksNS();
@@ -653,10 +656,12 @@ static void prep_card(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         ImGui::TextUnformatted(t);
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, 18 * scale));
-        if (accent_button("Stop and play", scale)) g_prep_cancel = 1;
+        if (accent_button(g_prep_stay ? "Stop" : "Stop and play", scale)) g_prep_cancel = 1;
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextWrapped("%s", tr("What is compiled so far is kept; the rest is made while you play."));
+        ImGui::TextWrapped("%s", tr(g_prep_stay ? "What is compiled so far is kept; the rest is made while you play. "
+                                                  "When it is done you are back on the start page."
+                                                : "What is compiled so far is kept; the rest is made while you play."));
         ImGui::PopStyleColor();
     }
     ImGui::PopTextWrapPos();
@@ -955,7 +960,8 @@ bool config_run(void) {
         if (pt) {
             if (frame == 30 && g_prep.load() == PREP_NONE) g_prep = PREP_ASK;
             if (frame == 60) pshot = "build/prep_ask.png";
-            if (frame == 90 && g_prep.load() == PREP_ASK) prep_start();
+            if (frame == 90 && g_prep.load() == PREP_ASK) { g_prep_stay = !strcmp(pt, "stay"); prep_start(); }
+            if (!strcmp(pt, "stay") && frame > 901 && g_prep.load() == PREP_NONE) { pshot = "build/prep_back.png"; result = 2; }
             if (frame == 900) pshot = "build/prep_run.png";
             if (frame == 901) g_prep_cancel = 1;
         }
@@ -969,7 +975,12 @@ bool config_run(void) {
         if (result == 1 && !s && g_prep.load() == PREP_NONE && vk_prepare_due()) { g_prep = PREP_ASK; result = 0; }
         static bool quit_after;  // (closed while compiling: it stops first, then the program exits)
         if (g_prep.load() == PREP_RUN && result == 2) { g_prep_cancel = 1; quit_after = true; result = 0; }
-        if (g_prep.load() == PREP_DONE && !result) result = quit_after ? 2 : 1;
+        if (g_prep.load() == PREP_DONE && !result) {
+            if (g_prep_stay && !quit_after) {  // (compiled, not played: the start page again, Play starts the game)
+                g_prep_stay = false, g_prep = PREP_NONE, g_cfg_settings = false, g_cfg_focus = 1;
+                LOG("[config] shader compilation ended (code %d); back on the start page (play later)\n", g_prep_code.load());
+            } else result = quit_after ? 2 : 1;
+        }
 #endif
     }
 #ifndef __APPLE__

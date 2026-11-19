@@ -382,7 +382,13 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         ci.flags &= ~VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-        VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL));
+        VkResult r2 = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
+        // (#99, an 8 GB PC with integrated graphics, whose graphics memory is the PC's own: say what ran out)
+        if (r2 == VK_ERROR_OUT_OF_DEVICE_MEMORY || r2 == VK_ERROR_OUT_OF_HOST_MEMORY)
+            FATAL("out of memory for a texture (%ux%u): the PC's memory (with integrated graphics: RAM and page file) is "
+                  "full. Close other programs, set Performance > Memory use to Low, lower the internal resolution, or "
+                  "let the system manage a larger page file.\n", t->width, t->height);
+        VK_CHECK(r2);
         depthfmt = false;
     }
     b->storage = (ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
