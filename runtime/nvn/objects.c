@@ -851,8 +851,13 @@ NvnTexture *tex_trace_find(uint64_t addr) {
     static struct { uint64_t addr, inits; NvnTexture *t; } memo[8];
     static unsigned memo_next;
     uint64_t inits = atomic_load(&g_tex_inits);
+    // ODYSSEY_TEX_FIND_VERIFY=1 (tests): every kept answer is checked against a walk of the table
+    static int verify = -1;
+    if (verify < 0) verify = getenv("ODYSSEY_TEX_FIND_VERIFY") != NULL;
+    NvnTexture *kept = NULL;
     for (int i = 0; i < 8; i++)
-        if (memo[i].t && memo[i].addr == addr && memo[i].inits == inits && memo[i].t->addr == addr && memo[i].t->backend) return memo[i].t;
+        if (memo[i].t && memo[i].addr == addr && memo[i].inits == inits && memo[i].t->addr == addr && memo[i].t->backend) { kept = memo[i].t; break; }
+    if (kept && !verify) return kept;
     NvnTexture *best = NULL;
     pthread_mutex_lock(&g_tex_lock);
     for (size_t i = 0; i < g_tex_cap; i++) {
@@ -860,6 +865,16 @@ NvnTexture *tex_trace_find(uint64_t addr) {
         if (t && t->addr == addr && t->backend && (!best || t->debug_id > best->debug_id)) best = t;
     }
     pthread_mutex_unlock(&g_tex_lock);
+    if (verify && kept) {
+        static uint64_t same, diff;
+        if (kept == best) same++;
+        else if (diff++ < 12)
+            LOG("[tex-find] WRONG kept answer for %llx: texture %llu (%ux%u fmt %#x) kept, %llu (%ux%u fmt %#x) is the newest with a GPU copy\n",
+                (unsigned long long)addr, (unsigned long long)kept->debug_id, kept->width, kept->height, kept->format,
+                (unsigned long long)(best ? best->debug_id : 0), best ? best->width : 0, best ? best->height : 0, best ? best->format : 0);
+        if ((same + diff) % 2000 == 0) LOG("[tex-find] kept answers so far: %llu right, %llu wrong\n", (unsigned long long)same, (unsigned long long)diff);
+        return best;
+    }
     if (best) { unsigned m = memo_next++ % 8; memo[m].addr = addr, memo[m].inits = inits, memo[m].t = best; }
     return best;
 }
