@@ -62,7 +62,7 @@ with gameplay kept at full speed. It uses noticeably more power than 60 FPS.
 The install folder you chose (default `~/.local/share/super-odyssey-pc-recomp`, or `$XDG_DATA_HOME/...`):
 
 - `extracted/` - your game data and the game code built from it
-- `save/` - your saves, `cache/` - compiled shaders, `powermoon.ini` - settings
+- `save/` - your saves, `cache/` - compiled shaders, `settings.ini` - settings
 
 The log, `SuperOdysseyRecomp.log`, is always in `~/.local/share/super-odyssey-pc-recomp` (on the internal drive,
 wherever the game is installed); started from a terminal, it prints there instead.

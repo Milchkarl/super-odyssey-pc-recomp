@@ -1,4 +1,4 @@
-// User settings (powermoon.ini in the data root), edited from the in-game menu.
+// User settings (settings.ini in the data root), edited from the in-game menu.
 #pragma once
 #include <stdbool.h>
 
@@ -21,7 +21,7 @@ enum { DISPLAY_AUTO, DISPLAY_1080, DISPLAY_1440, DISPLAY_2160, DISPLAY_MODE_COUN
 // VSync (Vulkan present modes, named as in Savage Wind Recomp - owner 2026-11-16): ON = FIFO (classic vsync: each frame
 // waits for its refresh), FAST = mailbox (no tearing, the newest frame at each refresh, the game paces itself),
 // ADAPTIVE = FIFO relaxed (On, but a late frame goes out at once - tearing then), OFF = immediate (tearing, the lowest
-// latency; the default). The numbers are the settings file's older order (powermoon.ini "vsync": on = mailbox, strict
+// latency; the default). The numbers are the settings file's older order (settings.ini "vsync": on = mailbox, strict
 // = FIFO); the file now says "vsync_mode" (settings.c).
 enum { VSYNC_FAST, VSYNC_OFF, VSYNC_ON, VSYNC_ADAPTIVE, VSYNC_COUNT };
 static inline int settings_display_height(int mode) {
@@ -95,6 +95,8 @@ typedef struct {
     int console_mode;    // CONSOLE_*: docked or handheld (the game's own rendering for each; next start)
     bool game_dynres;    // the game's own dynamic resolution (on: as on the Switch; off: always its full resolution)
     bool frame_interp;   // always false: 120 FPS interpolation was removed (2026-11-16); ODYSSEY_INTERP for tests (nvn/interp.c)
+    bool hud_sharpen;    // the HUD and the game's menus sharpened on pictures of 900 lines and more (nvn/vulkan/exec.c
+                         // hud_sharpness)
     bool deband;         // smooth gradients: the game's final picture in half floats, dithered into the window (Vulkan:
                          // nvn/vulkan/textures.c vk_deband)
     float volume;        // master volume, 1 = 100%
@@ -117,7 +119,7 @@ typedef struct {
     int rumble_strength;  // 25..100 (%): how strong the vibration is
     int stick_deadzone;  // percent of a controller stick's travel that counts as rest (runtime/hle/input.c), 0: none
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
-    bool mouse_menus;    // in the game's menus, unbound mouse buttons are A / B and the wheel the D-pad (hle/input.c, #64)
+    bool mouse_menus;    // in the game's menus, the mouse buttons are A / B (bound or not) and an unbound wheel the D-pad (hle/input.c, #64)
     int mouse_sensitivity;  // percent, 25..400 (runtime/hle/input.c mouse_stick)
     int mouse_sensitivity_y; // independent vertical speed; old mouse_sensitivity files initialize both axes
     bool mouse_invert_x;

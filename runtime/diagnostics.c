@@ -15,6 +15,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
+#include <tlhelp32.h>
 #endif
 #include "paths.h"
 #include "platform.h"
@@ -22,15 +23,64 @@
 #include "settings.h"
 #include "version.h"
 
-static char gpu[1024], fault[256];
+static char gpu[1024], fault[256], fault_short[128];  // (short: what and the address - no host addresses, for signatures)
 static atomic_bool gpu_ready, fault_ready;
 static atomic_flag fault_claimed = ATOMIC_FLAG_INIT;
 static atomic_uint sequence;
 static atomic_int copy_status = -1;
 int diagnostics_copy_status(void) { return atomic_load(&copy_status); }
 static char build[128] = "unavailable";
+static char where_sym[160];        // the faulting code's symbol (dispatch.c rt_fault_report): f_<guest>, module, function
+static uint64_t where_off;
+static atomic_bool where_ready;
+static uint64_t start_ns;          // (the session's length in a report)
+static char parent[96] = "unknown";  // what started the game: Explorer, a launcher, Steam...
+
+void diagnostics_fault_where(const char *sym, uint64_t off) {
+    snprintf(where_sym, sizeof where_sym, "%s", sym && *sym ? sym : "?");
+    where_off = off;
+    atomic_store(&where_ready, true);
+}
+
+// The process that started this one (a launcher, Steam, Explorer, a terminal): many reports come from launchers
+static void parent_name(void) {
+#ifdef _WIN32
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32 e = {.dwSize = sizeof e};
+    DWORD me = GetCurrentProcessId(), ppid = 0;
+    for (BOOL ok = Process32First(snap, &e); ok; ok = Process32Next(snap, &e))
+        if (e.th32ProcessID == me) { ppid = e.th32ParentProcessID; break; }
+    e.dwSize = sizeof e;
+    for (BOOL ok = ppid && Process32First(snap, &e); ok; ok = Process32Next(snap, &e))
+        if (e.th32ProcessID == ppid) { snprintf(parent, sizeof parent, "%s", e.szExeFile); break; }
+    CloseHandle(snap);
+#elif defined(__linux__)
+    char path[64], name[96] = "";
+    snprintf(path, sizeof path, "/proc/%d/comm", (int)getppid());
+    FILE *f = fopen(path, "r");
+    if (f) {
+        if (fgets(name, sizeof name, f)) { name[strcspn(name, "\r\n")] = 0; snprintf(parent, sizeof parent, "%s", name); }
+        fclose(f);
+    }
+#endif
+}
 
 void diagnostics_init(void) {
+    start_ns = plat_now_ns();
+    parent_name();
+    {   // (the log's first line: which build, when, started by what - a launcher's log shows the same)
+        time_t now = time(NULL);
+        struct tm utc;
+#ifdef _WIN32
+        gmtime_s(&utc, &now);
+#else
+        gmtime_r(&now, &utc);
+#endif
+        char date[32];
+        strftime(date, sizeof date, "%Y-%m-%d %H:%M:%S UTC", &utc);
+        fprintf(stderr, "[session] Super Odyssey PC Recomp %s (%s), %s, started by %s\n", APP_VERSION, SDL_GetPlatform(), date, parent);
+    }
     // A small streaming fingerprint identifies private builds sharing a version
     // number. Cache it at startup; do not open the binary from a crash handler.
     char path[1024], bytes[4096];
@@ -57,6 +107,7 @@ void diagnostics_fault(const char *what, uint64_t address, uint64_t pc, uint64_t
     if (atomic_flag_test_and_set(&fault_claimed)) return;
     snprintf(fault, sizeof fault, "%s, address %#llx, host PC %#llx, host LR %#llx",
              what, (unsigned long long)address, (unsigned long long)pc, (unsigned long long)lr);
+    snprintf(fault_short, sizeof fault_short, "%s accessing %#llx", what, (unsigned long long)address);
     atomic_store(&fault_ready, true);
 }
 
@@ -167,12 +218,57 @@ bool diagnostics_write_report(char *path, size_t capacity) {
     OSVERSIONINFOW v = {.dwOSVersionInfoSize = sizeof v};
     if (version && !version(&v)) snprintf(os, sizeof os, "Windows %lu.%lu build %lu", v.dwMajorVersion, v.dwMinorVersion, v.dwBuildNumber);
 #endif
-    fprintf(out, "Super Odyssey PC Recomp diagnostic report (format 1)\nApp: %s\nExecutable fingerprint: %s\nUTC: %s\nOS: %s\n"
+    // ---- Summary: what a player or a developer reads first (format 2, 2026-11-17)
+    extern const char *odyssey_stage_name(void);
+    extern uint64_t renderer_present_count(void);
+    Module *main = loader_module("main");
+    char build_id[40] = "not loaded", game[48] = "not loaded";
+    if (main) {
+        for (unsigned i = 0; i < 8 && i < sizeof main->build_id; i++) snprintf(build_id + 2 * i, 3, "%02x", main->build_id[i]);
+        snprintf(game, sizeof game, "%s", !strcmp(build_id, "3ca12dfaaf9c82da") ? "1.0.0" :
+                 !strcmp(build_id, "b424be150a8e7d78") ? "1.4.1" : "another version");
+    }
+    bool faulted = atomic_load(&fault_ready), located = atomic_load(&where_ready);
+    // where: the recompiled game's code (f_<guest address>), a driver or other library (name.dll / .so), or ours
+    const char *place = "the PC port's own code";
+    if (located && !strncmp(where_sym, "f_7", 3)) place = "the game's own code (recompiled)";
+    else if (located && (strstr(where_sym, "nvoglv") || strstr(where_sym, "nvidia") || strstr(where_sym, "amdvlk") ||
+                         strstr(where_sym, "amdxx") || strstr(where_sym, "radv") || strstr(where_sym, "igvk") ||
+                         strstr(where_sym, "vulkan") || strstr(where_sym, "libvk")))
+        place = "the graphics driver";
+    else if (located && (strstr(where_sym, ".dll") || strstr(where_sym, ".so"))) place = "a library (see Where)";
+    else if (!located) place = "unknown (no exception: see the log's last lines)";
+    static const char *const tech[TEMPORAL_BACKEND_COUNT] = {"NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4", "Intel XeSS", "AMD FSR 2"};
+    static const char *const modes[DLSS_MODE_COUNT] = {"off", "native AA", "quality", "balanced", "performance"};
+    int tb = g_settings.temporal_backend, tm = *settings_temporal_mode();
+    char upscaler[64];
+    if (g_settings.temporal_off || tb < 0 || tb >= TEMPORAL_BACKEND_COUNT) snprintf(upscaler, sizeof upscaler, "off");
+    else snprintf(upscaler, sizeof upscaler, "%s %s", tech[tb], tm >= 0 && tm < DLSS_MODE_COUNT ? modes[tm] : "?");
+    uint64_t secs = start_ns ? (plat_now_ns() - start_ns) / 1000000000ull : 0;
+    char signature[256];  // (the same crash from two players gives the same line: what, where, stage)
+    snprintf(signature, sizeof signature, "%s | %s+%llx | %s | game %s", faulted ? fault_short : "no exception",
+             located ? where_sym : "?", (unsigned long long)(located ? where_off : 0), odyssey_stage_name(), game);
+    fprintf(out, "Super Odyssey PC Recomp crash report (format 2)\n\n"
+                 "=== Summary ===\n"
+                 "What happened: %s\n"
+                 "Where: %s (%s+%#llx)\n"
+                 "Last stage: %s, frame %llu, %llu min %llu s into the session\n"
+                 "Frame rate: setting %d, drawing %d a second; upscaler %s; frame generation %s\n"
+                 "Memory: %llu MB in RAM, %llu MB committed, of %llu MB RAM\n"
+                 "Game: Super Mario Odyssey %s (build %s); started by %s\n"
+                 "Signature: %s\n\n",
+            faulted ? fault_short : "the game stopped without a processor exception (see the log's last lines)", place,
+            located ? where_sym : "?", (unsigned long long)(located ? where_off : 0), odyssey_stage_name(),
+            (unsigned long long)renderer_present_count(), (unsigned long long)(secs / 60), (unsigned long long)(secs % 60),
+            settings_game_hz(), odyssey_native_hz(), upscaler,
+            g_settings.frame_gen == FG_FSR ? "AMD FSR" : g_settings.frame_gen == FG_DLSS ? "NVIDIA DLSS" : "off",
+            (unsigned long long)(plat_resident_bytes() >> 20), (unsigned long long)(plat_private_bytes() >> 20),
+            (unsigned long long)(plat_total_ram() >> 20), game, build_id, parent, signature);
+    fprintf(out, "=== This PC ===\nApp: %s\nExecutable fingerprint: %s\nUTC: %s\nOS: %s\n"
                  "CPU: %s\nLogical processors: %d\nRAM: %llu MiB\nGPU / driver: %s\n"
                  "Fault: %s\n", APP_VERSION, build, date, os, cpu, SDL_GetNumLogicalCPUCores(),
                  (unsigned long long)(plat_total_ram() >> 20), atomic_load(&gpu_ready) ? gpu : "unavailable (see log)",
-                 atomic_load(&fault_ready) ? fault : "No host exception recorded; see log for fatal errors and guest call chain.");
-    Module *main = loader_module("main");
+                 faulted ? fault : "No host exception recorded; see log for fatal errors and guest call chain.");
     if (main) {
         fprintf(out, "Game main build ID: ");
         for (unsigned i = 0; i < sizeof main->build_id; i++) fprintf(out, "%02x", main->build_id[i]);

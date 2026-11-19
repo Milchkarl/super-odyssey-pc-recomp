@@ -77,7 +77,7 @@ OSFLAGS  := -Wno-format  # (%llx for uint64_t, which is unsigned long here: the 
 SHADERC  ?= -lshaderc  # (Debian / Ubuntu's libshaderc.so; a shaderc built from source: -lshaderc_shared)
 # -rdynamic: crash backtraces name host functions (runtime/platform/linux.c)
 LDFLAGS  := -fuse-ld=lld -rdynamic $(if $(DEPS),-L$(DEPS)/lib) -lSDL3 -lavformat -lavcodec -lavutil -lswscale \
-            -lvulkan $(SHADERC) -lpthread -ldl -lm
+            -lvulkan $(SHADERC) -l:libzstd.a -lpthread -ldl -lm  # (zstd: the shader cache pack, nvn/vulkan/shaders.c)
 BACKEND_SRC := $(wildcard runtime/nvn/vulkan/*.c) $(wildcard runtime/nvn/vulkan/*.cpp)
 BACKEND_OBJ := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(BACKEND_SRC)))
 IMGUI_OBJ += $(B)/imgui/imgui_impl_vulkan.o
@@ -92,7 +92,7 @@ OSFLAGS  := -D_FILE_OFFSET_BITS=64 -D_POSIX_THREAD_SAFE_FUNCTIONS -D_CRT_RAND_S 
 GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA for the lifted FP/SIMD code (simd.h); override for older CPUs
 GENFLAGS += -D_FILE_OFFSET_BITS=64 $(GENARCH)
 LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 $(if $(DEPS),-L$(DEPS)/lib) -lSDL3 -lavformat -lavcodec -lavutil -lswscale \
-            -lvulkan-1 -lwinmm -lole32 -lshell32 -lcomdlg32 -luuid -lshaderc_shared -lpdh -lbcrypt -lwinhttp -lwintrust -lcrypt32 \
+            -lvulkan-1 -lwinmm -lole32 -lshell32 -lcomdlg32 -luuid -lshaderc_shared -l:libzstd.a -lpdh -lbcrypt -lwinhttp -lwintrust -lcrypt32 \
             $(if $(CONSOLE),,-Wl$(comma)--subsystem$(comma)windows)  # no console window (log -> SuperOdysseyRecomp.log); CONSOLE=1: one
 BACKEND_SRC := $(wildcard runtime/nvn/vulkan/*.c) $(wildcard runtime/nvn/vulkan/*.cpp)
 BACKEND_OBJ := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(BACKEND_SRC)))
@@ -112,7 +112,13 @@ endif
 # is never loaded (`make gen`, then `make` again; players' setup builds it again).
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/analyze.py tools/nso.py tools/passes.py tools/odyssey_patches.py \
                 tools/simd_c.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-                runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/zig_slim.sh
+                runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h
+# (the compiler runtime's script only where it is used: its change for #87 made every Linux / Steam Deck player's
+# game code rebuild too - about 25 minutes on a Deck - for a library that was the same. runtime/gamelib.c same_as
+# keeps the Linux libraries built before this.)
+ifeq ($(PLATFORM),windows)
+GAMELIB_SRCS += tools/zig_slim.sh
+endif
 # (line endings don't count: a Windows checkout with CRLF and GitHub's LF one make the same library)
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | tr -d '\015' | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
 

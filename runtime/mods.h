@@ -3,7 +3,7 @@
 // Also found: the loose files of the first builds (mods/romfs/) and the console / emulator layouts
 // (mods/Luigi/atmosphere/contents/0100000000010000/romfs/, mods/contents/0100000000010000/Luigi/romfs/).
 // runtime/services/fs.c serves their files in place of the game's; the menu's Mods tab switches them on and off
-// (powermoon.ini, applies the next time the game starts). Code patches (exefs/) can't apply: the game code is
+// (settings.ini, applies the next time the game starts). Code patches (exefs/) can't apply: the game code is
 // recompiled from the original - such mods are listed, greyed out.
 #pragma once
 #include <stdbool.h>
@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 typedef struct {
-    char id[512];    // its romfs/ (or exefs/) folder relative to mods/: the key in powermoon.ini
+    char id[512];    // its romfs/ (or exefs/) folder relative to mods/: the key in settings.ini
     char name[256];  // for the menu: the folders on the way, without the layouts' own (atmosphere, contents, title id)
     bool on;         // not switched off in the menu
     bool romfs;      // has game files (no: only code patches)
@@ -33,7 +33,7 @@ extern "C" {
 #endif
 int mods_count(void);  // the mods in mods/, in priority order (their names, alphabetical)
 const ModInfo *mods_get(int i);
-void mods_set_on(int i, bool on);  // menu: saved in powermoon.ini, applies the next time the game starts
+void mods_set_on(int i, bool on);  // menu: saved in settings.ini, applies the next time the game starts
 bool mods_changed(void);           // switched on or off since the game started
 int mods_applied(void);            // mods in use at this start (the crash notice mentions them)
 bool mods_dir_url(char *out, size_t cap);  // file:// URL of mods/ (made if missing): the menu's "Open mods folder"

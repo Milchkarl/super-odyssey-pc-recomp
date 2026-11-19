@@ -17,8 +17,12 @@
 #include "../gameplay_clock.h"
 #include "../ui/menu.h"
 #include "../nvn/nvn.h"
+#include "../nvn/rqueue.h"
 
 static bool hooks_ok, trace, extra_draw;
+uint64_t renderer_present_count(void);
+// (proc_draw) a scene prepared for extra draws drew in this frame / did in the last gameplay frame (odyssey_native_hz)
+static bool prepared_scene_drew, last_draw_known;
 static bool safe_scene_load = true;
 #define enabled odyssey_native_120_enabled()
 static GuestFn original_game_movement, original_draw, original_movement, original_stage_draw, original_flight_draw;
@@ -48,8 +52,23 @@ bool odyssey_native_120_enabled(void) {
     if (safe_scene_load && loader_main_is_v141() && odyssey_scene_cadence_warming()) return false;
     return true;
 }
+// Extra draws only in the scenes whose draw is prepared for them (the hooks below: a stage, the kingdom flight, the
+// title screen, the opening). Any other scene - the painting warp's WorldWarpHoleScene faulted in its depth shadow
+// map's texture allocation above 60 FPS (#72 follow-up: 1.0.0 at 165; #85: 1.4.1 at 240) - runs at the game's own 60
+// while it shows: the timer and the cadence follow this rate, so it's the 60 FPS setting's path for those frames.
+// ODYSSEY_EXTRA_DRAW_SCENES=all: every scene, as before.
+static bool unprepared_scene(void) {
+    static int known_only = -1;
+    if (known_only < 0) { const char *e = getenv("ODYSSEY_EXTRA_DRAW_SCENES"); known_only = !(e && !strcmp(e, "all")); }
+    return known_only && hooks_ok && !__atomic_load_n(&last_draw_known, __ATOMIC_RELAXED);
+}
 int odyssey_native_hz(void) {
     if (!odyssey_native_120_enabled()) return 60;
+    if (unprepared_scene()) return 60;
+#ifndef __APPLE__
+    extern bool vk_native_brake(void);  // (vulkan/device.c: frames missing their time above 60 - a few seconds at 60)
+    if (vk_native_brake()) return 60;
+#endif
     return settings_fps_hz(g_settings.frame_rate);
 }
 
@@ -414,6 +433,7 @@ static void prepare_extra_draw(Cpu *c, const char *what, bool *logged) {
 
 static void stage_draw(Cpu *c) {
     stage_draw_ns=plat_now_ns();
+    prepared_scene_drew = true;
     static bool logged;
     static uint64_t last_stage;
     if (enabled && extra_draw) {
@@ -424,11 +444,14 @@ static void stage_draw(Cpu *c) {
         // (90: the gameplay frames are between ticks too)
         if (last_stage && odyssey_native_hz() != 120 && draw_lead != 0.0f && odyssey_pose_enabled()) odyssey_pose_draw(c, draw_lead);
     }
+    // (the renderer is told which of the tick's draws this is: vulkan/exec.c renderer_extra_frame)
+    if (rq_enabled()) rq_push(RQ_EXTRA_FRAME, NULL, enabled && extra_draw);
     original_stage_draw(c);
 }
 
 static void flight_draw(Cpu *c) {
     static bool logged;
+    prepared_scene_drew = true;
     if (enabled && extra_draw) prepare_extra_draw(c, "kingdom flight", &logged);
     original_flight_draw(c);
 }
@@ -436,6 +459,7 @@ static void flight_draw(Cpu *c) {
 static GuestFn original_title_draw;
 static void title_draw(Cpu *c) {  // (the title screen's scene: the kingdom drawn behind the menu)
     static bool logged;
+    prepared_scene_drew = true;
     if (enabled && extra_draw) prepare_extra_draw(c, "title screen", &logged);
     original_title_draw(c);
 }
@@ -444,13 +468,22 @@ static void demo_draw(Cpu *c) {
     static bool logged;
     // The new-game opening has its own Scene, rather than StageScene. Its extra
     // draw needs the same temporary graphics resources as stages and flights.
+    prepared_scene_drew = true;
     if (enabled && extra_draw) prepare_extra_draw(c, "opening cutscene", &logged);
     original_demo_draw(c);
 }
 
 static void proc_draw(Cpu *c) {
     if (enabled && extra_draw) allocator_extra_draw(c);
+    if (!extra_draw) prepared_scene_drew = false;
     original_draw(c);
+    if (!extra_draw && prepared_scene_drew != last_draw_known) {
+        static int nlog;
+        if (enabled && nlog++ < 40)
+            LOG("[native-120] %s (frame %llu)\n", prepared_scene_drew ? "a prepared scene again: extra draws on" :
+                "a scene without extra-draw preparation: its own 60 FPS while it shows", (unsigned long long)renderer_present_count());
+        __atomic_store_n(&last_draw_known, prepared_scene_drew, __ATOMIC_RELAXED);
+    }
     draws++;
     if (!trace) return;
     uint64_t now = plat_now_ns();

@@ -258,7 +258,7 @@ void plat_fatal_notice(void) {
             if (strstr(line, "failed: -2 (") || strstr(line, "failed: -1 (")) {
                 size_t l = strlen(text);
                 snprintf(text + l, sizeof text - l, "\n\nThe graphics card ran out of memory. Lower the internal resolution "
-                         "(menu > Graphics), or delete powermoon.ini in the game's folder to go back to the default settings.");
+                         "(menu > Graphics), or delete settings.ini in the game's folder to go back to the default settings.");
             } else if (strstr(line, "Vulkan") || strstr(line, "VK_") || strstr(line, "vk")) {
                 size_t l = strlen(text);
                 snprintf(text + l, sizeof text - l, "\n\nSuper Odyssey PC Recomp needs a graphics driver with Vulkan 1.3: install the "
@@ -633,6 +633,9 @@ static void sample_modules(void) {
                 fprintf(m, "%llx %lx %s\n", (unsigned long long)(uintptr_t)mi.lpBaseOfDll, (unsigned long)mi.SizeOfImage, name);
         }
     if (m) fclose(m);
+    snprintf(path, sizeof path, "%s.funcs", getenv("ODYSSEY_SAMPLE"));
+    extern void rt_dump_host_fns(const char *path);
+    rt_dump_host_fns(path);
 }
 static DWORD WINAPI sample_main(LPVOID arg) {
     (void)arg;
@@ -668,8 +671,24 @@ static DWORD WINAPI sample_main(LPVOID arg) {
             memset(rec, 0, sizeof recs[0]);
             rec[0] = now;
             rec[1] = tid[t] | (tid[t] == sample_tid ? 1ull << 32 : 0);
-            for (int i = 0; ok && i < 8; i++) {
-                rec[2 + i] = ctx.Rip;
+            // (the leaf, then the callers outside the OS's and the thread library's wait functions: a waiting thread's 7
+            // callers were all inside them, and what it waited in couldn't be told)
+            static struct { uint64_t lo, hi; } skip[4];
+            static int nskip = -1;
+            if (nskip < 0) {
+                static const char *const names[] = {"ntdll.dll", "KERNELBASE.dll", "libwinpthread-1.dll", "KERNEL32.DLL"};
+                nskip = 0;
+                for (int k = 0; k < 4; k++) {
+                    MODULEINFO mi;
+                    HMODULE hm = GetModuleHandleA(names[k]);
+                    if (hm && GetModuleInformation(GetCurrentProcess(), hm, &mi, sizeof mi))
+                        skip[nskip].lo = (uint64_t)(uintptr_t)mi.lpBaseOfDll, skip[nskip++].hi = (uint64_t)(uintptr_t)mi.lpBaseOfDll + mi.SizeOfImage;
+                }
+            }
+            for (int i = 0, steps = 0; ok && i < 8 && steps < 48; steps++) {
+                bool skipped = false;
+                for (int k = 0; i > 0 && k < nskip; k++) skipped |= ctx.Rip >= skip[k].lo && ctx.Rip < skip[k].hi;
+                if (!skipped) rec[2 + i++] = ctx.Rip;
                 DWORD64 base;
                 PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &base, NULL);
                 if (!fn) {  // a leaf without unwind data: its return address is at the stack pointer

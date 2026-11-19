@@ -1,14 +1,27 @@
-# Super Odyssey PC Recomp
-
 <p align="center"><img src="docs/banner.svg" alt="Super Odyssey PC Recomp" width="100%"></p>
 
-<p align="center"><b>A native PC port of Super Mario Odyssey for Windows and Linux, made by static recompilation - from your own copy of the game.</b></p>
+<p align="center">
+  <a href="https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/releases/latest"><b>Download</b></a> ·
+  <a href="#install">Get started</a> ·
+  <a href="docs/STATUS.md">Status</a> ·
+  <a href="#known-issues">Known issues</a> ·
+  <a href="docs/ENGINEERING-NOTES.md">Engineering notes</a> ·
+  <a href="https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues">Issues</a>
+</p>
 
-> [!NOTE]
-> **This is an AI-made project.** The code of this port was written by AI: almost all of it by **Claude**
-> (Anthropic's AI model, through Claude Code), with some fixes and features from OpenAI's **Codex**. The maintainer
-> doesn't write the code; they direct the work, test every build on Windows and a Steam Deck, and run the releases.
-> See [Who made this](#who-made-this).
+**Super Odyssey PC Recomp** is a native PC port of *Super Mario Odyssey* (Nintendo Switch, versions 1.0.0 and 1.4.1)
+for Windows, Linux and the Steam Deck, made by static recompilation and built on your PC from your own copy of the
+game.
+
+<p align="center">
+  <a href="docs/media/cascade-4k.jpg"><img src="docs/media/cascade-4k.jpg" alt="Cascade Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/sand-4k.jpg"><img src="docs/media/sand-4k.jpg" alt="Sand Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/wooded-4k.jpg"><img src="docs/media/wooded-4k.jpg" alt="Wooded Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/metro-4k.jpg"><img src="docs/media/metro-4k.jpg" alt="Metro Kingdom at 4K" width="24%"></a>
+</p>
+<p align="center"><sub>Screenshots taken in Super Odyssey PC Recomp at 3840 x 2160 (click for full size). The game is © Nintendo; you need your own copy to run it.</sub></p>
+
+<p align="center"><img src="docs/media/progress/overall.svg" alt="Overall progress" width="420"></p>
 
 > [!IMPORTANT]
 > **You must bring your own game.** This project contains **no game files, no game code and no assets** -
@@ -16,42 +29,69 @@
 > Super Mario Odyssey**, already extracted. Instructions for getting game files are
 > not provided, and requests for game files will be closed.
 
+> [!NOTE]
+> **This is an AI-made project.** The code of this port was written by AI: almost all of it by **Claude**
+> (Anthropic's AI model, through Claude Code), with some fixes and features from OpenAI's **Codex**. The maintainer
+> doesn't write the code; they direct the work, test every build on Windows and a Steam Deck, and run the releases.
+> See [Who made this](#who-made-this).
+
 > [!WARNING]
 > **This is an early preview.** The whole game can be played, but there are known issues (see
-> [Known issues](#known-issues)) and things that still need fixing. Please report what you find.
+> [Known issues](#known-issues)) and things that still need fixing. If something breaks at a high frame rate, set
+> **Performance > Frame rate** to 60 for that moment, and please report what you find.
 
-## Current focus
+## Features
 
-1. **The same as on the Switch, at 60 FPS.** Every kingdom compared with the Switch version (recordings and
-   captures, side by side): rendering, effects, shadows, behaviour and timing. Any difference gets fixed, so that the
-   port plays and looks 1:1 with the original.
-2. **No stutter.** The shader preparation is being reworked to cover everything the game draws, to finish faster and
-   to take far less disk space, so a first visit to a kingdom or effect never hitches. Smooth, stable frame pacing
-   matters more here than higher numbers.
-3. **The open [issues](../../issues)**: crashes at start, slow performance on some AMD / Linux setups and handhelds,
-   controller fixes.
-4. Then **90 and 120 FPS**, and new features (frame generation, sharper HUD text, more graphics options, Steam Deck
-   controller layout).
+- **The whole game from your own copy**, versions 1.0.0 and 1.4.1 - no emulator runs while you play
+- **Frame rates from 60 to 240 FPS**, every frame really drawn, with **Match display** picking the smoothest rate for
+  your screen
+- **Resolutions up to 4K and beyond** (up to 4x the Switch's), and any screen shape: 16:9, 16:10, 21:9, 32:9, 4:3 or
+  Fill, with the HUD at the edges on ultrawide
+- **Upscaling** with NVIDIA DLSS / DLAA, AMD FSR 1 / 2 / 3.1 / 4 and Intel XeSS, the HUD drawn at full resolution over
+  the upscaled picture, plus **frame generation** (AMD FSR, NVIDIA DLSS beta) and NVIDIA Reflex
+- **Shaders prepared before you play**, and again by themselves after a driver update, so they are not compiled
+  while you play (a rare effect nobody has recorded yet can still hitch once)
+- **Sharper than the Switch when you want it**: FXAA or SMAA, 2x / 4x shadow maps, texture detail, 16x anisotropic
+  filtering, smooth colour gradients, a sharper HUD on large screens - and **the Switch's own look by default**
+- **Any controller**, with button icons that match it (Xbox, PlayStation, Switch), a Joy-Con pair, motion controls
+  and vibration; **keyboard and mouse** with a real mouse camera, and the mouse in the game's own menus
+- **A start screen and settings menu made for controller, mouse and keyboard**, where every option says what it does
+  and what is recommended, with button hints drawn for the device you are using - in English, Korean and Brazilian
+  Portuguese
+- **Steam Deck and PC handhelds**: 1280 x 800 at 60 FPS in Gaming Mode
+- **Built-in updates**, RomFS mods, 5.1 surround, a performance overlay, Discord activity (off by default)
+- **Crash reports you can read**: what happened, where, and a signature to match the same crash between players
 
-Releases will only go out once they've been tested on Windows and a Steam Deck with both game versions.
+<p align="center"><a href="docs/media/cap-120fps-4k-overlay.jpg"><img src="docs/media/cap-120fps-4k-overlay.jpg" alt="Cap Kingdom at 4K and 120 FPS with the performance overlay" width="80%"></a></p>
+<p align="center"><sub>Cap Kingdom at 3840 x 2160 and 120 FPS with the port's own performance overlay (0.4.4, upscaling and anti-aliasing off): the graphics card at 63%, the game using 3% of the CPU and 6.5 GB of RAM. One PC, an RTX 4090 with a Ryzen 9 9950X3D; other PCs and busier places will show other numbers.</sub></p>
+
+<p align="center">
+  <a href="docs/media/start-screen.jpg"><img src="docs/media/start-screen.jpg" alt="The start screen" width="49%"></a>
+  <a href="docs/media/settings-in-game.jpg"><img src="docs/media/settings-in-game.jpg" alt="The settings menu in game" width="49%"></a>
+</p>
+<p align="center"><sub>The start screen and the settings menu (0.4.1): Play first, categories in a sidebar, every option explained.</sub></p>
+
+## Status
+
+| Area | Share | Progress |
+|---|---|---|
+| Core game | 45% | ![Core game](docs/media/progress/area-core-game.svg) |
+| Platforms and input | 15% | ![Platforms and input](docs/media/progress/area-platforms-and-input.svg) |
+| Performance | 15% | ![Performance](docs/media/progress/area-performance.svg) |
+| Graphics options | 12% | ![Graphics options](docs/media/progress/area-graphics-options.svg) |
+| Player features | 13% | ![Player features](docs/media/progress/area-player-features.svg) |
+
+Every part, what it means, what holds it back and how the average is calculated: [Status](docs/STATUS.md).
+
+**Current focus:** no crashes, steady memory and no frame drops, then the open [issues](../../issues) - the plan is in
+[docs/stability-plan.md](docs/stability-plan.md). Releases only go out after the release build itself has been
+played on Windows and checked on Linux.
 
 ## What it is
 
-The game's ARM64 code is translated to C ahead of time and compiled into a regular Windows program - no emulator runs
-while you play. The parts of the Switch the game talks to (kernel, system services, the NVN graphics API, audio) are
-reimplemented on the PC, with Vulkan for graphics.
-
-- **Installer** that takes your game's extracted `exefs` and `romfs` folders (1.0.0, or 1.4.1 with the update applied)
-- **Every shader compiled ahead of play** (and again by itself after a GPU driver or game update), so effects don't
-  stutter the first time they appear - see [How the shader stutter was solved](#how-the-shader-stutter-was-solved)
-- **Frame rates from 60 up to 240 FPS**, every frame really drawn, with **Match display** picking the smoothest rate
-  for your screen
-- **Up to 4x internal resolution**, NVIDIA **DLSS / DLAA**, AMD **FSR 2 / 3.1 / 4**, Intel **XeSS**, FSR 1, SMAA - with
-  the **HUD drawn at full resolution** over the upscaled picture - and frame generation (AMD FSR, NVIDIA DLSS beta)
-  with NVIDIA Reflex
-- **Any screen shape**: 16:9, 16:10, 21:9, 32:9, 4:3 or Fill window, with the **HUD at the edges** on ultrawide
-- **Motion controls as on the Switch** (the game's 200 Hz sensor history), mouse camera, 5.1 surround
-- Keyboard and controller rebinding, RomFS mods, an in-game settings menu, and **built-in updates** from this page
+The game's ARM64 code is translated to C ahead of time and compiled into a regular program on your PC - no emulator
+runs while you play. The parts of the Switch the game talks to (kernel, system services, the NVN graphics API, audio)
+are reimplemented on the PC, with Vulkan for graphics.
 
 Windows 10 / 11 (x64). **Linux and Steam Deck: experimental** - an AppImage, see [docs/linux.md](docs/linux.md).
 
@@ -68,7 +108,8 @@ Windows 10 / 11 (x64). **Linux and Steam Deck: experimental** - an AppImage, see
    2. **Install the game to**: where the game data, saves and shaders go (about 12 GB).
 3. Press **Install**. It copies the game data, recompiles the game code for your PC (a few minutes) and compiles every
    shader (several minutes, once).
-4. Press **Play**. The game opens in fullscreen; later starts go straight to the game.
+4. Press **Play**. Every start then shows the start screen: **Play** (already selected: A, Enter or Start),
+   **Settings** and **Exit**. Untick *Show this screen at every start* to go straight to the game.
 
 <p align="center"><img src="docs/installer.png" alt="The installer" width="80%"></p>
 
@@ -87,16 +128,17 @@ You can also download the new zip from [Releases](../../releases) and extract it
 This is a preview. Known problems and things not done yet:
 
 - **Being worked on** (from the [issues](../../issues)):
-  - Crashes at start or in the first kingdom on some PCs (#19, #21).
-  - Very low FPS on some AMD graphics cards on Linux (#28, #32), and slowdown on the ROG Ally (#13).
-  - High memory use (#7).
-  - Upscaler jitter and bloom quality (#24); Mario's shadow can look distorted (#26).
-  - With a Switch controller, the map pointer doesn't select icons (#22). The game's own Joy-Con tips while
-    playing can't be turned off (#23): the setting only skips the controller screen at start.
-- **Version 1.4.1 at 90 or 120 FPS can crash while loading Wooded Kingdom.** Use 60 FPS there for now.
-- **Version 1.4.1** is newer in this port than 1.0.0 and less tested: native 90/120 FPS is tuned on 1.0.0, so 1.4.1
-  can show more jitter or small glitches with it on.
-- **Native 90 and 120 FPS** are experimental on both versions: some objects or effects can move unevenly or look doubled.
+  - The game freezes on Radeon RX 7800 XT under Linux (#21).
+  - The Steam Deck's own gyro isn't read yet (#68); a no-sound report on the Deck (#43).
+  - Sounds that click or crackle (#97): one cause was found and fixed in 0.4.5 (see
+    [What we measured and fixed](#what-we-measured-and-fixed)); reports from other PCs are still open.
+  - A tutorial video that stays black with FSR 3.1 on (#66): turn FSR 3.1 off, or use FSR 1, to see the videos.
+  - Memory on PCs with 16 GB of RAM (#75, #61): 0.4.3 uses much less on our test PC; we are waiting to hear how it
+    is on those PCs.
+- **Frame rates above 60** are less tested than 60, on both game versions: some objects or effects can move unevenly,
+  and the busiest places (New Donk City seen from high up, riding its power lines) can drop frames on any PC.
+  Painting transitions play at 60 FPS on purpose.
+- **Version 1.4.1** is newer in this port than 1.0.0 and less tested.
 - **A short stutter can still happen** the first time a rare effect is drawn whose pipeline state nobody has recorded
   yet. It's prepared then and kept for next time.
 - **Online features** of the game (anything that needs Nintendo's servers) don't work.
@@ -115,7 +157,9 @@ Open an [issue](../../issues) with:
 
 - what happened and where in the game (a screenshot helps),
 - your game version (1.0.0 or 1.4.1), Windows version, CPU and GPU,
-- the log, `SuperOdysseyRecomp.log`, from the install folder (it doesn't contain any game files).
+- the log, `SuperOdysseyRecomp.log`, from the install folder (it doesn't contain any game files),
+- after a crash, the **crash report**: the error box has a **Copy crash report** button. The report starts with a
+  summary (what happened, where, the stage, your settings) that usually tells us what to fix.
 
 For a graphics glitch, pressing **F9** where it happens saves the frame's details into the log, which helps a lot.
 
@@ -128,19 +172,21 @@ For a graphics glitch, pressing **F9** where it happens saves the frame's detail
 
 ## Settings
 
-Open the menu with **F1** or **Esc** (controller: Home / Guide button). Switch tabs with L / R (Q / E); the text on
-the right explains the selected setting.
+Open the menu with **F1** or **Esc** (controller: Home / Guide button, or Back + Start). The categories are in a
+sidebar on the left: move onto one to see it, press A / Enter / Right (or click) to go into it, B / Esc to come back,
+and L / R (Q / E) to switch from anywhere. The bar at the bottom shows what your buttons do, and the text on the right
+explains the selected option and says what is recommended.
 
-- **Display**: windowed, borderless or exclusive fullscreen, display resolution, aspect ratio (ultrawide *Fill window*)
-- **Graphics**: internal resolution, NVIDIA DLSS / DLAA (presets, sharpening), AMD FSR 1, SMAA, anisotropic
-  filtering, smooth gradients
-- **Performance**: 90 or 120 FPS (native) or 120 interpolated, shader preloading and warm-up, FPS counter and performance
-  overlay, compile shaders again at the next start
-- **Audio**: volume, reverb, movie audio, mute in background
-- **Controls**: language, motion controls, vibration, stick deadzone, mouse camera (sensitivity, invert), button
-  prompts (keyboard, Xbox, PlayStation, Switch), skip the start-up controller screen, key and button rebinding
-- **Mods**: switch RomFS mods on and off
-- **Updates**: this version, check / install updates, the project page
+- **Display**: windowed, borderless or exclusive fullscreen, display resolution, VSync, aspect ratio, console mode
+- **Graphics**: internal resolution, anti-aliasing, upscaling and frame generation, texture filtering and detail,
+  shadow quality, smooth gradients, sharper HUD and menus
+- **Performance**: early frame hand-off, multithreaded rendering, frame rate (60 to 240 FPS or Match display),
+  Discord activity, shader preparation, memory use
+- **Overlay**: the FPS counter, and the performance overlay with what it shows, where and how large
+- **Audio**: volume, stereo or 5.1, reverb, movie audio, mute in background
+- **Controls**: motion controls, vibration, stick deadzone and speed, mouse camera, mouse in menus, button prompts,
+  key and button rebinding
+- **Language**, **Mods** (RomFS mods on and off), **Updates**
 
 ## Controls
 
@@ -172,7 +218,7 @@ accelerometer: PlayStation and Switch Pro controllers. Menu > Controls > *Motion
 The program folder holds the program; the install folder (the same one unless you chose another) holds:
 
 - `extracted\` - your game data as the installer wrote it and the game code built from it (`odyssey_game.dll`)
-- `save\` - your saves, `cache\` - compiled shaders, `powermoon.ini` - settings, `SuperOdysseyRecomp.log` - the log
+- `save\` - your saves, `cache\` - compiled shaders, `settings.ini` - settings, `SuperOdysseyRecomp.log` - the log
 - `mods\` - optional RomFS mods, each in its own folder (`mods\<Mod name>\romfs\...`; the Atmosphere layout works too)
 
 Never share `extracted\` or anything built from it: it's Nintendo's game.
@@ -233,6 +279,10 @@ Bug reports are read and worked on the same way: the maintainer tests, and Claud
   original repository is no longer online.
 - **[LAS Recomp](https://github.com/peiikai/LASRecomp)** by Peiikai and its contributors - the static recompiler,
   runtime and renderer Power Moon Recomp is built on, and the frame interpolation (MIT license).
+- **[Odyssey Recomp](https://github.com/rwwo8/OdysseyRecomp)** by its contributors - another Power Moon based port of the
+  game (MIT license): its list of the shaders drawn in a run through all 197 stages (`known_programs.txt`, merged with
+  ours) and its approach of compiling only those, plus the effects, before the first start. Thanks to Eggtooth for the
+  side-by-side measurements that pointed to it ([#94](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/94)).
 - **[PrimeRecomp](https://github.com/gminustwo/primerecomp)** by its contributors - the GPU ASTC texture decoder
   (`runtime/nvn/vulkan/astc_gpu.c`) and its GPU scratch memory (MIT license).
 - **[MacNativeGames](https://github.com/ly05010419/MacNativeGames)** - the game package reading code `runtime/nxpkg.c`
@@ -265,64 +315,104 @@ Steam Deck** before it is merged; nothing from a contributor ships untested. Nev
 **Contributors**
 
 - **[galaxyhf](https://github.com/galaxyhf) (Caio Silva)** - Brazilian Portuguese: the localization support, the
-  Language tab and the fan translation's installer (#49, #56, #58).
+  Language tab and the fan translation's installer (#49, #56, #58); **Discord activity** and the fix for game
+  folders with accents in their path on Windows (#78); **the mouse in the game's own menus** - click, wheel and
+  pointer (#86).
 - **zzzarathustra-dev** - shaders precompiled before the first start and the first Steam Deck defaults (0.2.1).
 - **Codex** (OpenAI) - fixes and features across the runtime (see [Who made this](#who-made-this)).
-- Everyone who reported a bug with logs, screenshots and saves: most of the fixes below started there.
+- Everyone who reported a bug with logs, crash reports, screenshots and saves: most fixes started there - the
+  painting crash was found from two players' reports (#72, #85), the frame generation crash from one log (#77).
 
-## How the shader stutter was solved
+## What we measured and fixed
 
-A Switch game ships its shaders ready for one GPU. On a PC every shader has to be translated (Maxwell -> GLSL ->
-SPIR-V) and then compiled by your graphics driver - and the first time an effect appears, that compile is a stutter.
-What fixed it, measured on an RTX 4090 and a Steam Deck:
+Versions 0.4.3 to 0.4.5 came out of measuring the port on the maintainer's PC and a Steam Deck, and from players'
+logs. This is what was found, what was changed and how it was checked. **The numbers are from one PC** (Windows 11,
+RTX 4090, Ryzen 9 9950X3D, 96 GB of RAM) unless a line says Steam Deck; other PCs will show other numbers, and AMD
+and Intel graphics cards were not measured.
 
-1. **Compile everything ahead of play.** The launcher scans the game's own shader archives (about 32,800 programs),
-   translates every one and builds its pipeline pieces, saving them as `VK_KHR_pipeline_binary` data. It asks first,
-   shows progress and time left, and keeps what's done if you stop it.
-2. **Make sure the game finds what was compiled.** A piece is looked up by its content plus the driver's own key; if
-   the compile and the game build anything even slightly differently, every lookup misses and the work is wasted.
-   The log reports what was loaded, refused or missing, so coverage can be checked.
-3. **Compile again when the cache goes stale.** A GPU driver update makes the driver refuse saved pieces, and a new
-   version of the game may translate shaders differently. The cache now records the GPU, driver and version it was
-   made for and is rebuilt (after asking) when any of them changes - this was the stutter many players still saw.
-4. **Never freeze the picture for an effect.** If a piece isn't ready, that one draw waits a frame or two on another
-   thread; only real full-screen passes (lighting, composites) hold the frame.
-5. **Less work for the driver.** A post-pass inlines the translator's one-instruction helper calls and strips debug
-   data from the SPIR-V: about 45% less driver time per shader on a Steam Deck.
-6. **Use the whole CPU.** The compile runs on every core but one (137 s -> 110 s from nothing on a 32-thread CPU).
+### How it was measured
 
-Tested the strict way: game cache deleted, the driver's own cache emptied, full compile, then play - no shader built
-while playing, on Windows and on the Steam Deck. A first compile takes about 2 minutes on a fast PC and about 6 on a
-Deck.
+Nothing here was judged by feel alone. The tools are in the source, as `ODYSSEY_*` environment variables:
 
-## Steam Deck optimizations
+- **A ride recorded once, replayed exactly.** The maintainer played the part that went wrong (the power lines in New
+  Donk City; a walk past characters where the sound crackled) once with `ODYSSEY_INPUT_RECORD`. It stores what the
+  controller, keyboard and mouse give the game, keyed to the stage's gameplay ticks, so `ODYSSEY_INPUT_REPLAY` plays
+  the same route again at any frame rate, before and after a change (`runtime/hle/input.c`).
+- **A fixed route through six kingdoms** at 120 FPS, scripted, for memory and hitches.
+- **The slow-frame log and a sampling profiler** (`ODYSSEY_LOG_SLOW_FRAMES`, `ODYSSEY_VK_PROF`): every frame over a
+  limit with where its time went, and which functions the busy threads were in.
+- **The mixer's sound written to a file** (`ODYSSEY_AUDIO_WAV`), the sound before it reaches the sound device, and a
+  log of where each voice's signal jumps (`ODYSSEY_AUDIO_CLICKS`).
+- **Screenshots of the window** at a set frame, for anything that is about the picture.
+- Every release is built by GitHub, and that build itself is played on Windows and started on a Steam Deck before it
+  is published (`tools/release.sh`).
 
-What took the Deck to a steady 1280x800 at 60 FPS in Gaming Mode at 10 W:
+### Memory and shaders (0.4.3)
 
-- **Don't wait for the GPU when the game doesn't need to.** The game waited for its whole GPU frame every frame
-  (fences); it now continues once the render thread has its data, and waits only where the GPU writes game memory:
-  45 -> 58-60 FPS in busy views.
-- **Guarded GPU writes**: GPU results copied back into game memory protect their pages instead of forcing a wait; only
-  a thread that actually touches them waits. The first Cap Kingdom visit went from 46-49 FPS to ~60.
-- **A separate compute queue** for small dispatches that write game memory, so they never queue behind a frame.
-- **Map the game's memory straight into Vulkan** (`VK_EXT_map_memory_placed`): about 3 ms less per submission that
-  the AMD driver spent re-checking an imported pointer.
-- **Loading stutters**: file decompression runs outside the emulated CPU core it was blocking (12-26 ms hitches when
-  new things loaded), and a first CPU read of GPU data (the fog) no longer waits for the GPU.
-- **Frame pacing**: the game's 60 Hz timer is locked to when the screen really shows each frame (present wait), so
-  frames aren't shown twice or skipped.
-- **The game's own dynamic resolution** dropped to its floor on the Deck and stayed there; it can be turned off (off by
-  default on the Deck), and its GPU timing now counts busy time only.
-- **Power**: CPU and GPU share the Deck's power budget, so CPU time saved is GPU clock gained; at a low power limit a
-  manual GPU clock of 1000 MHz keeps 60 FPS (the launcher shows this tip).
-- **Deck defaults**: 16:10 picture, Handheld console mode, FSR 2 available for Docked mode.
+- **RAM:** on the six-kingdom route the game went from 14.7 GB at the start and 15.6 GB at the end to 5.8 GB and
+  6.6 GB, at the same frame rate. The largest part was on NVIDIA: its driver held far more memory for shader
+  libraries created from saved pipeline binaries than for the same libraries from a normal pipeline cache.
+- **First start:** only the shaders the game draws, the effects and the compute shaders are prepared up front (98 s
+  before, 44 s after; on a Steam Deck about 6 minutes before, a little over 3 after).
+- **Shader cache on disk:** one compressed file instead of tens of thousands (2.2 GB before, under 0.7 GB after).
+- The shader list and the idea of compiling only what is drawn come from
+  [Odyssey Recomp](https://github.com/rwwo8/OdysseyRecomp); Eggtooth's side-by-side measurements in #94 pointed to it.
 
-## Performance techniques for other projects
+### Stutter in heavy views (0.4.4)
 
-Everything above - and more: frame pacing, native high frame rates, drawing the HUD after upscaling, keeping game
-speed real time below 60 FPS, mip chains without copies, any screen shape - is written up with how it was measured in
-**[docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)**, for anyone building a recompiled or emulated port. The code it
-points to is MIT licensed: take what helps.
+- **New Donk City's power lines:** two costs in the port's own code grew with every command list the game records,
+  and this view records many. On the recorded ride at 60 FPS, frames longer than 17 ms went from 73 to between 7
+  and 18 per ride. At 120 FPS that ride still drops frames, and one long frame in 2 of 7 replays is unexplained.
+- **Tried and not kept:** dropping to 60 FPS in such views (it felt worse than the stutter), and reusing shadow maps
+  between the frames of one game tick (see Shadows).
+
+### Shadows
+
+- **Stair-stepped shadow edges (#66):** compared on NVIDIA and AMD graphics, these are the game's own shadow map,
+  which is low resolution on the Switch too; sharpening (FSR sharpness, CAS) makes the steps stand out.
+  **Graphics > Shadow quality** at 2x or 4x softens them. Nothing in the port's drawing of shadows was changed.
+- **Shadow maps reused above 60 FPS:** above 60 the game draws its shadow maps again for every extra frame. Keeping
+  them from the tick's first frame saves that work, but a shadow could lag a moving object by a frame. It is in the
+  source, off (`ODYSSEY_SHADOW_REUSE=1`), because the maintainer did not want any risk to the picture.
+
+### Picture (0.4.4)
+
+- **Ultrawide (#93):** "21:9" is 2.37:1 in the port and a 3840x1600 screen is 2.40:1, which left thin bars and a
+  lower resolution. A chosen shape within 3% of the window's now fills the window.
+- **16:10 (Steam Deck):** the dark bands behind button hints and tutorial text stopped short of the screen's edge;
+  they now reach it. Checked at 1280x800 on the PC.
+- **Sharper HUD and menus:** the game's HUD artwork is made for 720 lines and looked soft enlarged. On screens of 900
+  lines and more it is sharpened, more on bigger screens, without adding outlines. It makes edges crisper, not more
+  detailed, and can be turned off in **Graphics**.
+
+### Sound (0.4.5)
+
+- **Crackling near characters (#97):** the maintainer recorded a walk through New Donk City, the Odyssey and the Cap
+  Kingdom with the sound written to a file. The clicks were in the mixed sound itself, not gaps at the sound device.
+  Every new sound played its first 5 ms at the volume left behind by the last sound in the same slot, so a quiet,
+  distant footstep could start at a loud nearby sound's volume. In about 100 seconds of the replayed walk that
+  happened 425 times, with 138 isolated ticks in the output; with a new sound starting at its own volume, as on the
+  console, there were none, and the maintainer confirmed it by ear in stereo and 5.1.
+- Not listened to on a Steam Deck. Crackling from a busy PC (the sound device running dry) is a different cause.
+
+### Still open
+
+- Frame drops above 60 FPS in the busiest views, and how much CPU the port uses on a Steam Deck.
+- The time from starting the program to the game's first frame (about 7 seconds on the test PC, not broken down yet).
+- Everything in [Known issues](#known-issues).
+
+## For other recomp projects
+
+What went wrong here and what fixed it is written up so others don't have to find it twice:
+
+- **[Engineering notes](docs/ENGINEERING-NOTES.md)**: how we test (scripted runs, old and new behaviour back to
+  back, release builds tested before they're published), the crashes we hit above 60 FPS, with frame generation and
+  on quit, the memory growth, the sound crackling, the ways our own tests misled us - and how the shader stutter was
+  solved and the Steam Deck reached 60 FPS.
+- **[Performance techniques](docs/OPTIMIZATIONS.md)**: frame pacing, not waiting for the GPU, shader preparation,
+  native high frame rates, the HUD after upscaling, any screen shape - each with how it was measured.
+
+The code they point to is MIT licensed: take what helps.
 
 ## Legal
 

@@ -396,7 +396,7 @@ void plat_fatal_notice(void) {
             if (strstr(line, "failed: -2 (") || strstr(line, "failed: -1 (")) {
                 size_t l = strlen(text);
                 snprintf(text + l, sizeof text - l, "\n\nThe graphics card ran out of memory. Lower the internal resolution "
-                         "(menu > Graphics), or delete powermoon.ini in the game's folder to go back to the default settings.");
+                         "(menu > Graphics), or delete settings.ini in the game's folder to go back to the default settings.");
             } else if (strstr(line, "Vulkan") || strstr(line, "VK_") || strstr(line, "vk")) {
                 size_t l = strlen(text);
                 snprintf(text + l, sizeof text - l, "\n\nSuper Odyssey PC Recomp needs a graphics driver with Vulkan 1.3: "

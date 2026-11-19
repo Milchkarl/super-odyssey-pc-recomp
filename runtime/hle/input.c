@@ -65,17 +65,19 @@ static void latch_presses(uint64_t buttons) {
 }
 
 static uint64_t menu_mouse_bits(void);  // (the mouse in the game's menus: below)
+static bool menu_mouse_owns(int sc);    // a mouse button held as a menu button (its own binding then sleeps)
+static int bound_key(int sc) { return held_key(sc) && !menu_mouse_owns(sc); }
 
 // Through the bindings (runtime/hle/bindings.c: g_bind_key), read on every key event, so a rebind applies at once.
 static void recompute_keyboard(void) {
     uint64_t b = menu_mouse_bits();
     for (int i = 0; i < BIND_PAD_COUNT; i++)
-        if (held_key(g_bind_key[i])) b |= 1ull << i;
+        if (bound_key(g_bind_key[i])) b |= 1ull << i;
     latch_presses(b & ~atomic_exchange(&key_buttons, b));
-    key_lx = (held_key(g_bind_key[BIND_LS_RIGHT]) - held_key(g_bind_key[BIND_LS_LEFT])) * 32767;
-    key_ly = (held_key(g_bind_key[BIND_LS_UP]) - held_key(g_bind_key[BIND_LS_DOWN])) * 32767;
-    key_rx = (held_key(g_bind_key[BIND_RS_RIGHT]) - held_key(g_bind_key[BIND_RS_LEFT])) * 32767;
-    key_ry = (held_key(g_bind_key[BIND_RS_UP]) - held_key(g_bind_key[BIND_RS_DOWN])) * 32767;
+    key_lx = (bound_key(g_bind_key[BIND_LS_RIGHT]) - bound_key(g_bind_key[BIND_LS_LEFT])) * 32767;
+    key_ly = (bound_key(g_bind_key[BIND_LS_UP]) - bound_key(g_bind_key[BIND_LS_DOWN])) * 32767;
+    key_rx = (bound_key(g_bind_key[BIND_RS_RIGHT]) - bound_key(g_bind_key[BIND_RS_LEFT])) * 32767;
+    key_ry = (bound_key(g_bind_key[BIND_RS_UP]) - bound_key(g_bind_key[BIND_RS_DOWN])) * 32767;
 }
 
 // The Controls tab's stick deadzone (g_settings.stick_deadzone, percent): inside that circle a stick is at rest, the
@@ -112,7 +114,7 @@ static void recompute_pad(void) {
     pad_rx = x, pad_ry = y;
 }
 
-// Mouse camera (Controls tab "Mouse camera", `mouse_camera` in powermoon.ini): while the game has the window and no
+// Mouse camera (Controls tab "Mouse camera", `mouse_camera` in settings.ini): while the game has the window and no
 // menu is up, the pointer is held in the window (SDL relative mode, input_mouse_window) and its movement turns the
 // camera: the speed of the movement, sampled every ~12 ms (the game reads it several times a frame), is a stick's
 // tilt. MOUSE_FULL counts a second make a full tilt at 100% sensitivity; any movement tilts at least MOUSE_MIN, past
@@ -135,8 +137,12 @@ static void mouse_forget(void) { atomic_store(&mouse_acc_x, 0), atomic_store(&mo
 
 // The mouse in the game's own menus (#64; Controls > "Mouse in menus", `mouse_menus` in powermoon.ini): while the
 // game's camera isn't reading its stick - the title and file select, the pause menu, shops, dialogue, but not while
-// Mario is being played - the mouse buttons the player hasn't bound act as the menu's buttons: left click A (confirm),
-// right click and the Back button B (back), and each wheel notch one D-pad step up or down. Whether a press is a menu
+// Mario is being played - the mouse buttons act as the menu's buttons: left click A (confirm), right click and the Back
+// button B (back), and each wheel notch the wheel hasn't been bound to one D-pad step up or down. The buttons do so
+// even when they are bound for play (#90: Mouse Left bound to Y left the menus without a click); while one is held as
+// a menu button its binding gives nothing, so the menu doesn't also see Y. On the map (A does nothing there) a bound
+// left click keeps its binding: Y opens the map's lists; right click stays B there (it closes the lists and the map).
+// Whether a press is a menu
 // press is decided when it starts, so a click begun in a menu ends as it began; a click that focuses the window is
 // not a press. ODYSSEY_LOG_MOUSE=1 logs the switches between menu and play.
 #define MENU_MOUSE_CAMERA_NS 250000000ull  // the camera this long silent: not playing (it reads its stick every update)
@@ -199,7 +205,9 @@ static uint64_t menu_mouse_bits(void) {
         if (!held_key(k_menu_mouse[i].code)) *l = 0;
         else if (!*l) {
             bool focus_click = now - atomic_load(&window_focus_ns) < 300000000ull;
-            *l = !focus_click && !mouse_code_bound(k_menu_mouse[i].code) && in_game_menu() ? (uint8_t)(k_menu_mouse[i].bit + 1) : 0xff;
+            extern bool odyssey_map_open(void);  // (runtime/hle/odyssey_pointer.c: on the map a binding stays)
+            bool keep = k_menu_mouse[i].code == BIND_MOUSE_LEFT && mouse_code_bound(BIND_MOUSE_LEFT) && odyssey_map_open();
+            *l = !focus_click && !keep && in_game_menu() ? (uint8_t)(k_menu_mouse[i].bit + 1) : 0xff;
         }
         if (*l && *l != 0xff) b |= 1ull << (*l - 1);
     }
@@ -210,6 +218,11 @@ static uint64_t menu_mouse_bits(void) {
         test_wheel[d] = t;
     }
     return b | atomic_load(&menu_wheel_bit);
+}
+static bool menu_mouse_owns(int sc) {
+    for (int i = 0; i < 3; i++)
+        if (k_menu_mouse[i].code == sc) return menu_mouse_latch[i] && menu_mouse_latch[i] != 0xff;
+    return false;
 }
 static void recompute_keyboard(void);
 // Every frame: the wheel's queued steps, one at a time (each a press the game sees, however fast the wheel turned)
@@ -476,7 +489,7 @@ int input_pad_family(void) {
 // Odyssey reads the controller's motion for its motion moves (a shake throws the cap at a homing target, spins,
 // tilting): nn::hid GetSixAxisSensorStates. It comes from the active controller's gyro and accelerometer (SDL),
 // turned into the Switch's axes and units (as Switch emulators do: acceleration in G, rotation in turns a second,
-// the angle and orientation integrated from it). Controls tab "Motion controls" (`motion` in powermoon.ini).
+// the angle and orientation integrated from it). Controls tab "Motion controls" (`motion` in settings.ini).
 static pthread_mutex_t motion_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     bool on;              // the active pad has a gyro or an accelerometer
@@ -520,7 +533,7 @@ static void motion_push(uint64_t now) {
     // The shake button / key (Controls: Shake button, Shake key - #39, #27): while held, the controller is shaken hard
     // up and down (+-3.5 G, the direction flipping every 15 ms) - the game's motion cap throw, spin and shake moves -
     // with or without a gyro, and with Motion controls off.
-    bool held = atomic_load(&shake_pad_down) || held_key(g_settings.motion_shake_key);
+    bool held = atomic_load(&shake_pad_down) || bound_key(g_settings.motion_shake_key);
     if (held && !menu_input_captured()) {
         bool flip = (mot.shake_ticks++ / 3) & 1;
         f[0] = 0, f[1] = flip ? 3.5f : -3.5f, f[2] = -1;
@@ -541,7 +554,7 @@ void input_motion_settle(void) {
 }
 
 // Calibrate gyro (Controls tab, #53): the controller lies still for 2 s; the offset its gyro reports at rest is learned
-// (as at every settle, motion_bias_sample) from scratch, then kept in powermoon.ini (motion_gyro_bias).
+// (as at every settle, motion_bias_sample) from scratch, then kept in settings.ini (motion_gyro_bias).
 // input_motion_calibration: 0 none, 1 running, 2 done, -1 this controller has no gyro.
 void input_motion_calibrate(void) {
     pthread_mutex_lock(&motion_lock);
@@ -905,7 +918,7 @@ static _Atomic int32_t script_lx, script_ly, script_rx, script_ry;
 
 // Tests of the bindings, through them like a real player:
 // ODYSSEY_HOST_INPUT="frame:key:<SDL key name>:frames,frame:pad:<button>:frames,..." holds a host key / controller
-//   button (names as in powermoon.ini's bind_* lines: "Z", "Keypad 0", "south", "ltrigger"...);
+//   button (names as in settings.ini's bind_* lines: "Z", "Keypad 0", "south", "ltrigger"...);
 //   "frame:lstick:<x>/<y>:frames" holds the controller's left stick there (raw SDL units, y up: a drifting stick);
 //   "frame:mouse:<dx>/<dy>:frames" moves the mouse by that many counts each frame (screen y down: the mouse camera).
 // "frame:type:<text>" types <text> as real key events (down, text, up per character), through the overlay menu / name
@@ -1178,6 +1191,68 @@ void input_native_tick_end(void) { tick_input_active = false; input_cappy_tick_e
 
 static int32_t clamp_axis(int32_t v) { return v > 32767 ? 32767 : v < -32767 ? -32767 : v; }
 
+// A ride recorded once and replayed by scripts (docs/perf-plan-heavy-views.md): ODYSSEY_INPUT_RECORD=<file> writes
+// what the game is given at each poll of player 1's pad - buttons and both sticks as the game gets them (keyboard,
+// mouse camera and controller already combined) - keyed to the stage's gameplay tick (odyssey_stage_ticks) and the
+// poll's number within it; ODYSSEY_INPUT_REPLAY=<file> gives the game exactly that instead, from the first stage tick
+// on (before it - the title screen - the usual input applies), and ends the game 2 s after the recording's last tick.
+// Both log Mario's position once a second ("[ride] tick N pos x y z"): a replay that follows the ride shows the same
+// positions. Not recorded: motion, player 2.
+typedef struct { uint32_t tick, poll; uint64_t buttons; int32_t ax[4]; } RideRec;
+static void ride_io(uint64_t *b, int32_t ax[4]) {
+    static int mode = -1;  // 0 none, 1 record, 2 replay
+    static FILE *out;
+    static RideRec *recs;
+    static size_t nrec, cur;
+    static uint64_t last_tick, poll, end_tick;
+    extern uint64_t odyssey_stage_ticks(void);
+    extern bool odyssey_player_position(float p[3]);
+    if (mode < 0) {
+        const char *r = getenv("ODYSSEY_INPUT_RECORD"), *p = getenv("ODYSSEY_INPUT_REPLAY");
+        mode = 0;
+        if (p && *p) {
+            FILE *f = fopen(p, "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                nrec = sz > 0 ? (size_t)sz / sizeof *recs : 0;
+                recs = malloc(nrec * sizeof *recs + 1);
+                if (recs && fread(recs, sizeof *recs, nrec, f) == nrec && nrec) mode = 2, end_tick = recs[nrec - 1].tick;
+                fclose(f);
+            }
+            LOG("[ride] replay %s: %s (%zu polls, %llu ticks)\n", p, mode == 2 ? "loaded" : "could not be read", nrec, (unsigned long long)end_tick);
+        } else if (r && *r) {
+            out = fopen(r, "wb");
+            if (out) mode = 1;
+            LOG("[ride] recording to %s%s\n", r, out ? "" : ": could not be opened");
+        }
+    }
+    if (!mode) return;
+    uint64_t tick = odyssey_stage_ticks();
+    if (!tick) return;
+    if (tick != last_tick) {
+        last_tick = tick, poll = 0;
+        float pos[3];
+        if (tick % 60 == 0 && odyssey_player_position(pos)) LOG("[ride] tick %llu pos %.0f %.0f %.0f\n", (unsigned long long)tick, pos[0], pos[1], pos[2]);
+        if (mode == 1 && tick % 30 == 0) fflush(out);
+        if (mode == 2 && tick == end_tick + 1) LOG("[ride] the recording ended at tick %llu\n", (unsigned long long)end_tick);
+        if (mode == 2 && tick > end_tick + 120) { extern void vk_exit_now(void); LOG("[ride] replay done\n"); vk_exit_now(); }
+    } else poll++;
+    if (mode == 1) {
+        RideRec rec = {(uint32_t)tick, (uint32_t)poll, *b, {ax[0], ax[1], ax[2], ax[3]}};
+        fwrite(&rec, sizeof rec, 1, out);
+        return;
+    }
+    while (cur < nrec && recs[cur].tick < tick) cur++;
+    *b = 0, ax[0] = ax[1] = ax[2] = ax[3] = 0;
+    if (cur >= nrec || recs[cur].tick != tick) return;  // (a tick without polls in the recording, or past its end)
+    size_t i = cur;
+    while (i + 1 < nrec && recs[i + 1].tick == tick && recs[i].poll < poll) i++;
+    *b = recs[i].buttons;
+    memcpy(ax, recs[i].ax, sizeof recs[i].ax);
+}
+
 // NpadFullKeyState / NpadHandheldState / NpadJoy*State share this layout (0x28 bytes):
 // {int64 sampling, u64 buttons, AnalogStick L {x,y}, AnalogStick R {x,y}, u32 attributes}
 static void fill_state(Cpu *c) {
@@ -1224,6 +1299,10 @@ static void fill_state(Cpu *c) {
     if (ry > 16000) b |= 1ull << 21;
     if (rx > 16000) b |= 1ull << 22;
     if (ry < -16000) b |= 1ull << 23;
+    {   int32_t ax[4] = {lx, ly, rx, ry};
+        ride_io(&b, ax);
+        lx = ax[0], ly = ax[1], rx = ax[2], ry = ax[3];
+    }
     *(uint64_t *)(s + 8) = b;
     static uint64_t last_b;
     if (b != last_b && (getenv("ODYSSEY_INPUT") || getenv("ODYSSEY_HOST_INPUT")))
@@ -1308,7 +1387,7 @@ HLE_FUNC("_ZN2nn3hid27BindNpadStyleSetUpdateEventERKjPNS_2os15SystemEventTypeENS
 // a low and a high band's amplitude for each device (left / right Joy-Con, or the two sides of a Pro Controller) -
 // through the hid service (services/hid_set.c: SendVibrationValue(s)) to here: onto the gamepad's two motors, the
 // stronger side per band (low band: the low-frequency motor). Sent again while it lasts, so a value runs 250 ms at most:
-// a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in powermoon.ini).
+// a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in settings.ini).
 void input_vibration(uint32_t handle, float amp_low, float amp_high) {
     static float lo[2][2], hi[2][2];
     static uint16_t last_l[2], last_h[2];

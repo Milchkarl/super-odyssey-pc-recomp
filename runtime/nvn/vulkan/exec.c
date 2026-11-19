@@ -1121,11 +1121,23 @@ typedef struct { uint32_t op, size; VkCommandBuffer cb; } DqHdr;  // (size: the 
 #define DQ_RING (16u << 20)
 static uint8_t *dq_ring;
 static _Atomic uint64_t dq_w, dq_r;  // bytes written / consumed (positions mod DQ_RING)
+static uint64_t dq_wl, dq_pub;  // (the queueing thread, under the render lock) bytes added / published as dq_w
+static int dq_batch = -1;       // (ODYSSEY_DQ_BATCH=0: every packet published at once, as before)
 static bool dq_on;                   // the thread runs (decided once)
 static pthread_mutex_t dq_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t dq_cond = PTHREAD_COND_INITIALIZER;
 static _Atomic int dq_sleeping;
+// (the queueing thread) what it added becomes visible to the recording thread - a sequentially consistent store: see
+// dq_main's sleep
+static void dq_publish(void) {
+    if (dq_batch < 0) { const char *e = getenv("ODYSSEY_DQ_BATCH"); dq_batch = !e || !*e || atoi(e) != 0; }
+    if (dq_wl == dq_pub) return;
+    dq_pub = dq_wl;
+    atomic_store(&dq_w, dq_wl);
+    if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
+}
 static VkDescriptorSet dq_alloc(Sub *s, VkDescriptorSetLayout layout);
+static uint64_t hash_words(uint64_t h, const void *p, size_t n);
 
 typedef struct { uint32_t binding, type; union { VkDescriptorImageInfo ii; VkDescriptorBufferInfo bi; }; } DqWrite;
 
@@ -1170,9 +1182,37 @@ static void dq_run(DqHdr *h) {
     case DQ_SETW: {  // allocate and write a descriptor set: the draw's set `slot`
         struct { Sub *s; VkDescriptorSetLayout layout; uint32_t slot, n; } *a = (void *)p;
         DqWrite *dw = (DqWrite *)(p + sizeof *a);
+        uint32_t n = a->n < MAX_BIND ? a->n : MAX_BIND;
+        // A set with exactly this content written earlier in the same submission (its pools are reset only when the
+        // submission is recycled: Sub.seq changes) is bound again instead of allocated and written: an object drawn in
+        // several passes (depth, shadow, colour) binds the same buffers and textures. ODYSSEY_SET_CACHE=0: off.
+        static int cache_on = -1;
+        if (cache_on < 0) { const char *e = getenv("ODYSSEY_SET_CACHE"); cache_on = !e || !*e || atoi(e) != 0; }
+        static struct { uint64_t h, seq; Sub *s; VkDescriptorSet ds; } setc[8192];
+        static uint64_t hits, total;
+        uint64_t h = 0;
+        uint32_t ci = 0;
+        if (cache_on) {
+            uint64_t k[4] = {(uint64_t)(uintptr_t)a->layout, n, 0, 0};
+            h = hash_words(0x5e75e75e75e75e75ull, k, 16);
+            for (uint32_t i = 0; i < n; i++) {
+                bool img = dw[i].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || dw[i].type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                k[0] = (uint64_t)dw[i].binding << 32 | dw[i].type;
+                if (img) k[1] = (uint64_t)(uintptr_t)dw[i].ii.sampler, k[2] = (uint64_t)(uintptr_t)dw[i].ii.imageView, k[3] = dw[i].ii.imageLayout;
+                else k[1] = (uint64_t)(uintptr_t)dw[i].bi.buffer, k[2] = dw[i].bi.offset, k[3] = dw[i].bi.range;
+                h = hash_words(h, k, sizeof k);
+            }
+            h |= 1;
+            ci = (uint32_t)(h ^ (h >> 32)) & 8191;
+            total++;
+            if (setc[ci].h == h && setc[ci].s == a->s && setc[ci].seq == a->s->seq && setc[ci].ds) {
+                slot_set[a->slot & 1] = setc[ci].ds;
+                if (++hits % 200000 == 0) LOG("[vk] descriptor sets reused: %.1f%% of %llu\n", 100.0 * hits / total, (unsigned long long)total);
+                break;
+            }
+        }
         VkDescriptorSet ds = dq_alloc(a->s, a->layout);
         VkWriteDescriptorSet w[MAX_BIND];
-        uint32_t n = a->n < MAX_BIND ? a->n : MAX_BIND;
         for (uint32_t i = 0; i < n; i++) {
             w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds,
                                           .dstBinding = dw[i].binding, .descriptorCount = 1, .descriptorType = dw[i].type};
@@ -1182,6 +1222,7 @@ static void dq_run(DqHdr *h) {
         }
         if (n) (vkUpdateDescriptorSets)(g_vk.dev, n, w, 0, NULL);
         slot_set[a->slot & 1] = ds;
+        if (cache_on) setc[ci].h = h, setc[ci].s = a->s, setc[ci].seq = a->s->seq, setc[ci].ds = ds;
         break;
     }
     case DQ_BINDSETS: {
@@ -1269,6 +1310,8 @@ static void dq_sync(void) {
             plat_print_backtrace();
         }
     }
+    // (the queueing thread: what it added but hasn't published yet, first)
+    if (atomic_load_explicit(&dq_producer, memory_order_relaxed) == (uint64_t)(uintptr_t)pthread_self()) dq_publish();
     uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
     int spin = 0;
     uint64_t t0 = 0;
@@ -1294,30 +1337,38 @@ static void dq_sync(void) {
     }
 }
 
-// (render thread) room for a packet of `size` payload bytes; dq_push publishes it
+// (render thread) room for a packet of `size` payload bytes; dq_push adds it
 static void *dq_begin(uint32_t op, VkCommandBuffer cb, uint32_t size) {
     atomic_store_explicit(&dq_producer, (uint64_t)(uintptr_t)pthread_self(), memory_order_relaxed);
     uint32_t total = (uint32_t)((sizeof(DqHdr) + size + 7) & ~7u);
-    uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
+    uint64_t w = dq_wl;
     uint32_t at = (uint32_t)(w % DQ_RING);
     if (at + total > DQ_RING) {  // (no wrap inside a packet: the rest of the ring is skipped)
         uint32_t rest = DQ_RING - at;
+        if (w + rest + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) dq_publish();  // (before waiting)
         while (w + rest + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) SDL_CPUPauseInstruction();
         DqHdr *k = (DqHdr *)(dq_ring + at);
         k->op = DQ_SKIP, k->size = rest;
         w += rest, at = 0;
-        atomic_store_explicit(&dq_w, w, memory_order_release);
+        dq_wl = w;
     }
+    if (w + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) dq_publish();  // (before waiting)
     while (w + total - atomic_load_explicit(&dq_r, memory_order_acquire) > DQ_RING) SDL_CPUPauseInstruction();
     DqHdr *h = (DqHdr *)(dq_ring + at);
     h->op = op, h->size = total, h->cb = cb;
     return h + 1;
 }
+// The packet is added to the queue; the recording thread sees it once published: every DQ_PUBLISH bytes, at a sync and
+// at the end of each frame's lists (backend_execute). Publishing each packet - a sequentially consistent store, ~10 a
+// draw - cost 7.8% of the render thread at ~2,300 draws a frame (Metro, 120 FPS): each store also took the cache line
+// back from the recording thread polling it.
+#define DQ_PUBLISH 16384u
+static uint32_t dq_publish_bytes;  // (ODYSSEY_DQ_PUBLISH=<bytes>: tests)
 static void dq_push(void) {
-    uint64_t w = atomic_load_explicit(&dq_w, memory_order_relaxed);
-    DqHdr *h = (DqHdr *)(dq_ring + w % DQ_RING);
-    atomic_store(&dq_w, w + h->size);  // (sequentially consistent: see dq_main's sleep)
-    if (atomic_load(&dq_sleeping)) { pthread_mutex_lock(&dq_lock); pthread_cond_signal(&dq_cond); pthread_mutex_unlock(&dq_lock); }
+    DqHdr *h = (DqHdr *)(dq_ring + dq_wl % DQ_RING);
+    dq_wl += h->size;
+    if (!dq_publish_bytes) { const char *e = getenv("ODYSSEY_DQ_PUBLISH"); dq_publish_bytes = e && atoi(e) > 0 ? (uint32_t)atoi(e) : DQ_PUBLISH; }
+    if (dq_wl - dq_pub >= dq_publish_bytes || !dq_batch) dq_publish();
 }
 
 // The draw path's calls: queued while dq_mode, else made here (the macros sync first)
@@ -2935,8 +2986,10 @@ static VkPipeline clear_pipeline(int index, int kind, uint32_t mask, bool depth,
     return p;
 }
 
+static bool shadow_pass_extra(bool is_clear);
 static void clear(int index, int kind, const void *color, uint32_t mask, bool depth, float dval, bool stencil, uint32_t sval,
                   uint32_t smask) {
+    if (shadow_pass_extra(true)) return;
     if ((depth || stencil) && in_pass && pass_depth_sampled) { vk_end_pass(); st.rt_dirty = true; }  // (direct depth reads)
     begin_pass();
     if (depth || stencil) pass_depth_written = true;
@@ -3723,14 +3776,19 @@ static void remember_frame_hold(Prog *p) {
 // shader of an effect resource - ~25,000 at boot, a few hundred ever drawn) only when drawn before.
 // A model's material set up as a stage loads that was drawn before (in any run, any scene) is built whole right away
 // too: a new player's first frame of the Sand Kingdom (2026-11-02, cold caches) stood 2.4 s for the 450 libraries of
-// such programs (all drawn then), the loading screen before it 10 s long. ODYSSEY_PREWARM_KNOWN=0: as before.
+// such programs (all drawn then), the loading screen before it 10 s long. Off by default since 2026-11-17: with the
+// pipeline binaries and the warm-up that came after, only warm programs (drawn in a scene's first frames) are built whole;
+// the others get their libraries at their first draw. Each built whole holds ~4 MB of NVIDIA driver memory and the boot
+// alone set up ~1,450 of them: 16 GB PC settings, Cap -> Sand -> Metro -> Wooded, 2 runs each with an empty driver
+// cache: in RAM 11.7 -> 10.3 GB at start, 13.6-14.2 -> 11.7-12.3 GB after three kingdoms; worst frames and frames over
+// 50 ms the same (437 / 439 ms vs 428 / 496 ms once, an empty-cache effect in both). ODYSSEY_PREWARM_KNOWN=1: built whole.
 // ODYSSEY_PREWARM=0: programs build when first drawn; =2: bulk ones too.
 static _Atomic uint64_t prog_setups;  // programs the game set up so far (backend_execute: when to prefetch)
 void renderer_program_hint(NvnProgram *np, bool bulk) {
     atomic_fetch_add(&prog_setups, 1);
     static int on = -1, known_whole = -1;
     if (on < 0) { const char *e = getenv("ODYSSEY_PREWARM"); on = e ? atoi(e) : 1; }
-    if (known_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_KNOWN"); known_whole = e ? atoi(e) != 0 : 1; }
+    if (known_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_KNOWN"); known_whole = e ? atoi(e) != 0 : 0; }
     if (!on || !g_vk.dev || (np->stage_mask & 3) != 3) return;
     // Low memory (settings: Memory use): nothing set up ahead - each program is translated and built at its first draw
     // (from the driver's cache when it has it: a few ms; 6.5 GB in RAM instead of 9.4, Cascade, NVIDIA)
@@ -3740,6 +3798,11 @@ void renderer_program_hint(NvnProgram *np, bool bulk) {
                                           np->stages[1].code_addr, np->stages[1].const_offset ? np->stages[1].const_offset : 0x10000),
                            &warm);
     if (bulk && !known && on < 2) return;
+    // ODYSSEY_PREWARM_BULK=0 (tests): no bulk set-ups at all, also those drawn before - the boot hands over every
+    // kingdom's programs at once; a stage load still sets up its own
+    static int bulk_on = -1;
+    if (bulk_on < 0) { const char *e = getenv("ODYSSEY_PREWARM_BULK"); bulk_on = e ? atoi(e) != 0 : 1; }
+    if (bulk && !bulk_on) return;
     // ODYSSEY_PREWARM=3: only programs drawn before (in any run: drawn_tab). A stage load hands over thousands of
     // programs (every material of every model), most never drawn; a Steam Deck sets them up at ~70 a second on its 4
     // cores - about a core busy for minutes after each kingdom change. Deck, 3 tours each (2026-11-16): Metro 52.3 ->
@@ -3749,7 +3812,9 @@ void renderer_program_hint(NvnProgram *np, bool bulk) {
     if ((on == 3 || (on == 1 && g_settings.shader_known_only && !getenv("ODYSSEY_PREWARM"))) && !known) return;
     ShaderKey vkey, fkey;
     base_keys(&vkey, &fkey);
-    program_for(np, &vkey, &fkey, warm || (known && !bulk && known_whole) ? PF_AHEAD_WARM : PF_AHEAD);
+    static int warm_whole = -1;  // (ODYSSEY_PREWARM_WARM=0, tests: warm programs too get their libraries at their first draw)
+    if (warm_whole < 0) { const char *e = getenv("ODYSSEY_PREWARM_WARM"); warm_whole = e ? atoi(e) != 0 : 1; }
+    program_for(np, &vkey, &fkey, (warm && warm_whole) || (known && !bulk && known_whole) ? PF_AHEAD_WARM : PF_AHEAD);
 }
 
 static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
@@ -4795,7 +4860,7 @@ static void *pm_worker(void *arg) {
 
 // The game's RomFS contains NintendoWare BNSH and agl BAHS programs, some inside Yaz0/SARC containers.
 typedef struct { const uint8_t *code; uint32_t size; } PcStage;
-typedef struct { PcStage stages[2]; uint32_t local[3]; } PcProg;
+typedef struct { PcStage stages[2]; uint32_t local[3]; bool known; } PcProg;  // (known: compiled for the GPU, pc_add)
 
 enum { PC_SEEN_SIZE = 1 << 18, PC_ASSET_LIMIT = 512u << 20 };
 static PcProg *pc_progs;
@@ -4804,6 +4869,14 @@ static int pc_n, pc_cap, pc_bnsh, pc_bahs, pc_compute;
 static _Atomic int pc_next, pc_done, pc_items_n, pc_compute_translated;
 static FullPrepItem *pc_items;
 static long pc_huge_limit;
+// Which programs the GPU compile takes (as Odyssey Recomp 0.2.6 / 0.2.7 does, github.com/rwwo8/OdysseyRecomp, MIT): every
+// program is translated and its SPIR-V kept, but the driver compiles - a binary each, minutes on slower PCs, and most
+// of the cache - only the programs drawn before (the shipped list: known_programs.txt, and this player's own:
+// drawn_has), the compute programs, and the whole effects archive (EffectPtcl / EffectDataBase: a first box smashed
+// or enemy hit could freeze where no tour drew that effect). The rest compile if the game ever draws them.
+// ODYSSEY_PRECOMPILE_ALL=1: every program, as before.
+static bool pc_file_all;     // (the file being scanned is the effects archive)
+static int pc_all = -1, pc_known_n;
 
 static uint32_t pc_le32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static uint64_t pc_le64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8); return v; }
@@ -4832,6 +4905,15 @@ static bool pc_add(PcStage first, PcStage second, const uint32_t local[3]) {
     if (second.size) memcpy(code + first.size, second.code, second.size);
     PcProg *prog = &pc_progs[pc_n++];
     *prog = (PcProg){.stages = {{code, first.size}, {code + first.size, second.size}}};
+    if (pc_all < 0) pc_all = getenv("ODYSSEY_PRECOMPILE_ALL") && atoi(getenv("ODYSSEY_PRECOMPILE_ALL"));
+    if (local || pc_all || pc_file_all) prog->known = true;
+    else {  // (hashed as a draw hashes it: prog_code_hash, the first 2 KB of each stage up to its constants)
+        bool warm;
+        uint64_t ph = hash_words(0x9e3779b97f4a7c15ull, first.code, first.size < 2048 ? first.size : 2048);
+        ph = hash_words(ph, second.code, second.size < 2048 ? second.size : 2048);
+        prog->known = drawn_has(ph | 1, &warm);
+    }
+    if (prog->known) pc_known_n++;
     if (local) { memcpy(prog->local, local, sizeof prog->local); pc_compute++; }
     pc_seen[slot] = h;
     return true;
@@ -4977,6 +5059,7 @@ static bool pc_scan_asset(const uint8_t *data, size_t size, void *arg) {
     unsigned depth = *(const unsigned *)arg;
     if (size < 4) return true;
     unsigned next = depth + 1;
+    if (!depth) pc_file_all = !strncmp(romfs_visit_name, "EffectPtcl", 10) || !strncmp(romfs_visit_name, "EffectDataBase", 14);
     if (!memcmp(data, "Yaz0", 4)) {
         if (depth == 8 || size < 16 || data[4] >= PC_ASSET_LIMIT >> 24) return false;
         size_t n;
@@ -5031,6 +5114,16 @@ static void *pc_worker(void *arg) {
             if (cs) maxwell_free(cs);
             continue;
         }
+        // Only the programs compiled for the GPU are translated here too; the rest are translated if the game sets them
+        // up (in the background, then saved: translations.bin). A first start, RTX 4090: 59 -> 44 s; Steam Deck: ~370 ->
+        // 193 s, cache 455 -> 254 MB; the Deck's Cap Kingdom bench and the PC's kingdom route the same (FPS, hitches).
+        // ODYSSEY_PRECOMPILE_TRANSLATE=all: every program, as before.
+        static int tr_known = -1;
+        if (tr_known < 0) {
+            const char *e = getenv("ODYSSEY_PRECOMPILE_TRANSLATE");
+            tr_known = !(e && !strcmp(e, "all")) && pc_all <= 0;
+        }
+        if (tr_known && !pp->known) continue;
         ShaderKey fk = fkey;
         ShaderInfo *vi = maxwell_translate(stages[0].code, stages[0].size, STAGE_VERTEX, &vkey), *fi = NULL;
         if (vi && vi->msl) {
@@ -5045,7 +5138,7 @@ static void *pc_worker(void *arg) {
             uint64_t kv = vk_spirv_last_key;
             uint32_t *sf = sv ? vk_glsl_to_spirv(fi->msl, STAGE_FRAGMENT, "fs", &nf) : NULL;
             uint64_t kf = vk_spirv_last_key;
-            if (sv && sf) pc_items[atomic_fetch_add(&pc_items_n, 1)] = (FullPrepItem){.program = {{kv, kf}}, .huge = huge};
+            if (sv && sf && pp->known) pc_items[atomic_fetch_add(&pc_items_n, 1)] = (FullPrepItem){.program = {{kv, kf}}, .huge = huge};
             free(sv);
             free(sf);
         } else {
@@ -5080,6 +5173,8 @@ static bool precompile_collect(const char *out, int nt) {
     }
     LOG("[precompile] %d graphics and %d compute programs from %d BNSH and %d BAHS archives in %.1f s\n",
         pc_n - pc_compute, pc_compute, pc_bnsh, pc_bahs, (plat_now_ns() - t0) / 1e9);
+    LOG("[precompile] %d of them compiled for the GPU (drawn before, compute, effects)%s\n", pc_known_n,
+        pc_all > 0 ? " - ODYSSEY_PRECOMPILE_ALL: all" : "");
     if (!ok || !pc_n) {
         LOG("[precompile] %s\n", ok ? "no programs found" : "could not finish scanning game files");
         goto done;
@@ -7564,8 +7659,10 @@ static uint64_t prof_tp_;
 // more: the scene transitions' masks (a hole and the black around it, 5 panes scaled about 3 times: stretched
 // together, each alone wouldn't cover the sides; the HUD itself is never above 1).
 // tall (optional): it also covers the 16:9 screen's whole height (-360..360) - a background, not a band across it
+static float ui2d_ylo, ui2d_yhi;  // (the last pane ui2d_covers_screen found across the screen: its bottom and top, -360..360)
 static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
     if (tall) *tall = false;
+    ui2d_ylo = ui2d_yhi = 0;
     if (!u || size != 560) return false;
     if (!(u[0] > 0) || u[1] != 0 || u[2] != 0 || u[14] != -1 || u[12] != 0 || u[13] != 0) return false;  // (layouts' perspective)
     float w = u[132], h = u[133], l = u[134], t = u[135];
@@ -7577,6 +7674,7 @@ static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
         lo = fminf(lo, X), hi = fmaxf(hi, X), ylo = fminf(ylo, Y), yhi = fmaxf(yhi, Y);
     }
     if (tall) *tall = ylo <= -359.0f && yhi >= 359.0f;
+    ui2d_ylo = ylo, ui2d_yhi = yhi;
     return lo <= -639.0f && hi >= 639.0f;
 }
 
@@ -7590,6 +7688,33 @@ static bool ui2d_covers_screen(const float *u, uint64_t size, bool *tall) {
 // since, gets that layer copied in instead: the same bytes the draw would write. Only this program for now
 // (REPEAT_FS). ODYSSEY_REPEAT_DRAWS=0: off.
 #define REPEAT_FS 0x6005e82f2a61e98bull
+// Frame rates above 60: the game draws a gameplay tick twice or more (hle/odyssey_120.c's extra draws), the shadow maps
+// each time. (render thread) g_extra_frame: the lists being run are an extra draw's (rqueue.c RQ_EXTRA_FRAME).
+// ODYSSEY_LOG_SHADOW=1: per 600 frames, the shadow maps' draws in first and extra draws, and which layers.
+// ODYSSEY_SHADOW_REUSE=1: an extra draw's shadow map draws and clears are left out - the maps keep what the tick's
+// first draw rendered.
+static bool g_extra_frame;
+void renderer_extra_frame(bool on) { g_extra_frame = on; }
+static bool shadow_pass_extra(bool is_clear) {
+    NvnTexture *d = st.rt.ncolor ? NULL : st.rt.depth;
+    if (!d || d->width != d->height) return false;
+    static int log = -1, reuse = -1;
+    if (log < 0) log = getenv("ODYSSEY_LOG_SHADOW") != NULL;
+    if (reuse < 0) { const char *e = getenv("ODYSSEY_SHADOW_REUSE"); reuse = e && atoi(e) != 0; }
+    if (log) {
+        static uint64_t n[2][2], layers[2], last;
+        n[g_extra_frame][is_clear]++;
+        if (st.rt.has_dview) layers[g_extra_frame] |= 1ull << (st.rt.dview.min_layer & 63);
+        uint64_t f = renderer_present_count();
+        if (f >= last + 600) {
+            LOG("[shadow] 600 frames: first draws %llu draws %llu clears (layers %llx); extra draws %llu draws %llu clears (layers %llx); target %ux%u" "%s",
+                (unsigned long long)n[0][0], (unsigned long long)n[0][1], (unsigned long long)layers[0], (unsigned long long)n[1][0],
+                (unsigned long long)n[1][1], (unsigned long long)layers[1], d->width, d->height, "\n");
+            memset(n, 0, sizeof n); layers[0] = layers[1] = 0; last = f;
+        }
+    }
+    return reuse && g_extra_frame;
+}
 static uint64_t g_write_gen;  // anything else that may have written a texture since (draws, clears, copies, dispatches)
 static struct { uint64_t key, gen; NvnTexture *tex; uint32_t level, layer; bool valid; } g_repeat;
 static uint64_t repeat_key(Prog *pr, CmdRec *r, bool indexed) {
@@ -7732,7 +7857,17 @@ static void draw_(CmdRec *r, bool indexed) {
         uint64_t fs = st.program->stages[1].code_addr;
         if (fs != last_fs) {
             last_fs = fs;
-            last_hash = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0;
+            // (cached per program object and code address: hashed byte by byte at every change of fragment shader it was
+            // ~2% of the render thread in Metro, where nearly every draw changes it)
+            static struct { uint64_t fs, word; const void *prog; uint64_t hash; } fsc[1024];
+            uint32_t slot = (uint32_t)((fs >> 4) * 0x9E3779B97F4A7C15ull >> 54) & 1023;
+            uint64_t word = 0;
+            if (fs) memcpy(&word, (const void *)(uintptr_t)(fs + 0x30), 8);  // (and the code's first word: reused memory)
+            if (fs && fsc[slot].fs == fs && fsc[slot].prog == st.program && fsc[slot].word == word) last_hash = fsc[slot].hash;
+            else {
+                last_hash = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0;
+                fsc[slot].fs = fs, fsc[slot].word = word, fsc[slot].prog = st.program, fsc[slot].hash = last_hash;
+            }
         }
         static uint64_t skip[16];
         static int nskip = -1;
@@ -7757,6 +7892,7 @@ static void draw_(CmdRec *r, bool indexed) {
         if (g_debug_frame && getenv("ODYSSEY_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
     }
+    if (shadow_pass_extra(false)) return;
     if (repeat_draw(pr, r, indexed)) return;
     if (g_interp_log) {  // (frame interpolation, runtime/nvn/interp.c: the draw's identity across frames)
         // the draw arguments (not the index buffer's address: dynamic geometry's buffers move every frame), the programs
@@ -8061,10 +8197,13 @@ static void draw_(CmdRec *r, bool indexed) {
         // left its text above it).
         float k = 1.0f, ky = 1.0f;
         bool tall = false;
+        int band = 0;
         if ((pass_sx > pass_sy * 1.01f || pass_sy > pass_sx * 1.01f) &&
             ui2d_covers_screen((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, &tall)) {
             if (pass_sx > pass_sy) k = pass_sx / pass_sy;
             else if (tall) ky = pass_sy / pass_sx;
+            else if (ui2d_ylo <= -359.0f && ui2d_yhi < 200.0f) band = 1;   // (a band along the HUD's bottom edge)
+            else if (ui2d_yhi >= 359.0f && ui2d_ylo > -200.0f) band = 2;   // (... its top edge)
         }
         if (ui_mark && pass_sx > pass_sy * 1.01f) {  // (HUD position: Edges; a stretched pane stays)
             float shift = hud_edge_shift(pass_sx / pass_sy);
@@ -8078,6 +8217,23 @@ static void draw_(CmdRec *r, bool indexed) {
         if (k > 1.0f) { vx -= vw * (k - 1) / 2; vw *= k; }
         float vy = vp[1] * vp_sy + vp_oy, vh = vp[3] * vp_sy;
         if (ky > 1.0f) { vy -= vh * (ky - 1) / 2; vh *= ky; }
+        // A band across the screen along the HUD's bottom or top edge (the button tutorials' dark strip, the pause menu's
+        // footer) in a narrower target: the HUD is shorter than the screen there, and the band ended ~40 lines above the
+        // bottom of a Steam Deck's 1280x800, the scene showing below it. Its inner edge stays where it is (next to its
+        // text), its outer edge goes to the screen's: the viewport scaled about the inner edge. Layout y (up, -360..360)
+        // is at vy + vh * (0.5 - q * y / 720) on the screen, q the HUD's height in the target's. ODYSSEY_HUD_BANDS=0: off.
+        static int bands = -1;
+        if (bands < 0) { const char *e = getenv("ODYSSEY_HUD_BANDS"); bands = !e || !*e || atoi(e) != 0; }
+        if (band && bands) {
+            float q = pass_sx / pass_sy;  // (< 1 here)
+            if (band == 1) {
+                float a = 0.5f - q * ui2d_yhi / 720.0f, b = 0.5f + q / 2;
+                if (b - a > 0.01f) { float nh = vh * (1 - a) / (b - a); vy += vh * a - nh * a; vh = nh; }
+            } else {
+                float c = 0.5f - q * ui2d_ylo / 720.0f, a = 0.5f - q / 2;
+                if (c - a > 0.01f) { float nh = vh * c / (c - a); vy -= nh * a; vh = nh; }
+            }
+        }
         float jitter[2] = {0};
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
         if (st.rt.depth && st.ds[0])
@@ -8681,14 +8837,14 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         !nvn_linear_rows_fit(q->guest_capacity, q->guest_pitch, row_bytes, b->height) ||
         !nvn_linear_rows_fit(q->snapshot_capacity, row_bytes, row_bytes, b->height))) return;
     typedef struct { VkBuffer buf; VmaAllocation mem; uint8_t *ptr; uint64_t cap, seq, size; } Slot;
-    typedef struct { uint64_t id, frame, size, epoch; uint8_t *bytes; Slot slot[3]; uint64_t issued_frame, have_seq; } Cache;
+    typedef struct { uint64_t id, frame, size, epoch, wseq, gen; uint8_t *bytes; Slot slot[3]; uint64_t issued_frame, have_seq; } Cache;
     static Cache cache[8];
     static unsigned next;
     Cache *e = NULL;
     for (int i = 0; i < 8; i++) if (cache[i].id == t->debug_id) { e = &cache[i]; break; }
     if (!e) {
         e = &cache[next++ % 8];
-        e->id = t->debug_id; e->frame = UINT64_MAX; e->issued_frame = UINT64_MAX; e->have_seq = 0;
+        e->id = t->debug_id; e->frame = UINT64_MAX; e->issued_frame = UINT64_MAX; e->have_seq = 0; e->wseq = UINT64_MAX; e->gen = 0;
         for (int i = 0; i < 3; i++) e->slot[i].seq = 0, e->slot[i].size = 0;
     }
     uint64_t frame = renderer_present_count(), size = (uint64_t)b->width * b->height * fi->bpb;
@@ -8756,11 +8912,78 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         // costs at most one ripple request for a frame or two.
         for (int i = 0; i < 3; i++) if (e->slot[i].seq > done && e->slot[i].size == size) return;
     }
-    if (q->refresh_snapshot || e->frame != frame || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
+    if (bytes == 4) {  // ODYSSEY_LOG_PAINT_SYNC=1: what each paint map readback finds changed (tests)
+        static int lg = -1;
+        static uint64_t n, n_refresh, n_frame, n_epoch, n_gpu, n_none, t_ns, last_wseq[8], last_frame_logged;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_PAINT_SYNC") != NULL;
+        if (lg) {
+            int ci = (int)(e - cache);
+            bool will = q->refresh_snapshot || e->frame != frame || e->size != size || e->epoch != paint_cpu_epoch;  // (asked, before the check below)
+            bool gpu = b->gpu_wgen != last_wseq[ci];
+            n++;
+            if (will) {
+                if (q->refresh_snapshot) n_refresh++;
+                if (e->frame != frame) n_frame++;
+                if (e->epoch != paint_cpu_epoch) n_epoch++;
+                if (gpu) n_gpu++; else n_none++;
+            }
+            last_wseq[ci] = b->gpu_wgen;
+            if (frame - last_frame_logged >= 240) {
+                LOG("[paint-sync] 240 frames: %llu reads; readbacks asked by refresh %llu, new frame %llu, CPU edit %llu; the GPU had written the map before %llu of them, not before %llu\n",
+                    (unsigned long long)n, (unsigned long long)n_refresh, (unsigned long long)n_frame, (unsigned long long)n_epoch, (unsigned long long)n_gpu, (unsigned long long)n_none);
+                n = n_refresh = n_frame = n_epoch = n_gpu = n_none = t_ns = 0; last_frame_logged = frame;
+            }
+        }
+    }
+    // The paint map (4-byte texels: the Wooded Kingdom's poison, PaintObj) is read every frame while Mario is near
+    // it, and each frame's first read copied the map back and waited for the GPU to finish everything queued: in the
+    // owner's recording (Wooded Kingdom, 4K, 120 FPS asked) the game thread waited there for half of every frame and
+    // the game ran at ~51 FPS for as long as he stood there. The map itself rarely changes: in that recording the
+    // GPU had not written it since the last copy before ~90-100% of those readbacks. A copy is still the map while
+    // nothing recorded has written the texture since (gpu_wgen: drawn, copied, stored, uploaded - on either queue) and the CPU has not
+    // handed edits back (paint_cpu_epoch). ODYSSEY_PAINT_SYNC_ALWAYS=1: a readback every frame, as before.
+    static int paint_always = -1;
+    if (paint_always < 0) paint_always = getenv("ODYSSEY_PAINT_SYNC_ALWAYS") && atoi(getenv("ODYSSEY_PAINT_SYNC_ALWAYS"));
+    bool stale = e->frame != frame;
+    if (bytes == 4 && !paint_always && stale && e->frame != UINT64_MAX && e->wseq == b->gpu_wgen) stale = false;
+    // ODYSSEY_PAINT_SYNC_VERIFY=1 (tests): each readback left out is made all the same and compared with the copy
+    // kept - "[paint-verify]" counts those that differ (none may) and logs the first.
+    static int paint_verify = -1;
+    if (paint_verify < 0) paint_verify = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+    if (paint_verify && bytes == 4 && e->frame != frame && !stale && !q->refresh_snapshot && e->size == size && e->epoch == paint_cpu_epoch && e->bytes) {
+        static uint64_t n_same, n_diff, n_gen_seen, last_log;
+        static uint64_t last_gen;
+        vk_end_pass();
+        st.rt_dirty = true;
+        VkCommandBuffer vcb = vk_cmd();
+        vk_full_barrier(vcb);
+        VkSpan vout = vk_readback(size);
+        VkBufferImageCopy vcp = {.bufferOffset = vout.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                 .imageExtent = {b->width, b->height, 1}};
+        vkCmdCopyImageToBuffer(vcb, b->image, VK_IMAGE_LAYOUT_GENERAL, vout.buf, 1, &vcp);
+        wait_why = "paint verify";
+        renderer_flush();
+        if (!memcmp(e->bytes, vout.ptr, size)) n_same++;
+        else {
+            uint64_t nd = 0, first = 0;
+            for (uint64_t i = 0; i < size; i++) if (e->bytes[i] != ((const uint8_t *)vout.ptr)[i]) { if (!nd) first = i; nd++; }
+            if (n_diff++ < 8) LOG("[paint-verify] DIFFERENT: texture %llx frame %llu: %llu bytes differ, the first at %llu (kept gen %llu)\n",
+                                  (unsigned long long)q->addr, (unsigned long long)frame, (unsigned long long)nd, (unsigned long long)first, (unsigned long long)e->gen);
+        }
+        if (e->gen != last_gen) last_gen = e->gen, n_gen_seen++;
+        e->frame = frame;  // (once a frame, as the readback it stands for)
+        if (frame - last_log >= 600) {
+            last_log = frame;
+            LOG("[paint-verify] so far: %llu left-out readbacks equal to the kept copy, %llu different; %llu copies made in between\n",
+                (unsigned long long)n_same, (unsigned long long)n_diff, (unsigned long long)n_gen_seen);
+        }
+    }
+    if (q->refresh_snapshot || stale || e->size != size || (bytes == 4 && e->epoch != paint_cpu_epoch)) {
         vk_end_pass();
         st.rt_dirty = true;
         VkCommandBuffer cb = vk_cmd();
         vk_full_barrier(cb);
+        e->wseq = b->gpu_wgen;  // (what the copy holds: writes up to here)
         VkSpan out = vk_readback(size);
         VkBufferImageCopy cp = {.bufferOffset = out.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .imageExtent = {b->width, b->height, 1}};
@@ -8772,11 +8995,17 @@ void renderer_cpu_texel(RqCpuTexel *q) {
         memcpy(e->bytes, out.ptr, size);
         e->frame = frame;
         e->epoch = paint_cpu_epoch;
+        static uint64_t gens;
+        e->gen = ++gens;
     }
     if (q->snapshot) {
         uint64_t span = q->guest_pitch * (b->height - 1) + row_bytes;
         if (!paint_register_shared(t, span)) return;
-        memcpy(q->snapshot, e->bytes, size);
+        // (the caller's rows already hold this copy: PaintObj's attack sensor asks ~28 times a frame, and each ask
+        // copied the 553 KB map here and again into the game's rows)
+        q->gen = e->gen;
+        q->unchanged = !paint_always && e->gen && q->have_gen == e->gen;
+        if (!q->unchanged) memcpy(q->snapshot, e->bytes, size);
         q->snapshot_width = b->width; q->snapshot_height = b->height;
     }
     memcpy(&q->value, e->bytes + ((uint64_t)q->y * b->width + q->x) * fi->bpb + q->component * bytes, bytes);
@@ -9361,6 +9590,18 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
 }
 
 // Inside the window image's rendering (device.c vk_frame_begin): the game image into (vx, vy, vw, vh).
+// HUD sharpening: the game's HUD art is made for 720 lines; on a larger picture its enlarged text and icons are soft.
+// The layer is sharpened when it is composited (shaders.c hud_over.frag): nothing below 900 lines, rising to the full
+// strength at 1440 and above. ODYSSEY_HUD_SHARPEN=<0..1>: the full strength (0: off; 0.6 by default).
+static float hud_sharpness(uint32_t oh) {
+    // (Graphics > Sharper HUD and menus: settings hud_sharpen; the variable, when set, decides instead)
+    static float full = -1;
+    static bool env;
+    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); env = e && *e; full = env ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
+    if (oh < 900 || full <= 0 || (!env && !g_settings.hud_sharpen)) return 0;
+    float t = ((float)oh - 900.0f) / 540.0f;
+    return full * (t > 1 ? 1 : t < 0.15f ? 0.15f : t);
+}
 // The HUD layer over the (upscaled) picture, at the layer's size (begin_hud_pass); then whether the next frames use it.
 // The picture is the window texture's bytes (sRGB: the game copies its picture in through an sRGB view), the layer
 // linear (as the game's picture): mixed in linear light.
@@ -9372,7 +9613,7 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
         vk_frame_suspend();
         TexBackend *out = post_image(8, ow, oh);
         VkImageView in[3] = {src, post_view(layer)};
-        float pc[8] = {1.0f / ow, 1.0f / oh};
+        float pc[8] = {1.0f / ow, 1.0f / oh, hud_sharpness(oh), (float)oh / 720.0f * 0.75f};  // (.w: the radius, pixels)
         post_pass(cb, "hud_over.frag", in, 2, out, pc, false);
         vk_full_barrier(cb);
         vk_frame_resume();
@@ -9385,7 +9626,15 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
 #else
     bool temporal = false;
 #endif
-    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1);
+    // (also for its sharpening, where the picture is large enough for it: hud_sharpness)
+    // Not for the sharpening alone while the window shows a corner of the game's texture (handheld mode: 1280x720 of
+    // 1600x900): the layer is not placed for that crop - the pause menu lost its blurred scene and its footer (black
+    // instead), on a Steam Deck in its default console mode (0.4.4 / 0.4.5; owner 2026-11-18).
+    extern void renderer_present_crop(float crop[4]);
+    float crop[4];
+    renderer_present_crop(crop);
+    bool whole = crop[2] > 0.999f && crop[3] > 0.999f;
+    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || (whole && hud_sharpness(oh) > 0));
     if (on != hud.on || (on && (ow != hud.w || oh != hud.h)))
         LOG("[hud] layer %s (%ux%u, the picture %ux%u%s)\n", on ? "on" : "off", ow, oh, b->width, b->height, temporal ? ", temporal" : "");
     hud.on = on;
@@ -9825,6 +10074,7 @@ void backend_execute(uint64_t handle) {
     if (setups != seen_setups) seen_setups = setups, quiet_since = frame;
     if (prefetch && game_is_odyssey() && frame - quiet_since < 600) prefetch_programs(handle, 0);
     exec_list(handle, 0);
+    if (dq_on) dq_publish();  // (the frame's last packets: nothing waits unpublished between frames)
     PROF_ADD(prof_exec);
     if (prof) cum_exec += SDL_GetTicksNS() - prof_t0_;
     static int sync_submit = -1;

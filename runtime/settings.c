@@ -13,10 +13,27 @@
 
 #define SETTINGS_FILE settings_file()
 
-// ODYSSEY_SETTINGS=<path>: another settings file (test runs never touch the player's powermoon.ini)
+// The settings file: settings.ini in the data root (before 0.4.1: powermoon.ini, renamed at the first start - the
+// name came from the project's first name). ODYSSEY_SETTINGS=<path>: another file (test runs never touch the player's).
 static const char *settings_file(void) {
     const char *e = getenv("ODYSSEY_SETTINGS");
-    return e && *e ? e : "powermoon.ini";
+    if (e && *e) return e;
+    static bool moved;
+    if (!moved) {
+        moved = true;
+        FILE *now = fopen("settings.ini", "rb"), *old = now ? NULL : fopen("powermoon.ini", "rb");
+        if (now) fclose(now);
+        if (old) {
+            fclose(old);
+            if (rename("powermoon.ini", "settings.ini") == 0) LOG("[settings] powermoon.ini renamed to settings.ini\n");
+            else LOG("[settings] couldn't rename powermoon.ini to settings.ini: reading and saving powermoon.ini\n");
+        }
+    }
+    FILE *f = fopen("settings.ini", "rb");
+    if (f) { fclose(f); return "settings.ini"; }
+    f = fopen("powermoon.ini", "rb");  // (the rename failed: a read-only folder, the file in use)
+    if (f) { fclose(f); return "powermoon.ini"; }
+    return "settings.ini";
 }
 const char *settings_current_file(void) { return settings_file(); }
 
@@ -45,6 +62,7 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
+    .hud_sharpen = true,
     .antialias = AA_FXAA,
     .rumble = true,
     .rumble_strength = 100,
@@ -106,9 +124,19 @@ static const char *const warmups[WARMUP_COUNT] = {"auto", "normal", "long"};
 
 void settings_warmup_budget(unsigned *ms, unsigned *mb) {
     int ram_mb = SDL_GetSystemRAM();
-    // (Auto: Long with 32 GB or more. Each pipeline prepared ahead keeps ~1 MB of NVIDIA driver memory: Long's 7,650 cost
+    // (Until 2026-11-17 Auto was Long with 32 GB or more. Each pipeline prepared ahead keeps ~1 MB of NVIDIA driver memory: Long's 7,650 cost
     // ~6 GB more in RAM than Normal's ~1,700 - on a 16 GB PC that meant swapping, #75 / #61; 2026-11-16)
-    int w = g_settings.warmup == WARMUP_AUTO ? (ram_mb >= 30000 ? WARMUP_LONG : WARMUP_NORMAL) : g_settings.warmup;
+    // (Auto since 2026-11-17: 1 GB on every PC - the first-scene pipelines and the most recent ones. 120 FPS routes through
+    // six kingdoms, this PC: Long 8,925 pipelines and 14.7 GB in RAM at the start, Normal 1,883 and 11.3 GB, 1 GB 304
+    // and 10.8 GB - FPS, hitches in play and at arrivals the same; none at all: more hitches. #94: Long took 32 GB PCs
+    // to 10 GB in RAM at the start.)
+    if (g_settings.warmup == WARMUP_AUTO) {
+        *ms = 15000;
+        *mb = 1024;
+        return;
+    }
+    int w = g_settings.warmup;
+    (void)ram_mb;
     if (w == WARMUP_LONG) {  // (what the 120 FPS launcher used: 30 s, up to 12 GB - at most half of this PC's memory)
         *ms = 30000;
         *mb = ram_mb > 0 && ram_mb / 2 < 12288 ? (unsigned)(ram_mb / 2) : 12288;
@@ -328,6 +356,7 @@ void settings_load(void) {
             g_settings.dlss_rcas_sharpness = n < 0 ? 0 : n > 100 ? 100 : n;
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
+        else if (!strcmp(key, "hud_sharpen")) g_settings.hud_sharpen = atoi(val) != 0;
         else if (!strcmp(key, "aspect")) {
             g_settings.aspect = ASPECT_16_9;
             for (int i = 0; i < ASPECT_COUNT; i++) if (!strcmp(val, ASPECT_NAMES[i])) g_settings.aspect = i;
@@ -464,6 +493,7 @@ void settings_save(void) {
     fprintf(f, "dlss_rcas_sharpness = %d\n", g_settings.dlss_rcas_sharpness);
     fprintf(f, "fsr1_sharpness = %d\n", g_settings.fsr1_sharpness);
     fprintf(f, "deband = %d\n", g_settings.deband);
+    fprintf(f, "hud_sharpen = %d\n", g_settings.hud_sharpen);
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : 0]);
     fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
     fprintf(f, "game_dynres = %d\n", g_settings.game_dynres);

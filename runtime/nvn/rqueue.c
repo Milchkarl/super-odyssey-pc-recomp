@@ -84,6 +84,9 @@ static void *render_thread(void *arg) {
         case RQ_PRESENT: backend_present(it.p); atomic_fetch_sub(&q_presents, 1); break;
         case RQ_ODYSSEY_POSE: odyssey_pose_render_frame(it.p); break;
 #ifndef __APPLE__
+        case RQ_EXTRA_FRAME: { extern void renderer_extra_frame(bool on); renderer_extra_frame(it.a != 0); break; }
+#endif
+#ifndef __APPLE__
         case RQ_CPU_TEXEL: { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(it.p); break; }
         case RQ_PAINT_WRITE: {
             extern void renderer_paint_cpu_written(uint64_t, uint64_t);

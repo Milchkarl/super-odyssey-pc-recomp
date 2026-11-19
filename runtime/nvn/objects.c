@@ -1,4 +1,5 @@
 // NVN objects, builders, and state objects (everything except command recording).
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -329,17 +330,27 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     uint64_t capacity = p->size - off;
     if (capacity > 4 * 1024 * 1024) capacity = 4 * 1024 * 1024;
     void *snapshot = malloc(capacity);
+    // (the copy the rows at an address hold: asked again within a frame, the renderer returns "unchanged" and
+    // nothing is copied - a CPU edit handed back, or a refresh, makes a new copy with a new number)
+    static struct { uint64_t addr, gen; } held[8];
+    static unsigned held_next;
+    int hi = -1;
+    for (int i = 0; i < 8; i++) if (held[i].addr == p->storage + off) hi = i;
     RqCpuTexel q = {.addr = p->storage + off, .components = 1, .component_bytes = 4,
         .snapshot = snapshot, .snapshot_capacity = capacity, .guest_capacity = p->size - off,
-        .guest_pitch = G(uint32_t, td, 0x4c), .refresh_snapshot = refresh};
+        .guest_pitch = G(uint32_t, td, 0x4c), .refresh_snapshot = refresh, .have_gen = hi >= 0 && !refresh ? held[hi].gen : 0};
 #ifndef __APPLE__
     if (snapshot) {
         if (rq_enabled()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
         else { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(&q); }
     }
 #endif
-    bool stored = q.valid && nvn_linear_store_rows((void *)(uintptr_t)q.addr, q.guest_capacity, q.guest_pitch,
-        snapshot, capacity, (uint64_t)q.snapshot_width * 4, q.snapshot_height);
+    bool stored = q.valid && (q.unchanged || nvn_linear_store_rows((void *)(uintptr_t)q.addr, q.guest_capacity, q.guest_pitch,
+        snapshot, capacity, (uint64_t)q.snapshot_width * 4, q.snapshot_height));
+    if (stored && !q.unchanged) {
+        if (hi < 0) hi = (int)(held_next++ % 8);
+        held[hi].addr = q.addr, held[hi].gen = q.gen;
+    }
     if (stored) p->paint_cpu_shared = true;
     static unsigned counts[4];
     static const char *names[] = {"attack", "label mask", "label color", "median"};
@@ -746,7 +757,10 @@ static uint64_t tex_desc_hash(const NvnTexture *t) {
 }
 
 // The host texture with n's description (n freed), or n itself, new. One more initialization of it.
+static _Atomic uint64_t g_tex_inits;  // (texture initializations so far: textures.c vk_tex_prefetch skips its scan when none)
+uint64_t nvn_texture_inits(void) { return atomic_load(&g_tex_inits); }
 static NvnTexture *tex_by_desc(NvnTexture *n) {
+    atomic_fetch_add(&g_tex_inits, 1);
     static int off = -1;  // ODYSSEY_NO_TEX_DEDUP=1 (debug): every initialization its own host texture, as before
     if (off < 0) off = getenv("ODYSSEY_NO_TEX_DEDUP") != NULL;
     if (off) { n->live = 1; tex_set_add(n); return n; }

@@ -228,6 +228,26 @@ static void pick_device(void) {
     LOG("[vk] using %s\n", g_vk.props.deviceName);
 }
 
+// Pipeline binaries by default everywhere but NVIDIA. NVIDIA's driver holds far more memory for a library made from a
+// binary than for the same library from the pipeline cache (2026-11-17, RTX 4090, driver 610.x, Cap -> Sand -> Metro ->
+// Wooded): a new player 6.0 -> 9.1 GB in RAM with binaries, 4.6 -> 6.1 GB without; returning 9.3 -> 11.9 vs 5.1 ->
+// 5.7 GB; the preparation as fast (51 s) and the stutter no worse (frames over 50 ms 9 vs 8, worst 408 vs 252 ms).
+// Without binaries the preparation fills the pipeline cache (cache/vk_pipelines.bin), as on GPUs that have none.
+// ODYSSEY_PBIN=1: on, ODYSSEY_NO_PBIN=1: off, on any GPU. (In prep_identity: a change prepares the shaders again.)
+static bool pbin_wanted(uint32_t vendor) {
+    if (getenv("ODYSSEY_NO_PBIN")) return false;
+    const char *e = getenv("ODYSSEY_PBIN");
+    if (e && *e) return atoi(e) != 0;
+    return vendor != 0x10de;
+}
+
+static void *remove_old_pbin(void *a) {
+    (void)a;
+    extern bool plat_remove_tree(const char *dir);
+    plat_remove_tree("cache/old-pbin");
+    return NULL;
+}
+
 static bool g_fault_ext;
 // After VK_ERROR_DEVICE_LOST: what the driver says faulted (VK_EXT_device_fault), into the log.
 void vk_device_fault_report(void) {
@@ -330,14 +350,21 @@ static void create_device(void) {
     // Pipeline binaries: a compiled shader library saved as data of our own, and created from that data in a later run
     // or in another process - no compile (exec.c lib_binary_*). ODYSSEY_NO_PBIN=1: off.
     VkPhysicalDevicePipelineBinaryFeaturesKHR pbf = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR};
-    if (g_vk.gpl && m5.maintenance5 && has_ext(ep, ne, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) && !getenv("ODYSSEY_NO_PBIN")) {
+    if (g_vk.gpl && m5.maintenance5 && has_ext(ep, ne, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) && pbin_wanted(g_vk.props.vendorID)) {
         VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &pbf};
         vkGetPhysicalDeviceFeatures2(g_vk.phys, &f2);
         pbf.pNext = NULL;
         if (pbf.pipelineBinaries) ext[n_ext++] = VK_KHR_PIPELINE_BINARY_EXTENSION_NAME;
     }
     g_vk.pbin = pbf.pipelineBinaries;
-    LOG("[vk] pipeline binaries: %s\n", g_vk.pbin ? "on" : "off");
+    LOG("[vk] pipeline binaries: %s\n", g_vk.pbin ? "on" : pbin_wanted(g_vk.props.vendorID) ? "off (not supported)" : "off (pipeline cache instead)");
+    {   // (the game, binaries off: a folder of them from before is of no use any more - removed in the background)
+        struct stat pst;
+        if (!g_vk.pbin && !g_vk.headless && stat("cache/pbin", &pst) == 0 && rename("cache/pbin", "cache/old-pbin") == 0) {
+            pthread_t t;
+            if (pthread_create(&t, NULL, remove_old_pbin, NULL) == 0) pthread_detach(t);
+        }
+    }
 #ifdef _WIN32
     vk_dlss_probe_device(ep, ne, ext, &n_ext, SDL_arraysize(ext));
     vk_xess_device_extensions(ep, ne, ext, &n_ext, SDL_arraysize(ext));
@@ -498,7 +525,7 @@ static void create_device(void) {
     // empty one: it saves pipeline binaries only)
     size_t sz = 0;
     void *data = NULL;
-    FILE *fp = g_vk.headless ? NULL : fopen("cache/vk_pipelines.bin", "rb");
+    FILE *fp = g_vk.headless || getenv("ODYSSEY_NO_PCACHE_LOAD") ? NULL : fopen("cache/vk_pipelines.bin", "rb");  // (the switch: tests)
     if (fp) {
         fseek(fp, 0, SEEK_END);
         sz = (size_t)ftell(fp);
@@ -541,6 +568,7 @@ void vk_pcache_load_headless(void) {
 
 static pthread_mutex_t pcache_save_lock = PTHREAD_MUTEX_INITIALIZER;  // (the exit and an autosave at once)
 void vk_pipeline_cache_save(void) {
+    if (getenv("ODYSSEY_NO_PCACHE_LOAD")) return;  // (a test without it loaded: its file isn't replaced by this run's part)
     pthread_mutex_lock(&pcache_save_lock);
     size_t sz = 0;
     void *data = NULL;
@@ -1571,6 +1599,9 @@ static bool frame_placement(float v[4], float pv[8]) {
     else {
         int a = g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : ASPECT_16_9;
         double k = a == ASPECT_FILL ? (fabs(win - 1.0) > 0.005 ? win : 1.0) : ASPECT_K[a];
+        // (a fixed shape within 3% of the window's is the window's: 21:9 is 64:27 = 2.37, a 3840x1600 screen 2.40 - the
+        // picture was 3793 wide with bars at the sides, #93)
+        if (a != ASPECT_FILL && fabs(k / win - 1.0) < 0.03) k = fabs(win - 1.0) > 0.005 ? win : 1.0;
         odyssey_wide_want((float)k);
     }
     OutScale os;
@@ -1710,6 +1741,45 @@ static void present_brake(uint64_t now, bool interp) {
     if (backoff > 120 && total_frames > last_brake + 1800) backoff = 120;
 }
 
+// The native frame rate's brake (frame rates above 60: odyssey_120.c's extra draws). Where the game's code and the
+// translation of its lists together take longer than a frame - the New Donk City power lines at 120 FPS: ~2,400 draws,
+// ~14 ms of the game's code and ~9 ms of translation, back to back (the game waits for each frame's translation:
+// nvnSyncWait) - the extra frames missed their time in bursts: 20-28 ms frames, 80-110 FPS, a stutter. When 12 of the
+// last 120 frames take over 1.5x their period, the game plays at 60 for 2 s - an even 60 instead of an uneven 80-110 -
+// longer each time in a row (up to 20 s), and 30 s without: short pauses again. Frames already at 60 (loads, scenes
+// without extra-draw preparation) aren't counted. ODYSSEY_FRAME_BRAKE=1: on (off by default: on the power line the
+// switches to 60 felt worse to the owner than the uneven frames).
+static _Atomic uint64_t native_brake_until_ns;
+bool vk_native_brake(void) { return plat_now_ns() < atomic_load(&native_brake_until_ns); }
+static void native_brake(uint64_t now) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_FRAME_BRAKE"); on = e && *e && atoi(e) != 0; }  // (off: owner, 2026-11-17 - dropping to 60 felt worse than the stutter)
+    static uint64_t last, last_brake_ns;
+    static uint8_t slow[120];
+    static int n, nslow;
+    static uint64_t backoff_ns = 2000000000ull;
+    extern int odyssey_native_hz(void);
+    int hz = odyssey_native_hz();
+    uint64_t prev = last;
+    last = now;
+    if (!on || !prev || now <= prev || hz <= 60 || vk_native_brake()) return;
+    double d = (double)(now - prev), period = 1e9 / hz;
+    int k = n++ % 120;
+    bool late = d > period * 1.5;
+    nslow += late - slow[k];
+    slow[k] = late;
+    if (backoff_ns > 2000000000ull && now > last_brake_ns + 30000000000ull) backoff_ns = 2000000000ull;
+    if (nslow >= 12) {
+        atomic_store(&native_brake_until_ns, now + backoff_ns);
+        LOG("[frame-rate] %d of the last %d frames took over %.1f ms: %d FPS for %.0f s\n", nslow, n < 120 ? n : 120,
+            period * 1.5 / 1e6, 60, backoff_ns / 1e9);
+        last_brake_ns = now;
+        backoff_ns = backoff_ns * 2 > 20000000000ull ? 20000000000ull : backoff_ns * 2;
+        memset(slow, 0, sizeof slow);
+        n = nslow = 0;
+    }
+}
+
 static void backend_present_locked(NvnTexture *t, bool handed);
 void backend_present(NvnTexture *t) {
     plat_heap_check("present");
@@ -1736,6 +1806,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     TexBackend *b = fd.b, *game_img = fd.game_img;
     b->presented = true;
     present_brake(present_ns, fd.game_w != NULL);
+    native_brake(present_ns);
     static const float black[4] = {0, 0, 0, 1};
     uint64_t t0 = SDL_GetTicksNS();
     pcache_autosave();
@@ -1936,6 +2007,21 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
             int ln = snprintf(line, sizeof line, "[vk] t=%.1f frame %llu %.1f fps max %.0fms level - (%s)\n", now,
                               (unsigned long long)total_frames, frames / (now - last_fps_time), max_gap * 1000.0, stats);
             if (ln > 0) fwrite(line, 1, ln < (int)sizeof line ? (size_t)ln : sizeof line - 1, stderr);
+            {   // A plain status line a minute (players' logs: where, how smooth, how much memory - at a glance)
+                static double minute_t0, minute_low = 1e9, minute_worst;
+                static uint64_t minute_f0;
+                double fps = frames / (now - last_fps_time);
+                if (fps < minute_low) minute_low = fps;
+                if (max_gap > minute_worst) minute_worst = max_gap;
+                if (!minute_t0) minute_t0 = now, minute_f0 = total_frames;
+                if (now - minute_t0 >= 60.0) {
+                    extern const char *odyssey_stage_name(void);
+                    LOG("[status] %.0f min: %s, %.1f FPS (lowest 2 s: %.1f), worst frame %.0f ms, memory %.1f GB in RAM, "
+                        "%.1f GB committed\n", now / 60.0, odyssey_stage_name(), (total_frames - minute_f0) / (now - minute_t0),
+                        minute_low, minute_worst * 1000.0, plat_resident_bytes() / 1073741824.0, plat_private_bytes() / 1073741824.0);
+                    minute_t0 = now, minute_f0 = total_frames, minute_low = 1e9, minute_worst = 0;
+                }
+            }
             uint64_t st2 = plat_now_ns();
             if (st2 - st0 > 5000000ull) {  // (the stats line itself: memory queries, the log write)
                 static int nlog;
@@ -2043,6 +2129,7 @@ void ui_window_init(void) {
     create_swapchain();
     vk_exec_init();
     vk_shaders_init();
+    vk_shader_cache_migrate();  // (cache/spirv into cache/shaders.pack, in the background)
     vk_pipeline_prewarm(!recovering_pipeline_cache);
     vk_start_ok();
 }
@@ -2140,7 +2227,8 @@ static void prep_identity(char out[128]) {
             }
         }
         if (best.vendorID)
-            snprintf(id, sizeof id, "gpu %04x:%04x driver %u app %s", best.vendorID, best.deviceID, best.driverVersion, APP_VERSION);
+            snprintf(id, sizeof id, "gpu %04x:%04x driver %u app %s pbin %d", best.vendorID, best.deviceID, best.driverVersion,
+                     APP_VERSION, pbin_wanted(best.vendorID));
     }
     memcpy(out, id, 128);
 }
