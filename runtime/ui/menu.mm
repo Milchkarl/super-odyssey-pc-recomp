@@ -1414,25 +1414,35 @@ static void tab_quit(float scale) {
     static char previous[1200];
     static bool checked_previous;
     static const char *result = "Create file";
-    auto copy_result = []() { int s = diagnostics_copy_status(); return s > 0 ? "Path copied" : s == 0 ? "Copy pending" : "Saved"; };
+    static char previous_reason[256];
+    // (the report's text, not its path: a path pasted into an issue is only a name - issue #75)
+    auto copy_result = []() { int s = diagnostics_copy_status(); return s > 0 ? "Text copied" : s == 0 ? "Copy pending" : "Saved"; };
     if (!strcmp(result, "Copy pending")) result = copy_result();
     opt_begin("##quit", scale);
     opt_section("Quit");
     if (opt_action("Quit to Desktop", "", "Closes " RT_APP_NAME " after confirmation.")) g_quit_prompt = true;
     opt_section("Diagnostics");
     if (opt_action("Copy crash report", result,
-                   "Creates one text file with the saved settings, log, hardware/driver and fault details. Copies its path to paste into the attachment file picker. Includes local paths; nothing is uploaded.")) {
+                   "Creates one text file with the saved settings, log, hardware/driver and fault details, and copies its text: paste it into the bug report. Includes local paths; nothing is uploaded.")) {
         settings_save();
         if (diagnostics_write_report(report, sizeof report))
-            result = diagnostics_copy_path(report) ? copy_result() : "Saved";
+            result = diagnostics_copy_report(report) ? copy_result() : "Saved";
         else result = "Could not save";
     }
-    if (report[0]) { opt_disable_next(); opt_action("Saved report", "", report); }
-    if (!checked_previous) { diagnostics_last_crash(previous, sizeof previous); checked_previous = true; }
-    if (previous[0] &&
-        opt_action("Copy last crash report", "", "Copies the saved crash report's path, including after restarting the game.")) {
-        if (diagnostics_last_crash(report, sizeof report)) result = diagnostics_copy_path(report) ? copy_result() : "Saved";
-        else { previous[0] = 0; result = "No saved crash"; }
+    if (report[0] && opt_action("Show report file", "", report)) diagnostics_show_report(report);
+    if (!checked_previous) {
+        diagnostics_last_crash_info(previous, sizeof previous, previous_reason, sizeof previous_reason, NULL);
+        checked_previous = true;
+    }
+    if (previous[0]) {
+        char note[400];
+        snprintf(note, sizeof note, "The last crash: %s. Copies that crash report's text, including after restarting the game.",
+                 previous_reason);
+        if (opt_action("Copy last crash report", "", note)) {
+            if (diagnostics_last_crash(report, sizeof report)) result = diagnostics_copy_report(report) ? copy_result() : "Saved";
+            else { previous[0] = 0; result = "No saved crash"; }
+        }
+        if (previous[0] && opt_action("Show last crash report file", "", previous)) diagnostics_show_report(previous);
     }
     opt_end();
 }

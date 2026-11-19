@@ -178,6 +178,31 @@ static int mem_trace(void *arg) {
     return 0;
 }
 
+// ODYSSEY_TEST_CRASH=<kind> (tests of the crash report and its notices, 2026-11-19): ODYSSEY_TEST_CRASH_AFTER seconds
+// (default 20) into the game, stop as that kind of crash does - the same error lines as the real ones. vram: a Vulkan
+// call out of device memory; ram: out of host memory; devlost: Vulkan device lost; illegal: an illegal instruction;
+// fatal: another FATAL error; segv: an access violation; ram-segv: an access violation with memory reported low
+// (ODYSSEY_TEST_MEMORY_LOW). missing-file is in services/fs.c: the RomFS image opened under a name that isn't there.
+static int test_crash(void *arg) {
+    const char *kind = arg, *after = getenv("ODYSSEY_TEST_CRASH_AFTER");
+    SDL_Delay((Uint32)((after ? atof(after) : 20) * 1000));
+    LOG("[test] crash: %s\n", kind);
+    if (!strcmp(kind, "vram")) FATAL("vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL) failed: %d (%s:%d)\n", -2, __FILE__, __LINE__);
+    if (!strcmp(kind, "ram")) FATAL("nvn: out of host memory for commands\n");
+    if (!strcmp(kind, "devlost")) FATAL("vkQueueSubmit(g_vk.queue, 1, &si, fence) failed: %d (%s:%d)\n", -4, __FILE__, __LINE__);
+    if (!strcmp(kind, "illegal")) __builtin_trap();
+    if (!strcmp(kind, "fatal")) FATAL("test: the game asked for something the PC port does not have yet\n");
+    if (!strcmp(kind, "ram-segv")) {
+#ifdef _WIN32
+        _putenv_s("ODYSSEY_TEST_MEMORY_LOW", "1");
+#else
+        setenv("ODYSSEY_TEST_MEMORY_LOW", "1", 1);
+#endif
+    }
+    *(volatile int *)(uintptr_t)8 = 1;
+    return 0;
+}
+
 int main(int argc, char **argv) {
     plat_init();
     diagnostics_init();
@@ -266,6 +291,8 @@ int main(int argc, char **argv) {
 #endif
     if ((!no_audio || !strcmp(no_audio, "0")) && !SDL_InitSubSystem(SDL_INIT_AUDIO))
         LOG("[audio] SDL audio init failed: %s\n", SDL_GetError());
+    if (getenv("ODYSSEY_TEST_CRASH") && strcmp(getenv("ODYSSEY_TEST_CRASH"), "missing-file"))
+        SDL_DetachThread(SDL_CreateThread(test_crash, "testcrash", (void *)getenv("ODYSSEY_TEST_CRASH")));
     for (;;) {
         boot(root);
         ui_run();  // window and input on the main thread; returns when a reboot is requested
