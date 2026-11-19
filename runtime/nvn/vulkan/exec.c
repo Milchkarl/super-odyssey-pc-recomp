@@ -822,6 +822,15 @@ static void split_if_pending(void) {
     vk_submit_extra(VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
 }
 uint64_t renderer_guest_write_seq(void) { return atomic_load(&g_guest_write_seq); }
+// A paint map was drawn into (textures.c renderer_mark_gpu_owned): the submission is ended after that pass, so the
+// map and its copy (paint_copy_at_submit) are done on the GPU early instead of with the whole frame. On a Steam Deck
+// the game's next read waited ~5 ms for that frame-long submission, ~40 times a second, in the Wooded Kingdom's
+// poison (the owner's recording: 28-61 FPS; a locked 60 with the readback off). ODYSSEY_PAINT_SPLIT=0: off.
+void vk_paint_map_written(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_PAINT_SPLIT"); on = !e || atoi(e) != 0; }
+    if (on) g_split_pending = true;
+}
 
 // ---- Guarded compute writes (Linux, with early fences; ODYSSEY_GPU_WRITE_GUARD=0: off)
 // A compute dispatch whose stores go back into game memory through known ranges (the gfast copy-back) doesn't make the
@@ -8763,6 +8772,7 @@ static bool paint_register_shared(NvnTexture *t, uint64_t span) {
         paint_shared_count++;
     }
     paint_shared[slot] = (PaintShared){t, t->debug_id, t->addr, span};
+    if (t->backend) ((TexBackend *)t->backend)->paint_map = true;
     return true;
 }
 

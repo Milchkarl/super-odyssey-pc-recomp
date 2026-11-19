@@ -332,24 +332,52 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
     void *snapshot = malloc(capacity);
     // (the copy the rows at an address hold: asked again within a frame, the renderer returns "unchanged" and
     // nothing is copied - a CPU edit handed back, or a refresh, makes a new copy with a new number)
-    static struct { uint64_t addr, gen; } held[8];
+    static struct { uint64_t addr, gen, ticket; } held[8];
     static unsigned held_next;
     int hi = -1;
     for (int i = 0; i < 8; i++) if (held[i].addr == p->storage + off) hi = i;
+    // Nothing has been handed to the render thread since the last ask about this map: nothing can have written it, the
+    // rows are still the map - no ask at all. PaintObj's attack sensor asks ~39 times a frame, in a row, and each ask
+    // waited for the render thread to reach it behind the frame's draw lists. On a Steam Deck that kept the game
+    // thread just over a frame's time in the Wooded Kingdom's poison (the owner's recording: 28-61 FPS, mostly
+    // 35-55), and under 60 the game runs extra ticks to keep its speed, which costs still more.
+    // ODYSSEY_PAINT_TICKET=0: every ask goes to the render thread, as before. ODYSSEY_PAINT_SYNC_VERIFY=1: it goes
+    // there all the same and must come back "unchanged".
+    static int ticket_on = -1, ticket_verify = -1;
+    static uint64_t tk_skipped, tk_asked, tk_wrong, tk_log;
+    if (ticket_on < 0) { const char *e = getenv("ODYSSEY_PAINT_TICKET"); ticket_on = !e || atoi(e) != 0; }
+    if (ticket_verify < 0) ticket_verify = getenv("ODYSSEY_PAINT_SYNC_VERIFY") != NULL;
+    bool same_queue = ticket_on && rq_enabled() && !refresh && hi >= 0 && held[hi].gen && held[hi].ticket &&
+                      rq_last_ticket() == held[hi].ticket;
+    if (same_queue && !ticket_verify) { tk_skipped++; return; }
     RqCpuTexel q = {.addr = p->storage + off, .components = 1, .component_bytes = 4,
         .snapshot = snapshot, .snapshot_capacity = capacity, .guest_capacity = p->size - off,
         .guest_pitch = G(uint32_t, td, 0x4c), .refresh_snapshot = refresh, .have_gen = hi >= 0 && !refresh ? held[hi].gen : 0};
+    uint64_t ticket = 0;
 #ifndef __APPLE__
     if (snapshot) {
-        if (rq_enabled()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
+        if (rq_enabled()) { ticket = rq_push(RQ_CPU_TEXEL, &q, 0); rq_wait(ticket); }
         else { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(&q); }
     }
 #endif
+    tk_asked++;
+    if (same_queue && !(q.valid && q.unchanged)) {  // (verify: the ask that would have been left out found a change)
+        if (tk_wrong++ < 8) LOG("[paint-verify] DIFFERENT (no ask since the queue stood still): %llx valid %d unchanged %d\n",
+                                (unsigned long long)q.addr, q.valid, q.unchanged);
+    }
+    if (ticket_verify && (tk_asked % 20000) == 0)
+        LOG("[paint-verify] asks the standing queue would leave out: %llu wrong so far\n", (unsigned long long)tk_wrong);
     bool stored = q.valid && (q.unchanged || nvn_linear_store_rows((void *)(uintptr_t)q.addr, q.guest_capacity, q.guest_pitch,
         snapshot, capacity, (uint64_t)q.snapshot_width * 4, q.snapshot_height));
     if (stored && !q.unchanged) {
         if (hi < 0) hi = (int)(held_next++ % 8);
         held[hi].addr = q.addr, held[hi].gen = q.gen;
+    }
+    if (hi >= 0) held[hi].ticket = stored ? ticket : 0;  // (the rows are the map as of this ask - or not known)
+    if (getenv("ODYSSEY_LOG_PAINT_SYNC") && tk_asked - tk_log >= 2000) {
+        tk_log = tk_asked;
+        LOG("[paint-sync] asks: %llu sent to the render thread, %llu left out (nothing queued since the last)\n",
+            (unsigned long long)tk_asked, (unsigned long long)tk_skipped);
     }
     if (stored) p->paint_cpu_shared = true;
     static unsigned counts[4];

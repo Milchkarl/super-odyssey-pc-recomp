@@ -1100,6 +1100,7 @@ void renderer_mark_gpu_owned(NvnTexture *t) {  // (the GPU writes it: in the gra
     b->gpu_wgen++;
     if (!vk_recording_cq()) b->gfx_wseq = renderer_fence_seq();
     else b->cq_wgen = b->gpu_wgen;
+    if (b->paint_map && !vk_recording_cq()) { extern void vk_paint_map_written(void); vk_paint_map_written(); }
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }

@@ -158,3 +158,26 @@ that wrote it (exec.c paint_copy_at_submit), and a read takes that copy, waiting
   3 -> 2.
 
 Not covered: the Steam Deck (a map last written on the compute queue keeps the copy at the read), other GPUs.
+
+## Steam Deck, 2026-11-18 (the owner's second Wooded Kingdom recording replayed there)
+
+Handheld mode, 60 FPS asked, `tools/linux/deck/deck-bench.sh` with `ODYSSEY_INPUT_REPLAY` (and `ODYSSEY_WARP=` in
+GAME_ENV: the bench warps to Cap Kingdom otherwise). FPS in the 2 s windows of the ride:
+
+| Build | FPS |
+| --- | --- |
+| a readback at every frame (0.4.6 and before) | 22-47, mostly 25-35 |
+| only when the map changed + the copy where it is written | 28-61, mostly 35-55 |
+| + no ask while nothing was queued since the last, + the map's pass in a submission of its own | 36-61, mostly 44-58 |
+| the readback off (`ODYSSEY_PAINT_CPU_READBACK=0`: poison then hurts where none is shown) | 60 throughout |
+
+- The copy made at the write waited ~5 ms for its submission ~40 times a second there (the frame's one long
+  submission); with the map's pass ending its own submission (vk_paint_map_written -> split_if_pending) none waits.
+- 91% of the asks are left out by the standing-queue check (objects.c paint_sync_rows), with no change in FPS: the
+  round trips were not what cost the time.
+- What is left: while Cappy clears poison the game's labeling pass asks with a refresh and hands CPU edits back,
+  about four times a frame, and each waits for the render thread to finish the lists queued before it (~7 ms of
+  work a frame on the Deck) - the game thread and the render thread then run one after the other. Below 60 FPS the
+  game also runs extra ticks to keep its speed (ODYSSEY_GAMEPLAY_CATCHUP), which adds to it.
+- `ODYSSEY_PAINT_SYNC_VERIFY=1` on the Deck: 2,873 copies at the write and 1,954 left-out readbacks equal, none
+  different; on Windows also the left-out asks (0 wrong) and the 1.0.0 Spewart runs (Cappy's path, 3 -> 2 in poison).
