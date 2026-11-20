@@ -45,7 +45,7 @@ export MSYS_NO_PATHCONV=1  # (Git Bash would rewrite /tmp/... and /retest-style 
 say() { echo; echo "== $*"; }
 # (the seed check's link to TESTDATA's game files - step 3b - is removed whatever happens: deleting the work folder
 # through it would delete those files)
-trap '[ -e "$WORK/seedcheck/extracted" ] && cmd //c rmdir "$(cygpath -w "$WORK/seedcheck/extracted")" > /dev/null 2>&1; echo "(work folder kept: $WORK)"' EXIT
+trap '[ -e "$WORK/seedcheck/extracted" ] && cmd /c rmdir "$(cygpath -w "$WORK/seedcheck/extracted")" > /dev/null 2>&1; echo "(work folder kept: $WORK)"' EXIT
 
 probe() {  # url -> runs the catalog probe on it, fails unless both of its checks find the window
     gh workflow run probe.yml --repo "$PROBE" -f "url=$1" >/dev/null
@@ -95,7 +95,7 @@ say "3b/7  Windows: the shipped pipeline seed against this build's shaders"
 # Regenerate the seed with tools/make_pipeline_seed.py (see its docstring).
 SEEDROOT="$WORK/seedcheck"
 mkdir -p "$SEEDROOT/cache"
-cmd //c mklink //J "$(cygpath -w "$SEEDROOT/extracted")" "$(cygpath -w "$SEEDDATA/extracted")" > /dev/null
+cmd /c mklink /J "$(cygpath -w "$SEEDROOT/extracted")" "$(cygpath -w "$SEEDDATA/extracted")" > /dev/null
 ( cd "$WORK/win/Super Odyssey PC Recomp" &&
   ./SuperOdysseyRecomp.exe --unpack-seed "$(cygpath -w "$SEEDROOT/cache/graphics-pipelines.bin")" > "$WORK/seed-unpack.log" 2>&1
   for pass in all recorded; do
@@ -125,7 +125,7 @@ cp -r "${RIDESAVE:-$TESTDATA/save-cap}" "$WORK/save-play"
   ODYSSEY_DATA_ROOT="$(cygpath -w "$SEEDROOT")" ODYSSEY_SAVE_DIR="$(cygpath -w "$WORK/save-play")" ODYSSEY_PREPARE=0 \
   ODYSSEY_NO_CONFIG=1 ODYSSEY_NO_UPDATE_CHECK=1 ODYSSEY_DISCORD=0 ODYSSEY_WINDOW=1280x720 \
   ODYSSEY_INPUT='1500:A:8,1650:A:8,1800:A:8,1950:A:8,2100:A:8' ODYSSEY_HOST_INPUT="${PLAY_FRAMES:-9000}:quit:x" timeout 1800 ./SuperOdysseyRecomp.exe > "$WORK/play.log" 2>&1 ) || true
-cmd //c rmdir "$(cygpath -w "$SEEDROOT/extracted")" > /dev/null 2>&1 || true
+cmd /c rmdir "$(cygpath -w "$SEEDROOT/extracted")" > /dev/null 2>&1 || true
 CENSUS=$(grep -a "\[census\] translated" "$WORK/play.log" | tail -1)
 [ -n "$CENSUS" ] || { echo "the play run gave no census ($WORK/play.log)"; exit 1; }
 echo "$CENSUS"; grep -a "\[census\] compiled" "$WORK/play.log" | tail -1
