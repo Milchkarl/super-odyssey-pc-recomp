@@ -45,6 +45,7 @@ Settings g_settings = {
     .discord_presence = false,  // (off until the player turns it on - owner 2026-11-17)
     .show_fps = false,
     .overlay_size = 1, .overlay_opacity = 80,
+    .overlay_corner = OVERLAY_BOTTOM_LEFT,  // (owner 2026-11-20: the performance overlay bottom left by default)
     .overlay_gpu = true, .overlay_cpu = true, .overlay_ram = true, .overlay_graph = true, .overlay_hardware = true,
     .overlay_render = true, .overlay_position = true,
 #ifdef __APPLE__
@@ -72,9 +73,9 @@ Settings g_settings = {
     .mouse_camera = true,
     .mouse_menus = true,
     // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
-    // (always the full resolution). VSync Fast (Mailbox) since 2026-11-20 (owner: no tearing, little delay).
+    // (always the full resolution) and VSync off (owner 2026-11-20, after a day of Fast: Off again for new players).
     .game_dynres = false,
-    .vsync = VSYNC_FAST,
+    .vsync = VSYNC_OFF,
     .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
     .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
     .mouse_sensitivity = 100,
