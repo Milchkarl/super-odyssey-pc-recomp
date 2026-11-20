@@ -388,6 +388,18 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         ci.flags &= ~VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         VkResult r2 = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
         // (#99, an 8 GB PC with integrated graphics, whose graphics memory is the PC's own: say what ran out)
+        if (r2 == VK_ERROR_OUT_OF_DEVICE_MEMORY || r2 == VK_ERROR_OUT_OF_HOST_MEMORY) {
+            // (which heap was full, and how much of it is outside VMA - e.g. the guest heap's import: #99)
+            VkPhysicalDeviceMemoryProperties pm;
+            vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+            VmaBudget bud[VK_MAX_MEMORY_HEAPS];
+            vmaGetHeapBudgets(g_vk.vma, bud);
+            for (uint32_t h = 0; h < pm.memoryHeapCount; h++)
+                LOG("[vk] heap %u %s: size %llu MB, budget %llu MB, used %llu MB (by our allocator %llu MB)\n", h,
+                    pm.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "gpu" : "sys",
+                    (unsigned long long)(pm.memoryHeaps[h].size >> 20), (unsigned long long)(bud[h].budget >> 20),
+                    (unsigned long long)(bud[h].usage >> 20), (unsigned long long)(bud[h].statistics.blockBytes >> 20));
+        }
         if (r2 == VK_ERROR_OUT_OF_DEVICE_MEMORY || r2 == VK_ERROR_OUT_OF_HOST_MEMORY)
             FATAL("out of memory for a texture (%ux%u): the PC's memory (with integrated graphics: RAM and page file) is "
                   "full. Close other programs, set Performance > Memory use to Low, lower the internal resolution, or "
