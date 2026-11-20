@@ -5801,16 +5801,20 @@ static PipeRecipe *load_pipeline_recipes(PipeRecipeHeader *h) {
     return recipes;
 }
 
+// (setup's pipeline pass) why recorded pipelines were left out: a duplicate / full table, a state out of range, no
+// program (its shaders not among the ones compiled), the build failing - logged with the pass's summary
+static uint32_t g_warm_miss[4];
 static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_libraries) {
     uint32_t slot = pipe_slot(hash);
-    if (slot == PIPE_TAB || pipe_tab[slot].pipe) return false;
+    if (slot == PIPE_TAB || pipe_tab[slot].pipe) { g_warm_miss[0]++; return false; }
     Pipe *pp = calloc(1, sizeof *pp);
     if (!pp) return false;
     memcpy((uint8_t *)&pp->k + PIPE_STATE_OFFSET, r->state, sizeof r->state);
-    if (r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2)
-        pp->k.prog = prewarm_program(r, use_libraries);
+    bool in_range = r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2;
+    if (in_range) pp->k.prog = prewarm_program(r, use_libraries);
     if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
     if (atomic_load(&pp->state) != 1) {
+        g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
         free(pp);
         return false;
     }
@@ -5897,6 +5901,8 @@ static int prepare_recorded_pipelines(void) {
     vk_pipeline_cache_save();
     LOG("[prep] recorded %u graphics and %u compute pipelines, %u unavailable (%u..%u of %u)\n",
         graphics, compute, next - start - graphics - compute, start, next, h.count);
+    LOG("[prep]   left out: %u already there or no room, %u state out of range, %u without their shaders, %u failed to build\n",
+        g_warm_miss[0], g_warm_miss[1], g_warm_miss[2], g_warm_miss[3]);
     if (next == h.count) {
         remove(RECORDED_NEXT);
         return 0;

@@ -53,6 +53,8 @@ def main():
     session = ''
     with open(sys.argv[1], encoding='utf-8', errors='replace') as f:
         for line in f:
+            if 'window closed' in line:  # (what follows is the game shutting down, not play)
+                break
             m = SESSION.search(line)
             if m and not session:
                 session = m.group(1)
