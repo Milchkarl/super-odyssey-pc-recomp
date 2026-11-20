@@ -1887,6 +1887,7 @@ static void translator_start(void) {
     int n = SDL_GetNumLogicalCPUCores() / 4;
     if (n < 2) n = 2;
     if (n > 4) n = 4;
+    if (SDL_GetNumLogicalCPUCores() <= 8) n = 1;  // (a Steam Deck: see workers_start)
     if (getenv("ODYSSEY_TRANSLATE_THREADS")) n = atoi(getenv("ODYSSEY_TRANSLATE_THREADS")) > 0 ? atoi(getenv("ODYSSEY_TRANSLATE_THREADS")) : 1;
     for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, translator, NULL); }
 }
@@ -1895,6 +1896,12 @@ static void workers_start(void) {
     int n = SDL_GetNumLogicalCPUCores() - 4;
     if (n < 4) n = 4;
     if (n > 16) n = 16;
+    // A CPU of 8 threads or fewer (a Steam Deck): 2 workers and 1 translator. With 4 + 2 at normal priority beside the
+    // game's own threads, the game's main thread lost the CPU to them whenever builds were queued - a 45-160 ms frame
+    // in about half of the Deck's Cap Kingdom walks (when Mario starts running into the town) and 50-63 ms arrivals;
+    // with 2 + 1: none over 50 ms in 4 walks, the same frame rate (2026-11-20). ODYSSEY_SHADER_THREADS /
+    // ODYSSEY_TRANSLATE_THREADS override.
+    if (SDL_GetNumLogicalCPUCores() <= 8) n = 2;
     if (getenv("ODYSSEY_SHADER_THREADS")) n = atoi(getenv("ODYSSEY_SHADER_THREADS")) > 0 ? atoi(getenv("ODYSSEY_SHADER_THREADS")) : 1;
     jobs_low_max = n > 1 ? n / 2 : 1;
     for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, worker, NULL); }
