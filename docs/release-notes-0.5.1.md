@@ -16,6 +16,6 @@ Smoother kingdom arrivals next, then gyro aiming.
 
 ## Updating
 
-This update prepares the shaders once more, now for the whole game: about 2 minutes on the test PC (RTX 4090), longer on slower PCs and the Steam Deck. It also uses about 0.4 GB more disk in the game's cache folder. The game code is not rebuilt.
+This update prepares the shaders once more, now for the whole game: about 2 minutes on the test PC (RTX 4090), about 6 minutes on a Steam Deck. It also uses about 0.4 GB more disk in the game's cache folder. The game code is not rebuilt.
 
 Windows: download the zip below and extract it over your current folder (or use **Updates** in the menu). Linux / Steam Deck: download the AppImage below, or use **Updates** in the menu. Your game files, saves and settings stay.
