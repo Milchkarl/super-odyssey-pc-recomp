@@ -21,6 +21,8 @@
 #
 # This machine's own places: tools/release.local.sh (git-ignored) sets
 #   TESTDATA=X:/path    a game data root (ODYSSEY_DATA_ROOT) with extracted game files and a Cap Kingdom save in save-cap/
+#   SEEDDATA=X:/path    optional: the game files for steps 3b/3c (default TESTDATA), as setup makes them - with
+#                       extracted/romfs.bin, which setup's shader pass scans (an old manual extraction has only romfs/)
 #   DECK=user@host      optional: the Steam Deck over SSH (with ~/sopr/ai-case.sh and ~/sopr/deck-boot-ov.sh there)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,6 +32,8 @@ NOTES=${2:?usage: tools/release.sh <version> <release-notes.md>}
 [ -f "$NOTES" ] || { echo "no such file: $NOTES"; exit 1; }
 [ -f tools/release.local.sh ] && . tools/release.local.sh
 : "${TESTDATA:?set TESTDATA in tools/release.local.sh}"
+SEEDDATA=${SEEDDATA:-$TESTDATA}
+[ -f "$SEEDDATA/extracted/romfs.bin" ] || { echo "no $SEEDDATA/extracted/romfs.bin: set SEEDDATA (tools/release.local.sh) to game files set up by the setup"; exit 1; }
 DECK=${DECK:-}
 REPO=Simon3Sarkis/super-odyssey-pc-recomp
 PROBE=Simon3Sarkis/sopr-catalog-probe
@@ -87,11 +91,11 @@ say "3b/7  Windows: the shipped pipeline seed against this build's shaders"
 # The setup compiles the pipelines in pipeline-seed.bin ahead. Its recipes name translated shaders by key, so a change
 # to the shader translator can leave them pointing at nothing: 0.5.0 shipped a seed whose recipes were 63% unusable
 # (4,318 of 6,905), and a new player's opening stuttered on what should have been ready. The zip's own setup passes are
-# run here on a fresh cache (the game files linked from TESTDATA) and the release stops if more than 5% are left out.
+# run here on a fresh cache (the game files linked from SEEDDATA) and the release stops if more than 5% are left out.
 # Regenerate the seed with tools/make_pipeline_seed.py (see its docstring).
 SEEDROOT="$WORK/seedcheck"
 mkdir -p "$SEEDROOT/cache"
-cmd //c mklink //J "$(cygpath -w "$SEEDROOT/extracted")" "$(cygpath -w "$TESTDATA/extracted")" > /dev/null
+cmd //c mklink //J "$(cygpath -w "$SEEDROOT/extracted")" "$(cygpath -w "$SEEDDATA/extracted")" > /dev/null
 ( cd "$WORK/win/Super Odyssey PC Recomp" &&
   ./SuperOdysseyRecomp.exe --unpack-seed "$(cygpath -w "$SEEDROOT/cache/graphics-pipelines.bin")" > "$WORK/seed-unpack.log" 2>&1
   for pass in all recorded; do
