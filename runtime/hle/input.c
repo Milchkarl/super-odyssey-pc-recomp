@@ -474,8 +474,24 @@ void hle__ZNK18ProjectCameraInput14calcInputStickEPN4sead7Vector2IfEE(Cpu *c) {
     mouse_camera_frame(&x, &y);
     float *v = (float *)(uintptr_t)out;
     float stick_x = v[0], stick_y = v[1];
-    v[0] *= g_settings.stick_camera_x / 100.0f * (g_settings.stick_camera_invert_x ? -1 : 1);
-    v[1] *= g_settings.stick_camera_y / 100.0f * (g_settings.stick_camera_invert_y ? -1 : 1);
+    // Stick speed (#111): the game's camera ignores the stick below 0.30 of its reach and turns in proportion to the
+    // part above it, up to its top speed at full tilt (measured: 0.35 -> 11 deg in 2 s, 0.5 -> 43, 0.7 -> 86, 1.0 -> 151;
+    // ODYSSEY_LOG_CAMERA_YAW). Scaling the whole value put 25% under that line (no turning at all) and 150% past full
+    // tilt (no faster). The speed scales the part above 0.30 instead: below 100% the camera turns that much slower at
+    // any tilt; above it, part tilts turn faster (full tilt stays the game's top speed).
+    {
+        const float dz = 0.30f;
+        float m = sqrtf(v[0] * v[0] + v[1] * v[1]);
+        if (m > dz) {
+            float sx = g_settings.stick_camera_x / 100.0f, sy = g_settings.stick_camera_y / 100.0f;
+            float ax = v[0] / m * (dz + sx * (m - dz)), ay = v[1] / m * (dz + sy * (m - dz));
+            float n = sqrtf(ax * ax + ay * ay);
+            if (n > 1.0f) ax /= n, ay /= n;  // (the game's own top speed)
+            v[0] = ax, v[1] = ay;
+        }
+        if (g_settings.stick_camera_invert_x) v[0] = -v[0];
+        if (g_settings.stick_camera_invert_y) v[1] = -v[1];
+    }
     v[0] += x, v[1] += y;
     static int lm = -1, n;
     if (lm < 0) lm = getenv("ODYSSEY_LOG_MOUSE") != NULL;
