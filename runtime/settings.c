@@ -342,6 +342,7 @@ void settings_load(void) {
         else if (!strcmp(key, "frame_generation")) g_settings.frame_gen = atoi(val) ? FG_FSR : FG_OFF;  // (0.2.12 dev)
         else if (!strcmp(key, "frame_gen")) g_settings.frame_gen = !strcmp(val, "fsr") ? FG_FSR : !strcmp(val, "dlss") ? FG_DLSS : FG_OFF;
         else if (!strcmp(key, "hud_position")) g_settings.hud_edges = strcmp(val, "centered") != 0;
+        else if (!strcmp(key, "narrow_view")) g_settings.narrow_full = !strcmp(val, "full");
         else if (!strcmp(key, "low_latency")) { int v = atoi(val); g_settings.low_latency = v >= 0 && v <= 2 ? v : 0; }
         else if (!strcmp(key, "fsr3_mode")) g_settings.fsr3_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "fsr4_mode")) g_settings.fsr4_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
@@ -511,6 +512,7 @@ void settings_save(void) {
     fprintf(f, "frame_gen = %s\n", g_settings.frame_gen == FG_FSR ? "fsr" : g_settings.frame_gen == FG_DLSS ? "dlss" : "off");
     fprintf(f, "low_latency = %d\n", g_settings.low_latency);
     fprintf(f, "hud_position = %s\n", g_settings.hud_edges ? "edges" : "centered");
+    fprintf(f, "narrow_view = %s\n", g_settings.narrow_full ? "full" : "cropped");
     fprintf(f, "temporal_backend = %s\n", temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "fsr3_mode = %s\n", fsr3_modes[g_settings.fsr3_mode]);
     fprintf(f, "fsr3_sharpness = %d\n", g_settings.fsr3_sharpness);
