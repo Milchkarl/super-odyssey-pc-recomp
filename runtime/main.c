@@ -218,6 +218,12 @@ int main(int argc, char **argv) {
     setvbuf(stderr, NULL, _IOLBF, 0);
 #endif
     { extern void input_steam_motion_prepare(void); input_steam_motion_prepare(); }  // (before SDL sees controllers)
+#ifdef __linux__
+    // Setup's shader pass compiles every program in the game files once into the driver's own disk cache (~650 MB on
+    // NVIDIA, 2026-11-19), from which the game's first draws take them in ~0.1 ms; Mesa's default limit is 1 GB, shared
+    // with other programs. (Under Steam, Steam's own setting is kept.)
+    setenv("MESA_SHADER_CACHE_MAX_SIZE", "4G", 0);
+#endif
     const char *root = "extracted";  // (in the data root)
     bool build_romfs = false;
     const char *prepare = NULL;

@@ -9,6 +9,8 @@
 #      clean machines. Download both.
 #   3. Windows: run the downloaded zip's exe on a copied save until it is playing in Cap Kingdom (a first run after a
 #      change to the game code's sources rebuilds that code first, as players' setups do) and take a screenshot.
+#      3b/3c. The zip's setup shader passes on a fresh cache: the pipeline seed must still build, and a new player's
+#      play from that cache must translate (almost) no shaders itself.
 #   4. Linux: if the Steam Deck (DECK) answers, start the AppImage there with no Vulkan driver and normally - each must
 #      show a window - and play it for 2 minutes from the installed save. Skipped with a warning when it doesn't.
 #   5. The AppImage catalog's own test (the private probe repository) on the downloaded AppImage, before publishing.
@@ -105,8 +107,27 @@ if [ $((SU * 100)) -gt $(((SG + SC + SU) * 5)) ]; then
     echo "Regenerate data/pipeline-seed.bin.zst (tools/make_pipeline_seed.py) - not releasing."
     exit 1
 fi
-cmd //c rmdir "$(cygpath -w "$SEEDROOT/extracted")" > /dev/null 2>&1 || true
 echo "ok: $SU of $((SG + SC + SU)) left out"
+
+say "3c/7  Windows: a new player's play translates no shaders"
+# The setup above translates every program in the game files (~31,500) and saves them; the game must then take each
+# from there. Played here from that fresh setup's cache: TESTDATA's Cap Kingdom save, or RIDE (a recorded ride,
+# tools/release.local.sh: RIDE=file.bin RIDESAVE=its save-at-start folder) for a longer route. The game's census at the
+# quit counts the programs it had to translate itself; the release stops above 50 (2026-11-19: 10 on a 3-minute ride,
+# was 12,646 - each ~4.6 ms of a worker's time with its draws skipped meanwhile).
+cp -r "${RIDESAVE:-$TESTDATA/save-cap}" "$WORK/save-play"
+( cd "$WORK/win/Super Odyssey PC Recomp" &&
+  if [ -n "${RIDE:-}" ]; then export ODYSSEY_INPUT_REPLAY="$(cygpath -w "$RIDE")"; fi &&
+  ODYSSEY_DATA_ROOT="$(cygpath -w "$SEEDROOT")" ODYSSEY_SAVE_DIR="$(cygpath -w "$WORK/save-play")" ODYSSEY_PREPARE=0 \
+  ODYSSEY_NO_CONFIG=1 ODYSSEY_NO_UPDATE_CHECK=1 ODYSSEY_DISCORD=0 ODYSSEY_WINDOW=1280x720 \
+  ODYSSEY_INPUT='1500:A:8,1650:A:8,1800:A:8,1950:A:8,2100:A:8' ODYSSEY_HOST_INPUT="${PLAY_FRAMES:-9000}:quit:x" timeout 1800 ./SuperOdysseyRecomp.exe > "$WORK/play.log" 2>&1 ) || true
+cmd //c rmdir "$(cygpath -w "$SEEDROOT/extracted")" > /dev/null 2>&1 || true
+CENSUS=$(grep -a "\[census\] translated" "$WORK/play.log" | tail -1)
+[ -n "$CENSUS" ] || { echo "the play run gave no census ($WORK/play.log)"; exit 1; }
+echo "$CENSUS"; grep -a "\[census\] compiled" "$WORK/play.log" | tail -1
+TN=$(echo "$CENSUS" | sed -E 's/.*not prepared ([0-9]+).*/\1/')
+[ "$TN" -le 50 ] || { echo "the game translated $TN shaders a setup should have - not releasing ($WORK/play.log)"; exit 1; }
+echo ok
 
 say "4/7  Linux on the Steam Deck"
 if [ -n "$DECK" ] && timeout 15 $SSH "$DECK" true 2>/dev/null; then

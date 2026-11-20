@@ -2050,6 +2050,7 @@ static void quick_exit_handler(void) {
     static int trace = -1;
     if (trace < 0) trace = getenv("ODYSSEY_VK_TRACE") != NULL;
     { extern void sampler_flush(void); sampler_flush(); }  // (a sampling session still going: written out)
+    { extern void vk_census_report(void); if (!g_vk.headless) vk_census_report(); }
     if (trace) LOG("[vk] exit: waiting for the GPU\n");
     if (g_vk.dev) {
         vk_queue_lock();
