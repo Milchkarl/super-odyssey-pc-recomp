@@ -316,6 +316,7 @@ dist:
 	@[ -f build/upscalers/libxess.dll ] || { echo "tools/fetch_upscalers.sh first (DLSS, FSR, XeSS runtimes)"; exit 1; }
 	$(MAKE) B=$(WIN_B) DEPS=$(CURDIR)/build/deps-win $(WIN_B)/SuperOdysseyRecomp.exe
 	! nm $(WIN_B)/SuperOdysseyRecomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
+	$(GEN_VPY) tools/check_cpu_baseline.py $(WIN_B)/SuperOdysseyRecomp.exe --dispatched "$$($(CC) -print-file-name=libzstd.a)"  # (runs on AVX without AVX2: docs/CPU-BASELINE.md)
 	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src"
 	cp $(WIN_B)/SuperOdysseyRecomp.exe $(WIN_B)/SuperOdysseyRecomp.dll.a "$(DIST)/"
 	strip --strip-debug "$(DIST)/SuperOdysseyRecomp.exe"  # (its debug info names the build folder; exports stay)
