@@ -1,7 +1,7 @@
 // Screen shape (Video tab "Aspect ratio": Fill window). In a window wider than 16:9 the game shows more of its scene at
 // the sides (Hor+) and keeps its HUD's shape in the middle; in a narrower one (a Steam Deck's 16:10) its view keeps its
-// height and shows a little less at the sides, and the HUD keeps its 16:9 shape, fitted to the width (a little shorter,
-// centred). The recompiler multiplies the game's own screen values (tools/odyssey_patches.py WIDE_SITES): its camera's
+// width and shows more above and below (Vert+: its field of view widened, odyssey_wide_camera), and the HUD keeps its
+// 16:9 shape, fitted to the width (a little shorter, centred). The recompiler multiplies the game's own screen values (tools/odyssey_patches.py WIDE_SITES): its camera's
 // aspect (odyssey_wide_camera: the shape), and the layout width where it sizes the screen (the layouts' projection, the
 // life gauge and Cappy's off-screen marker kept on screen, the 2D effects: odyssey_wide / odyssey_wide_drawinfo - the
 // shape when wider, 1 when narrower). The renderer allocates the screen targets in the shape (nvn/output_scale.c,
@@ -59,7 +59,28 @@ float odyssey_wide_drawinfo(uint64_t di) {
 }
 
 // (WIDE_SITES: al::CameraPoseUpdater::update, before its projection) the window's shape takes effect
+// Narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck): the view keeps the 16:9 one's width and shows more above and
+// below (Vert+, #112: it used to keep the height and cut the sides). The projection's arguments are in registers here
+// (s0 near, s1 far, s2 the vertical field of view in radians, s3 the aspect, which the caller multiplies by the shape):
+// the field of view is widened so tan(fovy / 2) x aspect stays the 16:9 one. Only the register: the camera's own value
+// (and so the next frame's) is untouched. ODYSSEY_WIDE_HOR_MINUS=1: the old cut sides.
+static float camera_shape(void);
 float odyssey_wide_camera(void) {
+    float k = camera_shape();
+    static int hor_minus = -1;
+    if (hor_minus < 0) hor_minus = getenv("ODYSSEY_WIDE_HOR_MINUS") && atoi(getenv("ODYSSEY_WIDE_HOR_MINUS"));
+    Cpu *c;
+    if (k < 1.0f && !hor_minus && (c = kernel_current_cpu())) {
+        float *fovy = (float *)&c->v[2];
+        if (*fovy > 0.01f && *fovy < 3.0f) {
+            float f = 2.0f * atanf(tanf(*fovy * 0.5f) / k);
+            *fovy = f < 3.0f ? f : 3.0f;
+        }
+    }
+    return k;
+}
+
+static float camera_shape(void) {
     for (int i = 0; i < g_ndi; i++)
         if (!g_di[i].known && g_di[i].k == g_wide) {  // (made since: its rows, and the HUD's height when narrower)
             float ky = hud_y(g_wide);
