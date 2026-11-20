@@ -2219,7 +2219,7 @@ static bool g_prepare_skipped;  // (the player said Later: not this start)
 #ifndef PREP_ID
 #define PREP_ID "dev"
 #endif
-#define PREP_REV 1
+#define PREP_REV 2  // (2, 0.5.2: saved translations labelled with PREP_ID - prepared once more so they match)
 // (a mark written the old way for the same shader sources: {PREP_ID "." PREP_REV, its "app <version>"} - 0.4.7 was
 // released from these sources, so its players are not prepared once more; void as soon as either changes)
 static const char *const prep_same_as[][2] = {{"50739c27e9a1.1", "0.4.7"}};

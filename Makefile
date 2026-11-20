@@ -147,6 +147,10 @@ PREP_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h runtim
 PREP_ID := $(shell cat $(PREP_SRCS) | tr -d '\015' | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-12)
 $(B)/rt/nvn/vulkan/device.o: $(PREP_SRCS)
 $(B)/rt/nvn/vulkan/device.o: RTFLAGS += -DPREP_ID='"$(PREP_ID)"'
+# (the same hash labels the game's saved translations - maxwell_translator_stamp: a build's own date and time made every
+# release's players translate thousands of shaders again in their first kingdom, setup not being due)
+$(B)/rt/nvn/maxwell/translate.o: $(PREP_SRCS)
+$(B)/rt/nvn/maxwell/translate.o: RTFLAGS += -DTRANSLATOR_ID='"$(PREP_ID)"'
 $(B)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 # the setup page's build of it on the player's machine (runtime/gamebuild.c) uses the same flags
 $(B)/rt/gamebuild.o: $(GAMELIB_SRCS) Makefile

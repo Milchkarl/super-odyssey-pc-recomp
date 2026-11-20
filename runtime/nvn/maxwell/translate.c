@@ -2952,8 +2952,17 @@ size_t maxwell_code_extent(const uint8_t *blob, size_t max_size, int stage) {
 }
 
 // Changes with every build of the translator (its output may change): saved translations of another build aren't used
+// What the game's saved translations (nvn/vulkan/exec.c tcache) and setup's are labelled with: the Makefile's hash of
+// the translator's sources (PREP_ID, also setup's identity: device.c prep_identity). It was this file's build date and
+// time: every release (a fresh build) made players' saved translations look stale while setup, going by PREP_ID, was not
+// due - the first kingdom loaded after an update translated ~2,800 shaders while playing (the owner, 2026-11-20).
+// A build without it (no Makefile): its date and time, as before.
 uint64_t maxwell_translator_stamp(void) {
+#ifdef TRANSLATOR_ID
+    static const char stamp[] = TRANSLATOR_ID;
+#else
     static const char stamp[] = __DATE__ " " __TIME__;
+#endif
     uint64_t h = 1469598103934665603ull ^ (sizeof(ShaderInfo) << 16 ^ sizeof(ShaderKey));
     for (const char *s = stamp; *s; s++) h = (h ^ (uint8_t)*s) * 1099511628211ull;
     return h;
