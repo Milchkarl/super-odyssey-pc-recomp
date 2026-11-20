@@ -41,7 +41,6 @@
 #include "steam_shortcut.h"
 
 #ifndef __APPLE__
-extern "C" bool vk_seed_unpack(const char *src, const char *dst);  // runtime/nvn/vulkan/shaders.c
 #endif
 extern "C" {
 #include "../diagnostics.h"
@@ -422,16 +421,7 @@ static void *work(void *) {
     if (!setup_ready(root.c_str())) { fail("Game files incomplete", "Choose your game again."); return NULL; }
 #ifndef __APPLE__
     if (!g_code_only) {
-        // the release's pipeline seed: the pipeline states recorded while playing (exec.c
-        // load_pipeline_recipes keeps the ones this GPU supports), unless this PC has recorded its own already
-        char seed[1100];
-        mkdir("cache", 0755);
-        // (packed with zstd since 0.5.1: runtime/nvn/vulkan/shaders.c vk_seed_unpack; a plain one still works)
-        if (file_exists("cache/graphics-pipelines.bin")) {}
-        else if (rt_resource("pipeline-seed.bin.zst", "data/pipeline-seed.bin.zst", seed, sizeof seed))
-            LOG("[setup] pipeline seed: %s\n", vk_seed_unpack(seed, "cache/graphics-pipelines.bin") ? "unpacked" : "unpacking failed");
-        else if (rt_resource("pipeline-seed.bin", "data/pipeline-seed.bin", seed, sizeof seed))
-            LOG("[setup] pipeline seed: %s\n", copy_file_to(seed, "cache/graphics-pipelines.bin") ? "copied" : "copy failed");
+        // (the release's pipeline seed is unpacked by vk_prepare_install: nvn/vulkan/device.c prep_seed)
         set_step("Compiling shaders...");
         g_frac = 0.55f;
         int code = vk_prepare_install(shader_progress, &g_cancel);

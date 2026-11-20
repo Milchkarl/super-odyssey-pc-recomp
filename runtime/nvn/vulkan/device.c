@@ -2318,10 +2318,25 @@ bool vk_gpu_is_nvidia(void) { return g_vk.props.vendorID == 0x10de; }  // (the m
 bool vk_prepare_due(void) { char key[64]; return prepare_due(false, key); }
 void vk_prepare_skip_this_start(void) { g_prepare_skipped = true; LOG("[prep] shader preparation put off (Later)\n"); }
 
+// The release's pipeline seed (data/pipeline-seed.bin.zst, ~8,300 pipeline states recorded while playing) as the
+// "recorded" pass's list, unless this PC has recorded its own already - before every full preparation, not only the
+// setup's first install: a game folder whose files were already set up was prepared without it (the owner's new-user
+// test, 2026-11-19: "no compatible recorded pipeline states", ~1,900 libraries built while playing, some ~120 ms).
+static void prep_seed(void) {
+    char seed[1100];
+    struct stat st;
+    mkdir("cache", 0755);
+    if (stat("cache/graphics-pipelines.bin", &st) == 0) return;
+    if (rt_resource("pipeline-seed.bin.zst", "data/pipeline-seed.bin.zst", seed, sizeof seed))
+        LOG("[prep] pipeline seed: %s\n", vk_seed_unpack(seed, "cache/graphics-pipelines.bin") ? "unpacked" : "unpacking failed");
+    else
+        LOG("[prep] no pipeline seed in this build\n");
+}
+
 void vk_prepare_before_start(void) {
     char key[64];
     if (!prepare_due(true, key)) return;
-    mkdir("cache", 0755);
+    prep_seed();
     remove("cache/prepare.progress");
     uint64_t t0 = plat_now_ns();
     LOG("[prep] precompiling the game's shaders\n");
@@ -2357,7 +2372,7 @@ int vk_prepare_install(void (*progress)(int phase, int done, int total), volatil
     struct stat st;
     if (!plat_exe_path(exe, sizeof exe)) return -2;
     if (stat(exe, &st) == 0) snprintf(key, sizeof key, "%lld %lld", (long long)st.st_size, (long long)st.st_mtime);
-    mkdir("cache", 0755);
+    prep_seed();
     static const char *const passes[] = {"all", "recorded"};
     static const char *const logs[] = {"cache/prepare.log", "cache/prepare-pipelines.log"};
     int code = 0;

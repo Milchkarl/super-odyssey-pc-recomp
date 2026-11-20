@@ -955,7 +955,7 @@ VkShaderModule vk_builtin_shader(const char *name) {
 }
 
 // The release's pipeline seed ships zstd-compressed (pipeline-seed.bin.zst: 5.9 MB of recipes, 70 KB packed - the
-// repository refuses files over 5 MB). Unpacked by the setup into cache/graphics-pipelines.bin (runtime/ui/setup.mm),
+// repository refuses files over 5 MB). Unpacked into cache/graphics-pipelines.bin before a full preparation (device.c prep_seed),
 // and by `SuperOdysseyRecomp --unpack-seed <out>` for tools/release.sh's seed check.
 bool vk_seed_unpack(const char *src, const char *dst) {
     FILE *f = fopen(src, "rb");
