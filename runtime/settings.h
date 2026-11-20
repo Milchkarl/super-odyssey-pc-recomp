@@ -155,6 +155,12 @@ typedef struct {
                          // reach farther (runtime/hle/odyssey_draw.c; ODYSSEY_DRAW_DISTANCE=<factor> for tests)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
                          // more first-draw builds (exec.c renderer_program_hint; ODYSSEY_PREWARM=3). Off by default.
+    bool fast_arrival;   // "Faster kingdom arrival" (menu): the three below together; off: all three off
+    bool arrival_mip_views;  // a draw making a 3D texture's or cube map's level from the one above reads a view of
+                         // those levels, not a copy of level 0 (exec.c resolve_feedback; the lighting set-up as a
+                         // kingdom appears: ~950 copies)
+    bool arrival_barriers;   // (settings.ini only) lighter barriers between those small passes (exec.c)
+    bool arrival_precreate;  // (settings.ini only) a stage's render targets made while it loads, not at its first frame
     bool skip_intro;     // no Joy-Con tips screen timer before the title (runtime/hle/odyssey_120.c; read at start)
     int warmup;          // WARMUP_*: how long the start replays known pipelines (nvn/vulkan/exec.c vk_pipeline_prewarm)
     bool mute_unfocused; // no sound while the window isn't in front (services/audio.c)

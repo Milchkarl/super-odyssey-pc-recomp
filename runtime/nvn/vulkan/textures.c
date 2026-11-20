@@ -1086,7 +1086,21 @@ void vk_tex_prefetch(void) {
     for (int i = 0; i < n; i++) {
         NvnTexture *t = c[i];
         if (tex_scalable(t) || renderer_format_is_depth(t->format) || !t->layout.fmt || !t->layout.fmt->bpb) {
+            // ("Faster kingdom arrival" / arrival_precreate) a render target or depth buffer the stage made: its image
+            // made now, while it loads (nothing to upload) - they were made at the stage's first frame, ~6 ms of that
+            // frame's recording (Mushroom Kingdom, 2026-11-20). ODYSSEY_ARRIVAL_PRECREATE=0: off.
+            static int pre = -2;
+            if (pre == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_PRECREATE"); pre = e ? atoi(e) != 0 : -1; }
+            bool on = pre >= 0 ? pre : g_settings.fast_arrival && g_settings.arrival_precreate;
             t->no_prefetch = true;
+            if (on && loading && (tex_scalable(t) || renderer_format_is_depth(t->format))) {
+                static uint64_t made;
+                t_prefetch = true;
+                tex_backend(t);
+                t_prefetch = false;
+                if (++made % 200 == 0) LOG("[tex] %llu render targets made while loading\n", (unsigned long long)made);
+                if ((SDL_GetTicksNS() - t0) / 1e6 >= budget) break;
+            }
             continue;
         }
         // (in play, small ones only: a large one - a CPU-decoded ASTC texture - can take tens of ms, and it may never

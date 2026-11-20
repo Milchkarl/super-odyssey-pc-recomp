@@ -81,6 +81,7 @@ Settings g_settings = {
     .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
+    .fast_arrival = true, .arrival_mip_views = true, .arrival_barriers = true, .arrival_precreate = true,
     .early_fences = 1,   // (on: nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default, every platform)
     .record_thread = -1,  // (Auto: on with an NVIDIA GPU, the only kind it has been tested on - nvn/vulkan/exec.c dq_enabled)
     // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22, #37, #106. 5% as Switch
@@ -396,6 +397,10 @@ void settings_load(void) {
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
+        else if (!strcmp(key, "fast_arrival")) g_settings.fast_arrival = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_mip_views")) g_settings.arrival_mip_views = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_barriers")) g_settings.arrival_barriers = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_precreate")) g_settings.arrival_precreate = atoi(val) != 0;
         else if (!strcmp(key, "frame_rate")) {  // (frames per second; another number: the nearest offered)
             int want = atoi(val), best = FPS_60;
             if (!strcmp(val, "display")) want = -1, best = FPS_AUTO;
@@ -534,6 +539,10 @@ void settings_save(void) {
     fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
+    fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
+    fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);
+    fprintf(f, "arrival_barriers = %d\n", g_settings.arrival_barriers);
+    fprintf(f, "arrival_precreate = %d\n", g_settings.arrival_precreate);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);
     fprintf(f, "warmup = %s\n", warmups[g_settings.warmup >= 0 && g_settings.warmup < WARMUP_COUNT ? g_settings.warmup : 0]);
     fprintf(f, "mute_unfocused = %d\n", g_settings.mute_unfocused);

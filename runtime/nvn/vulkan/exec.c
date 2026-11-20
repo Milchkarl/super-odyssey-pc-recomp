@@ -518,7 +518,26 @@ static void begin_cb(VkCommandBuffer *cb, bool *begun) { begin_cb_in(cb, begun, 
 static void gp_mark(VkCommandBuffer cb, const char *fmt, ...);
 static bool dq_enabled(void);
 static VkCommandBuffer vk_cmd_raw(void);
-VkCommandBuffer vk_cmd(void) { dq_sync(); return vk_cmd_raw(); }
+// "Faster kingdom arrival" / arrival_barriers (settings.ini): a stage's lighting set-up as it appears draws a mip chain
+// of a 3D texture / cube map one slice or face per pass (~1,100 passes of 32x32 or 128x128), and every pass began with a
+// full barrier - the GPU drained after each, ~0.03 ms each, most of that frame's ~40 ms. Passes into the same image's
+// same level, which read only the levels above it (resolve_feedback's level views), need no barrier between them: the
+// chain below. Any other command recorded outside a pass (a copy, dispatch, upload, clear) ends the chain, so the next
+// pass gets its barrier again. ODYSSEY_ARRIVAL_BARRIERS=0: off.
+static bool chain_valid, chain_skip_barrier;
+static NvnTexture *chain_t;
+static uint32_t chain_level;
+static int chain_guard;  // (begin_pass's own vk_cmd: not "another command")
+VkCommandBuffer vk_cmd(void) {
+    if (!in_pass && !chain_guard) chain_valid = false, chain_skip_barrier = false;
+    dq_sync();
+    return vk_cmd_raw();
+}
+static bool arrival_barriers(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_BARRIERS"); env = e ? atoi(e) != 0 : -1; }
+    return env >= 0 ? env : g_settings.fast_arrival && g_settings.arrival_barriers;
+}
 static VkCommandBuffer vk_cmd_raw(void) {  // (draw_: no wait for the recording thread)
     Sub *s = sub();
     if (!s->main_begun) {
@@ -2628,8 +2647,18 @@ static void begin_pass(void) {
     vk_end_pass();
     if (dl_on == 2) renderer_flush();  // (ODYSSEY_VK_DEVLOST_TRACE=2: each pass its own submission)
     st.rt_dirty = false;
+    chain_guard++;
     VkCommandBuffer cb = vk_cmd();
-    vk_full_barrier(cb);  // passes, copies and dispatches see each other's results
+    chain_guard--;
+    {   // (arrival_barriers) a pass into chain_t's chain_level only: no barrier when the chain says none is needed
+        bool in_chain = chain_valid && !st.rt.depth && st.rt.ncolor > 0;
+        for (int i = 0; in_chain && i < st.rt.ncolor; i++)
+            in_chain = st.rt.color[i] == chain_t && st.rt.has_cview[i] && (st.rt.cview[i].setmask & 1) &&
+                       st.rt.cview[i].base_level == chain_level;
+        if (!in_chain) chain_valid = false;
+        if (!(in_chain && chain_skip_barrier && arrival_barriers())) vk_full_barrier(cb);  // passes, copies and dispatches see each other's results
+        chain_skip_barrier = false;
+    }
     pass_hud = hud_want;
     if (pass_hud) { begin_hud_pass(cb); return; }
     for (int i = 0; i < st.rt.ncolor; i++)
@@ -6086,6 +6115,7 @@ static void huge_link_test(Prog *p) {
 // ================================================================== feedback snapshots (renderer.m resolve_feedback)
 static NvnTexture *feedback_tex[4];
 static VkImageView feedback_view[4];
+static int feedback_type[4];  // (TEXTYPE_* of the view: 2D, or a 3D / cube level range - arrival_mip_views)
 static int nfeedback;
 static uint64_t g_cur_fs_hash;
 #ifdef _WIN32
@@ -6404,6 +6434,12 @@ static bool views_overlap(TexBackend *b, const NvnTextureView *rv, bool has_rv, 
     if (ry >= b->layers) ry = b->layers - 1;
     return rl >= lv0 && rl < lv0 + nlv && ry >= ly0 && ry < ly0 + nly;
 }
+// "Faster kingdom arrival" / arrival_mip_views (settings.ini), ODYSSEY_ARRIVAL_MIP_VIEWS=0: off (see resolve_feedback)
+static bool arrival_mip_views(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_MIP_VIEWS"); env = e ? atoi(e) != 0 : -1; }
+    return env >= 0 ? env : g_settings.fast_arrival && g_settings.arrival_mip_views;
+}
 static bool feedback_disjoint(NvnTexture *t, const NvnTexEntry *en) {
     static int same = -1;
     if (same < 0) { const char *e = getenv("ODYSSEY_FEEDBACK_SAME_LEVEL"); same = e && atoi(e) != 0; }
@@ -6461,20 +6497,39 @@ static void resolve_feedback(Prog *pr) {
                 uint32_t rl = ci >= 0 && st.rt.has_cview[ci] && (st.rt.cview[ci].setmask & 1) ? st.rt.cview[ci].base_level : 0;
                 TexBackend *b = ci >= 0 && rl ? vk_tex(t, true) : NULL;
                 const NvnTexEntry *en = b ? shader_texture_entry(sg, &infos[sg]->tex[i]) : NULL;
-                if (!same && b && b->image && t != st.rt.depth && rl < b->levels && b->base_type == VK_IMAGE_VIEW_TYPE_2D &&
-                    infos[sg]->tex[i].type == TEXTYPE_2D && en) {
+                // The same for a 3D texture (one depth slice of level N written: the game's lighting volume, 32x32x32
+                // with 6 levels, ~870 draws as a kingdom appears) and a cube map (one face of level N: ~80) - each got
+                // a copy of level 0, slice / face 0 before, ~4 ms of that frame's GPU time and the wrong level read
+                // (settings "Faster kingdom arrival", arrival_mip_views; ODYSSEY_ARRIVAL_MIP_VIEWS=0: off)
+                int ttype = infos[sg]->tex[i].type;
+                bool shape_ok = (b && b->base_type == VK_IMAGE_VIEW_TYPE_2D && ttype == TEXTYPE_2D) ||
+                                (b && arrival_mip_views() &&
+                                 ((b->base_type == VK_IMAGE_VIEW_TYPE_3D && ttype == TEXTYPE_3D) ||
+                                  (b->base_type == VK_IMAGE_VIEW_TYPE_CUBE && ttype == TEXTYPE_CUBE)));
+                if (!same && b && b->image && t != st.rt.depth && rl < b->levels && shape_ok && en) {
                     NvnTextureView v;
                     if (en->has_view) v = en->view; else memset(&v, 0, sizeof v);
                     uint32_t lv0 = (v.setmask & 1) ? v.base_level : 0;
                     if (lv0 < rl) {
-                        if (!fb_disjoint_barrier) {  // (level N - 1 was written by an earlier pass: visible to this draw)
+                        // (arrival_barriers) the levels read were made visible by the chain's barrier and only passes
+                        // into this level came after: none now, and none at the pass's start
+                        bool plain = !pr->vi->uses_gmem_store && !pr->fi->uses_gmem_store && !pr->fi->nimages && !pr->vi->nimages;
+                        if (arrival_barriers() && plain && chain_valid && chain_t == t && chain_level == rl) {
+                            chain_skip_barrier = true;
+                        } else if (!fb_disjoint_barrier) {  // (level N - 1 was written by an earlier pass: visible to this draw)
                             if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
+                            chain_guard++;
                             vk_full_barrier(vk_cmd());
+                            chain_guard--;
                             fb_disjoint_barrier = true;
+                            // (everything before is visible now: a chain on this image's level starts, and the pass
+                            // that follows needs no second barrier)
+                            if (plain) chain_valid = true, chain_t = t, chain_level = rl, chain_skip_barrier = true;
                         }
                         v.setmask |= 1, v.base_level = (uint16_t)lv0, v.num_levels = (uint16_t)(rl - lv0);
                         feedback_tex[nfeedback] = t;
-                        feedback_view[nfeedback++] = vk_view(naliases ? alias_read(t) : t, &v, true, false, TEXTYPE_2D);
+                        feedback_type[nfeedback] = ttype;
+                        feedback_view[nfeedback++] = vk_view(naliases ? alias_read(t) : t, &v, true, false, ttype);
                         stat_feedback_disjoint++;
                         continue;
                     }
@@ -6498,6 +6553,7 @@ static void resolve_feedback(Prog *pr) {
                 pass_depth_sampled = true;
                 stat_depth_direct++;
                 static const VkComponentMapping idm = {0};
+                feedback_type[nfeedback] = TEXTYPE_2D;
                 feedback_tex[nfeedback] = t;
                 feedback_view[nfeedback++] = vk_image_view(src, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, idm, VK_IMAGE_ASPECT_DEPTH_BIT);
                 continue;
@@ -6513,9 +6569,16 @@ static void resolve_feedback(Prog *pr) {
             VkImageAspectFlags sa = src->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : src->aspect;
             static const VkComponentMapping id = {0};
             if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
+                feedback_type[nfeedback] = TEXTYPE_2D;
                 feedback_tex[nfeedback] = t;
                 feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
                 continue;
+            }
+            // (a snapshot is a 2D image: a draw that samples the texture as 3D or cube never binds it - see the texture
+            // binding - so it was GPU work for nothing, with its pass split and a full barrier; arrival_mip_views)
+            {
+                int tt = infos[sg]->tex[i].type;
+                if (arrival_mip_views() && tt != TEXTYPE_2D && tt != TEXTYPE_2D_ARRAY) continue;
             }
             stat_feedback_copies++;
             {   // ODYSSEY_LOG_FEEDBACK=<n>: the first n copies - the target and the sampled view (levels / layers)
@@ -6554,6 +6617,7 @@ static void resolve_feedback(Prog *pr) {
                 debug_save_depth(dst, path);
                 cb = vk_cmd();
             }
+            feedback_type[nfeedback] = TEXTYPE_2D;
             feedback_tex[nfeedback] = t;
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
@@ -7419,7 +7483,8 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
             renderer_texture_scale(e->tex, &sc[0], &sc[1]);
             wh[0] = e->tex->width; wh[1] = e->tex->height;
             for (int k = 0; k < nfeedback; k++)
-                if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY)) {
+                if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY ||
+                                                  (feedback_type[k] != TEXTYPE_2D && st_->type == feedback_type[k]))) {
                     view = feedback_view[k];
                     if (st_->type == TEXTYPE_2D_ARRAY) view = vk_dummy_view(TEXTYPE_2D_ARRAY);  // (2D snapshot as array: rare)
                 }
