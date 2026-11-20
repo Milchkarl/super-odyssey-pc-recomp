@@ -211,6 +211,16 @@ static int test_crash(void *arg) {
 int main(int argc, char **argv) {
     plat_init();
     diagnostics_init();
+    {   // how it was started, when not plainly: arguments, and the switches that change the start (a launcher may pass
+        // them; a Recomp Launcher player's log, 2026-11-20, skipped the start page and setup without saying why)
+        char line[512] = "";
+        for (int i = 1; i < argc && strlen(line) < sizeof line - 64; i++) snprintf(line + strlen(line), sizeof line - strlen(line), " %s", argv[i]);
+        static const char *const vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_CONFIG", "ODYSSEY_PREPARE", "ODYSSEY_PRECOMPILE",
+                                           "ODYSSEY_DATA_ROOT", "ODYSSEY_SETTINGS", "ODYSSEY_HIDDEN"};
+        for (size_t i = 0; i < sizeof vars / sizeof *vars && strlen(line) < sizeof line - 64; i++)
+            if (getenv(vars[i])) snprintf(line + strlen(line), sizeof line - strlen(line), " %s=%s", vars[i], getenv(vars[i]));
+        if (line[0]) LOG("[start]%s\n", line);
+    }
     if (getenv("ODYSSEY_MEM_TRACE")) SDL_DetachThread(SDL_CreateThread(mem_trace, "memtrace", NULL));
 #ifdef _WIN32
     setvbuf(stderr, NULL, _IONBF, 0);  // the Windows CRT treats _IOLBF as full buffering

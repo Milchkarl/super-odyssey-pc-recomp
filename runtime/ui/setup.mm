@@ -969,8 +969,10 @@ bool config_run(void) {
     const char *skip_vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_INPUT", "ODYSSEY_HOST_INPUT", "ODYSSEY_WARP", "ODYSSEY_HIDDEN",
                                "ODYSSEY_EXIT_AFTER_SHOT", "ODYSSEY_SETUP_EXIT_WHEN_DONE", "ODYSSEY_BIND_TEST"};
     for (const char *v : skip_vars)
-        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST"))
+        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST")) {
+            LOG("[config] page skipped: %s is set%s\n", v, v == skip_vars[0] ? " (or --play)" : "");
             return true;
+        }
     // (the settings file read first: its "Show this screen at every start" was checked before ui_window_init read the
     // file, so the default - shown - always won and unticking it did nothing, on every platform: issue #74, owner's
     // Steam Deck 2026-11-16)
@@ -992,7 +994,10 @@ bool config_run(void) {
             diagnostics_last_crash_seen();
         }
     }
-    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) return true;
+    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) {
+        LOG("[config] page not shown (%s)\n", force ? "ODYSSEY_CONFIG=0" : "turned off, nothing to ask");
+        return true;
+    }
     ui_window_init();
 #ifndef __APPLE__
     if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)

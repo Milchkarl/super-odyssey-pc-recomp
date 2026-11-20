@@ -2265,15 +2265,17 @@ static void prep_mark_write(const char *key) {
 }
 static bool prepare_due(bool log, char key[64]) {
     key[0] = 0;
-    if (g_prepare_skipped) return false;
+    // (each way of not preparing says so when asked to log: a Recomp Launcher player's 0.5.1 log, 2026-11-20, had it
+    // due at the start page and never run, with no line saying why - ~1,000 shader builds while playing)
+    if (g_prepare_skipped) { if (log) LOG("[prep] not this start: put off (Later)\n"); return false; }
     const char *e = getenv("ODYSSEY_PREPARE");
-    if (e && !atoi(e)) return false;
+    if (e && !atoi(e)) { if (log) LOG("[prep] not this start: ODYSSEY_PREPARE=%s\n", e); return false; }
     const char *pe = getenv("ODYSSEY_PRECOMPILE");
-    if (pe && !atoi(pe)) return false;
+    if (pe && !atoi(pe)) { if (log) LOG("[prep] not this start: ODYSSEY_PRECOMPILE=%s\n", pe); return false; }
     struct stat st;
     // A recovery boot runs with fresh driver caches. The cache guard clears the completion marker so the
     // next normal boot prepares the shaders again.
-    if (cache_start_interrupted()) return false;
+    if (cache_start_interrupted()) { if (log) LOG("[prep] not this start: the last start ended early (a recovery start; the next one prepares)\n"); return false; }
     bool requested = vk_prepare_requested();
     bool cached = vk_spirv_cache_available();
     // (PREPARED_MARK: a full pass finished, or was closed by the player - written below. A cache without it was
