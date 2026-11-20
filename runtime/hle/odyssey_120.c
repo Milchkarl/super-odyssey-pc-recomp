@@ -85,7 +85,7 @@ bool odyssey_motion_enabled(void) {
 }
 
 // 90: the camera between the last two ticks' (draw_lead + 1/2 ticks back from the last; the draw-only frames: none)
-static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *pose) {
+static bool camera_draw_90(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t source, float *pose) {
     static __thread uint64_t scene, camera, tick;  // the last tick's camera (last) and the one before (before)
     static __thread float last[9], before[9];
     static __thread bool paired;  // before: the tick before's, the same scene and camera
@@ -96,9 +96,9 @@ static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *
         scene = draw_scene;
         camera = source;
         tick = simulation_tick;
-    } else if (draw_scene != scene || source != camera || simulation_tick != tick) return;
+    } else if (draw_scene != scene || source != camera || simulation_tick != tick) return false;
     float back = 0.5f - draw_lead;
-    if (!paired || back <= 0.001f) return;
+    if (!paired || back <= 0.001f) return false;
     if (back > 1.0f) back = 1.0f;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
     for (unsigned i = 0; i < 3; i++) {
@@ -113,28 +113,26 @@ static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *
         next_length += next_direction * next_direction;
     }
     // (the limits at 120, for a whole tick instead of half of one)
-    if (!(travel <= 160.0f * 160.0f && turn <= 0.16f * 0.16f && (travel > 0.0f || turn > 0.0f))) return;
-    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return;
+    if (!(travel <= 160.0f * 160.0f && turn <= 0.16f * 0.16f && (travel > 0.0f || turn > 0.0f))) return false;
+    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += back * (before[i] - pose[i]);
     Cpu draw = *c;
-    draw.x[0] = c->x[23];
-    draw.x[1] = c->x[23] + 8;
+    draw.x[0] = cam;
+    draw.x[1] = cam + 8;
     guest_call(&draw, camera_matrix);
+    return true;
 }
 
-void odyssey_camera_draw(Cpu *c) {
+static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t source, float *pose) {
     // StageScene::drawMain's private copy of the current LookAtCamera.
     // Rebuild the view with sead's evaluator before the world and DLAA consume it.
     static __thread uint64_t scene, camera, tick;
     static __thread float previous[9];
     static __thread bool half_drawn;
-    if (!enabled || !odyssey_motion_enabled() || !camera_matrix) return;
-    uint64_t draw_scene = c->x[19], source = c->x[25];
-    float *pose = (float *)(uintptr_t)(c->x[23] + 0x38);
-    if (odyssey_native_hz() != 120) { camera_draw_90(c, draw_scene, source, pose); return; }  // (any rate but 120)
+    if (odyssey_native_hz() != 120) return camera_draw_90(c, cam, draw_scene, source, pose);  // (any rate but 120)
     if (extra_draw) {
         half_drawn = draw_scene == scene && source == camera && tick == simulation_tick;
-        return;
+        return false;
     }
     bool continuous = draw_scene == scene && source == camera && half_drawn && simulation_tick == tick + 1;
     half_drawn = false;
@@ -144,7 +142,7 @@ void odyssey_camera_draw(Cpu *c) {
     float old[9];
     memcpy(old, previous, sizeof old);
     memcpy(previous, pose, sizeof previous);
-    if (!continuous) return;
+    if (!continuous) return false;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
     for (unsigned i = 0; i < 3; i++) {
         float eye_delta = pose[i] - old[i], target_delta = pose[i + 3] - old[i + 3];
@@ -158,13 +156,41 @@ void odyssey_camera_draw(Cpu *c) {
         next_length += next_direction * next_direction;
     }
     // Skip cuts, abrupt changes in roll, and half steps that would reverse the view.
-    if (!(travel <= 80.0f * 80.0f && turn <= 0.08f * 0.08f && (travel > 0.0f || turn > 0.0f))) return;
-    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return;
+    if (!(travel <= 80.0f * 80.0f && turn <= 0.08f * 0.08f && (travel > 0.0f || turn > 0.0f))) return false;
+    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += 0.5f * (old[i] - pose[i]);
     Cpu draw = *c;
-    draw.x[0] = c->x[23];
-    draw.x[1] = c->x[23] + 8;
+    draw.x[0] = cam;
+    draw.x[1] = cam + 8;
     guest_call(&draw, camera_matrix);
+    return true;
+}
+
+// The hook in StageScene::drawMain, where its private copy of the LookAtCamera (sead::Camera: view matrix at +8, eye /
+// target / up at +0x38) is made. 1.0.0: the copy at x23, the scene x19, the camera it copies x25. 1.4.1: the copy is on
+// the stack at x29 - 0xf0, the scene x19, the camera x0 - and the hook runs one store early: the eye's x and y are
+// still in x8 (stur x8, [x29, #-0xb8] comes next), so they are placed in the copy first and handed back through x8.
+// (Until 2026-11-20 1.4.1 read 1.0.0's registers: its camera was never moved between ticks above 60 FPS - only Mario
+// was - the camera stepping at 60 while Mario moved at the frame rate: "not smooth at all".)
+// ODYSSEY_LOG_CAMERA=1 (frame pacing tests): each stage draw's camera as drawn - time, extra draw, Mario's lead, tick,
+// eye and target, then the same as the game made them (raw: without the in-between camera) ("[camera] ...")
+void odyssey_camera_draw(Cpu *c) {
+    static int v141 = -1, lg = -1;
+    if (v141 < 0) v141 = loader_main_is_v141();
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_CAMERA") != NULL;
+    if (!enabled || !odyssey_motion_enabled() || !camera_matrix) return;
+    uint64_t cam = v141 ? c->x[29] - 0xf0 : c->x[23];
+    uint64_t draw_scene = c->x[19], source = v141 ? c->x[0] : c->x[25];
+    if (cam < GUEST_LO || cam >= GUEST_HI - 0x60) return;
+    float *pose = (float *)(uintptr_t)(cam + 0x38);
+    if (v141) memcpy(pose, &c->x[8], 8);
+    float raw[6];
+    memcpy(raw, pose, sizeof raw);
+    if (camera_draw_inner(c, cam, draw_scene, source, pose) && v141) memcpy(&c->x[8], pose, 8);
+    if (lg)
+        LOG("[camera] %.3f %d %.3f %llu %.3f %.3f %.3f %.3f %.3f %.3f raw %.3f %.3f %.3f %.3f %.3f %.3f\n", plat_now_ns() / 1e6,
+            extra_draw, draw_lead, (unsigned long long)simulation_tick, pose[0], pose[1], pose[2], pose[3], pose[4], pose[5],
+            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
 }
 
 static void quality_reduce_off(Cpu *c) { (void)c; }  // (dynamic resolution off: the Reduce nerve does nothing)

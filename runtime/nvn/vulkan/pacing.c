@@ -133,6 +133,14 @@ static void note(uint64_t id, uint64_t t, bool ok) {
                 else g_refresh_ns += ((int64_t)dt - (int64_t)g_refresh_ns) / 64;
             }
         }
+        {   // ODYSSEY_LOG_SHOWN=1 (frame pacing tests): each image the display showed - when, the spacing from the one
+            // before, and the time since its present call ("[shown] t dt lat", ms)
+            static int log_shown = -1;
+            if (log_shown < 0) log_shown = getenv("ODYSSEY_LOG_SHOWN") && atoi(getenv("ODYSSEY_LOG_SHOWN"));
+            uint64_t c = pw_call[id % 256];
+            if (log_shown) LOG("[shown] %.3f %.3f %.3f\n", t / 1e6, st.last_shown ? (t - st.last_shown) / 1e6 : 0.0,
+                               c && t > c ? (t - c) / 1e6 : -1.0);
+        }
         st.last_shown = t;
         uint64_t call = pw_call[id % 256];
         if (call && t > call && t - call < 500000000ull) {
