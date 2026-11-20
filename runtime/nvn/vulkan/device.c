@@ -574,8 +574,10 @@ void vk_pcache_load_headless(void) {
 }
 
 static pthread_mutex_t pcache_save_lock = PTHREAD_MUTEX_INITIALIZER;  // (the exit and an autosave at once)
+// (vk_prepare_install: the preparation's processes write the file meanwhile - this process's copy is merged in after)
+static _Atomic bool pcache_preparing;
 void vk_pipeline_cache_save(void) {
-    if (getenv("ODYSSEY_NO_PCACHE_LOAD")) return;  // (a test without it loaded: its file isn't replaced by this run's part)
+    if (getenv("ODYSSEY_NO_PCACHE_LOAD") || pcache_preparing) return;  // (a test without it loaded: its file isn't replaced by this run's part)
     pthread_mutex_lock(&pcache_save_lock);
     size_t sz = 0;
     void *data = NULL;
@@ -2367,12 +2369,34 @@ void vk_prepare_before_start(void) {
 // the game's archives, then every recorded (or seeded) pipeline - from the setup's worker thread, its progress to the
 // setup page instead of a window of its own. Marks the cache done, so later starts go straight to the game. cancel
 // (may be NULL): stops it (the entries done so far stay). 0 = done.
+static int vk_prepare_install_passes(const char *exe, void (*progress)(int phase, int done, int total), volatile int *cancel);
+void vk_prepare_take_cache(void) {  // (the game going on in the process that prepared: see vk_prepare_install)
+    if (!g_vk.dev || !g_vk.pcache || g_vk.headless) return;
+    uint64_t t0 = plat_now_ns();
+    vk_pcache_load_headless();
+    LOG("[prep] the prepared pipeline cache taken into this process: %.0f ms\n", (plat_now_ns() - t0) / 1e6);
+}
 int vk_prepare_install(void (*progress)(int phase, int done, int total), volatile int *cancel) {
     char exe[1024], key[64] = "";
     struct stat st;
     if (!plat_exe_path(exe, sizeof exe)) return -2;
     if (stat(exe, &st) == 0) snprintf(key, sizeof key, "%lld %lld", (long long)st.st_size, (long long)st.st_mtime);
     prep_seed();
+    // The game's own process (the setup's or the start page's preparation): its pipeline cache was made before the
+    // preparation wrote cache/vk_pipelines.bin, so it isn't saved meanwhile - the owner's new-user test (2026-11-19)
+    // played with the empty one and saved it over the 313 MB file. Nor does the driver see what the preparation put in
+    // its own disk cache (read when the device is made): the game starts again in a new process after it
+    // (runtime/ui/setup.mm restart_after_prep), or takes the file in (vk_prepare_take_cache) when it can't.
+    pcache_preparing = true;
+    int code = vk_prepare_install_passes(exe, progress, cancel);
+    pcache_preparing = false;
+    if (code == 0 && key[0]) {
+        prep_mark_write(key);
+        remove(PREPARE_REQUEST);
+    }
+    return code;
+}
+static int vk_prepare_install_passes(const char *exe, void (*progress)(int phase, int done, int total), volatile int *cancel) {
     static const char *const passes[] = {"all", "recorded"};
     static const char *const logs[] = {"cache/prepare.log", "cache/prepare-pipelines.log"};
     int code = 0;
@@ -2396,10 +2420,6 @@ int vk_prepare_install(void (*progress)(int phase, int done, int total), volatil
             if (code != 2) break;  // 2: a memory budget was reached, the next round goes on where it stopped
         }
         if (pass == 0 && code == 3) code = 0;  // (3: done, some programs unavailable on this GPU)
-    }
-    if (code == 0 && key[0]) {
-        prep_mark_write(key);
-        remove(PREPARE_REQUEST);
     }
     return code;
 }

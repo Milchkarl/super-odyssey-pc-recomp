@@ -231,6 +231,7 @@ static std::string g_step, g_fail_head, g_fail_hint;
 static std::atomic<float> g_frac{0};
 static uint64_t g_t0;                       // when the work started (time left)
 static bool g_code_only;                    // the files are there: only the game code (a new version of the app)
+static bool g_prepared_here;                // a shader preparation finished in this process (restart_after_prep)
 static volatile int g_cancel;
 static std::string g_job_game, g_job_keys, g_job_update;  // the choices the work runs with
 
@@ -426,6 +427,7 @@ static void *work(void *) {
         g_frac = 0.55f;
         int code = vk_prepare_install(shader_progress, &g_cancel);
         if (code == -1) return NULL;  // (the window was closed)
+        g_prepared_here = code == 0;
         // not fatal: the game prepares what's missing at its next start
         if (code != 0) LOG("[setup] shader preparation ended with %d; the game finishes it at its start\n", code);
     }
@@ -434,6 +436,37 @@ static void *work(void *) {
     g_frac = 1;
     g_state = ST_DONE;
     return NULL;
+}
+
+// A shader preparation finished in this process (the setup's last step or the start page's): the game starts in a new
+// one, without the start page. The driver reads its own shader cache when the GPU is opened - here before the
+// preparation filled it - so ~24,800 programs found only there (exec.c pc_worker) were compiled again while playing:
+// ~1,800-2,000 libraries in the owner's new-user tests (2026-11-19), against 5 over 3 ms from a new process.
+// Windows: the new process is waited for (plat_exec), so a launcher waiting on this one still works.
+// ODYSSEY_PREP_NO_RESTART=1: played on here, the prepared pipeline cache file taken in.
+#ifndef __APPLE__
+extern "C" void vk_prepare_take_cache(void);
+#endif
+static void restart_after_prep(void) {
+#ifndef __APPLE__
+    if (!g_prepared_here) return;
+    g_prepared_here = false;
+    if (!getenv("ODYSSEY_PREP_NO_RESTART")) {
+        LOG("[setup] shaders prepared: the game starts again in a new process, straight into the game\n");
+        if (SDL_Window *w = ui_window()) SDL_HideWindow(w);
+#ifdef _WIN32
+        _putenv_s("ODYSSEY_NO_CONFIG", "1");
+        _putenv_s("ODYSSEY_CONFIG", ""), _putenv_s("ODYSSEY_PREP_PAGE_TEST", "");  // (tests' switches: the page again)
+#else
+        setenv("ODYSSEY_NO_CONFIG", "1", 1);
+        unsetenv("ODYSSEY_CONFIG"), unsetenv("ODYSSEY_PREP_PAGE_TEST");
+#endif
+        plat_exec(NULL);
+        LOG("[setup] the new process didn't start: playing on in this one\n");
+        if (SDL_Window *w = ui_window()) SDL_ShowWindow(w);
+    }
+    vk_prepare_take_cache();
+#endif
 }
 
 static void start_work(void) {
@@ -594,6 +627,7 @@ static void prep_page_progress(int phase, int done, int total) {
 static void *prep_page_work(void *) {
     int code = vk_prepare_install(prep_page_progress, &g_prep_cancel);
     g_prep_code = code;
+    if (code == 0) g_prepared_here = true;
     if (code != 0) vk_prepare_skip_this_start();  // (cancelled or failed: what is done stays; the game starts)
     g_prep = PREP_DONE;
     return NULL;
@@ -1032,10 +1066,14 @@ bool config_run(void) {
         bool s = shot && frame == atol(shot);
 #ifndef __APPLE__
         // ODYSSEY_PREP_PAGE_TEST=1 (tests): the question at frame 60 (build/prep_ask.png), Compile now at 90, the progress
-        // at 900 (build/prep_run.png), then stopped
+        // at 900 (build/prep_run.png), then stopped. =play: Compile now at 90, left to finish, then the game (a new
+        // player's path: tools' stutter census)
         static const char *pt = getenv("ODYSSEY_PREP_PAGE_TEST");
         const char *pshot = NULL;
-        if (pt) {
+        if (pt && !strcmp(pt, "play")) {
+            if (frame == 30 && g_prep.load() == PREP_NONE) g_prep = PREP_ASK;
+            if (frame == 90 && g_prep.load() == PREP_ASK) { g_prep_stay = false; prep_start(); }
+        } else if (pt) {
             if (frame == 30 && g_prep.load() == PREP_NONE) g_prep = PREP_ASK;
             if (frame == 60) pshot = "build/prep_ask.png";
             if (frame == 90 && g_prep.load() == PREP_ASK) { g_prep_stay = !strcmp(pt, "stay"); prep_start(); }
@@ -1069,6 +1107,7 @@ bool config_run(void) {
     menu_setup_mode(false);
     settings_save();
     LOG("[config] %s\n", result == 1 ? "play" : "exit");
+    if (result == 1) restart_after_prep();
     return result == 1;
 }
 
@@ -1314,6 +1353,7 @@ bool setup_run(const char *root) {
                 menu_request_window_apply();
                 menu_apply_window_requests(w);
             }
+            if (!g_code_only) restart_after_prep();
             break;
         }
 #ifdef __APPLE__
