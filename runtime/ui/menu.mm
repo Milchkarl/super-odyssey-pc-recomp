@@ -858,11 +858,11 @@ static void tab_display(void) {
         static const int vs_mode[] = {VSYNC_ON, VSYNC_FAST, VSYNC_ADAPTIVE, VSYNC_OFF};
         int vi = 3;
         for (int i = 0; i < 4; i++) if (vs_mode[i] == g_settings.vsync) vi = i;
-        if (opt_choice("VSync", &vi, vs, 4, 1,  /* (the default, Fast: settings.c) */
+        if (opt_choice("VSync", &vi, vs, 4, 3,  /* (the default, Off: settings.c) */
                        "On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits "
                        "a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no "
-                       "tearing and no waiting - the screen shows the newest finished frame at each refresh (the default). Adaptive "
-                       "(Relaxed): as On, but a late frame goes out at once (tearing only then). Off: frames "
+                       "tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive "
+                       "(Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames "
                        "go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver "
                        "lacks one, the closest it has is used.")) {
             g_settings.vsync = vs_mode[vi];
@@ -1186,7 +1186,7 @@ static void tab_overlay(void) {
         static const char *const corners[OVERLAY_CORNER_COUNT] = {"Top right", "Top left", "Bottom right", "Bottom left"};
         static const char *const sizes[3] = {"Small", "Medium", "Large"};
         if (!g_settings.performance_overlay) opt_disable_next();
-        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_TOP_RIGHT,
+        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_BOTTOM_LEFT,
                    "The corner of the picture the performance overlay sits in.");
         if (!g_settings.performance_overlay) opt_disable_next();
         opt_choice("Overlay size", &g_settings.overlay_size, sizes, 3, 1, "The size of the performance overlay's text.");

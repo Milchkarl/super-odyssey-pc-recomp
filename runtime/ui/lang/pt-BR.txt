@@ -291,7 +291,7 @@ Up to date ||| Atualizado
 Checking... ||| Verificando...
 Didn't work ||| Não funcionou
 Not set up ||| Não configurado
-On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh (the default). Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off: frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| Ligado: VSync clássico - cada quadro espera a próxima atualização da tela, sem tearing (um quadro atrasado espera uma atualização inteira; com G-Sync / FreeSync a tela acompanha o jogo). Rápido (Mailbox): sem tearing e sem espera - a tela mostra o quadro pronto mais recente a cada atualização (o padrão). Adaptativo (Relaxed): como Ligado, mas um quadro atrasado sai na hora (tearing só então). Desligado: os quadros saem assim que ficam prontos - o menor atraso de entrada, com tearing. Onde a GPU ou o driver não tem um deles, o mais próximo disponível é usado.
+On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| Ligado: VSync clássico - cada quadro espera a próxima atualização da tela, sem tearing (um quadro atrasado espera uma atualização inteira; com G-Sync / FreeSync a tela acompanha o jogo). Rápido (Mailbox): sem tearing e sem espera - a tela mostra o quadro pronto mais recente a cada atualização. Adaptativo (Relaxed): como Ligado, mas um quadro atrasado sai na hora (tearing só então). Desligado (o padrão): os quadros saem assim que ficam prontos - o menor atraso de entrada, com tearing. Onde a GPU ou o driver não tem um deles, o mais próximo disponível é usado.
 Fast (Mailbox) ||| Rápido (Mailbox)
 Adaptive (Relaxed) ||| Adaptativo (Relaxed)
 Smooth color gradients ||| Gradientes de cor suaves
@@ -354,7 +354,7 @@ Desktop (the default). ||| Área de trabalho (o padrão).
 How many times a second the screen updates (exclusive full screen only). ||| Quantas vezes por segundo a tela se atualiza (só na tela cheia exclusiva).
 Auto (the default). ||| Automático (o padrão).
 Lines the frames up with the screen's refreshes, so the picture never tears (splits in two). ||| Alinha os quadros com as atualizações da tela, para a imagem nunca rasgar (dividir em duas).
-Fast (the default): no tearing, little delay. Off for the lowest input delay. On with a G-Sync / FreeSync screen. ||| Rápido (o padrão): sem rasgos e pouco atraso. Desligado para o menor atraso de entrada. Ligado com uma tela G-Sync / FreeSync.
+Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen. ||| Desligado para o menor atraso de entrada (o padrão). Rápido se você vir a imagem rasgar. Ligado com uma tela G-Sync / FreeSync.
 The picture's shape. 16:9 is the Switch's. ||| O formato da imagem. 16:9 é o do Switch.
 16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck. ||| 16:9 para a imagem do Switch; Preencher em telas largas e no Steam Deck.
 Where the coin counters and other HUD go on a picture wider than 16:9. ||| Onde os contadores de moedas e o resto do HUD ficam numa imagem mais larga que 16:9.
@@ -477,3 +477,4 @@ Smoother edges on the glow around bright sky and lights, and a smoother far hori
 Switch (the default, as on the Switch). High at high resolutions. ||| Switch (o padrão, como no Switch). Alta em resoluções altas.
 Normal (the default). Low on a PC with less than 12 GB of RAM. ||| Normal (o padrão). Baixo num PC com menos de 12 GB de RAM.
 (Recommended) ||| (Recomendado)
+Bottom left (the default), or as you like. ||| Inferior esquerdo (o padrão), ou como preferir.
