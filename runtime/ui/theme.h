@@ -11,13 +11,13 @@
 // (experiment, branch menu-odyssey-look: the game's own HUD colours - a deep navy for panels, Mario's red for the
 // values and the primary button, the coins' gold for the cursor - in the layout of the settings menus the owner likes:
 // tabs along the top, rows with a filled value box, the picture and the description on the right)
-static const ImVec4 kPanelV = THEME_RGB(9, 14, 38, 0.985f);          // the menu window, the start page's card
+static const ImVec4 kPanelV = THEME_RGB(0, 0, 0, 1);              // pitch black (owner 2026-11-20)          // the menu window, the start page's card
 static const ImVec4 kSidebarV = THEME_RGB(17, 25, 62, 1);           // the tab bar, the description card, info boxes
 static const ImVec4 kSurfaceV = THEME_RGB(26, 38, 88, 1);           // fields, buttons, rows
 static const ImVec4 kSurfaceHoverV = THEME_RGB(36, 52, 116, 1);     // ... under the mouse / the cursor
-static const ImVec4 kAccentV = THEME_RGB(228, 0, 25, 1);            // Mario red: value boxes, the primary button
-static const ImVec4 kAccentRestV = THEME_RGB(168, 8, 30, 1);        // value boxes of the rows the cursor isn't on
-static const ImVec4 kAccentHotV = THEME_RGB(250, 40, 52, 1);        // ... the selected row's / under the mouse
+static const ImVec4 kAccentV = THEME_RGB(228, 0, 25, 0.82f);           // Mario red: value boxes, the primary button
+static const ImVec4 kAccentRestV = THEME_RGB(228, 0, 25, 0.55f);       // value boxes of the rows the cursor isn't on
+static const ImVec4 kAccentHotV = THEME_RGB(240, 20, 40, 0.85f);       // ... the selected row's / under the mouse
 static const ImVec4 kAccentTintV = THEME_RGB(228, 0, 25, 0.22f);    // the selected tab
 static const ImVec4 kAccentDeepV = THEME_RGB(150, 0, 18, 1);        // pressed; a value box's inactive half
 static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white)

@@ -46,7 +46,8 @@ void opt_begin(const char *id, float scale) {
     g_page = id;
     ImVec2 avail = ImGui::GetContentRegionAvail();
     ImGui::PushID(id);
-    ImGui::BeginChild("##rows", ImVec2(avail.x * 0.52f, avail.y), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+    // (on an ultrawide screen the rows stop growing - about as wide as the page is tall - and the picture takes the rest)
+    ImGui::BeginChild("##rows", ImVec2(fminf(avail.x * 0.52f, avail.y * 1.05f), avail.y), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 6 * scale));  // (rows close)
     g_desc_first.clear(), g_title_first.clear();
 }
@@ -341,7 +342,13 @@ void opt_end(void) {
     // unpainted) - a setting that changes the picture shows there at once, at its real pixels
     {
         extern bool menu_live_picture(float x0, float y0, float x1, float y1);
-        float ph = fminf((x1 - x0) * 9 / 16, avail.y * 0.46f);
+        // (in the screen's own shape: the whole of what the window shows, ultrawide too)
+        ImVec2 ds = ImGui::GetIO().DisplaySize;
+        float asp = ds.x > 0 && ds.y > 0 ? ds.x / ds.y : 16.0f / 9;
+        float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.55f;
+        if (ph > maxh) ph = maxh, pw = ph * asp;
+        float ox0 = x0, ox1 = x1;
+        x0 = ox0 + (ox1 - ox0 - pw) * 0.5f, x1 = x0 + pw;
         if (menu_live_picture(x0, y, x1, y + ph)) {
             dl->AddRect(ImVec2(x0 - 1, y - 1), ImVec2(x1 + 1, y + ph + 1), theme_u32(kSidebarV), r, 0, fmaxf(2, 3 * g_scale));
             const char *lab = tr("Live picture");
@@ -358,6 +365,7 @@ void opt_end(void) {
             dl->AddText(ImVec2(x1 - fsz.x - lp, y + ph - fsz.y - lp * 0.5f), kText, fps);
             y += ph + 14 * g_scale;
         }
+        x0 = ox0, x1 = ox1;  // (the card: the pane's whole width)
     }
     // the card: the option's name, a hairline, what it does
     dl->AddRectFilled(ImVec2(x0, y), ImVec2(x1, p.y + avail.y), theme_u32(kSidebarV), r);

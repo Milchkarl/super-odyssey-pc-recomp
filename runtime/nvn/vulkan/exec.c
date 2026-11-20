@@ -10164,10 +10164,27 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
     return src;
 }
 
+static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy, float vw, float vh, const float pv[8]);
+// (the menu's live picture: the picture this frame was presented from, after its post-processing and HUD layer)
+static VkImageView g_present_last;
+static float g_present_last_pv[8];
+
 void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh, const float pv[8]) {
     if (!b || !b->image || (b->aspect & ~VK_IMAGE_ASPECT_COLOR_BIT)) return;
     VkImageView src = post_process(cb, b, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
     src = hud_composite(cb, b, src, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
+    g_present_last = src;
+    memcpy(g_present_last_pv, pv, sizeof g_present_last_pv);
+    present_view(cb, src, vx, vy, vw, vh, pv);
+}
+
+// The picture vk_present_draw just drew, again at another place and size - plainly scaled, without running the
+// post-processing (anti-aliasing, upscalers, their history) a second time: the settings menu's live picture.
+void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh) {
+    if (g_present_last) present_view(cb, g_present_last, vx, vy, vw, vh, g_present_last_pv);
+}
+
+static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy, float vw, float vh, const float pv[8]) {
     VkPipeline p = present_pipeline(g_vk.sc_format);
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     VkDescriptorImageInfo ii = {vk_default_sampler(true), src, VK_IMAGE_LAYOUT_GENERAL};

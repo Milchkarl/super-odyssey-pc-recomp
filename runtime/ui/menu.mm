@@ -118,6 +118,14 @@ static void reset_menu_events(void) {
 
 bool menu_is_open(void) { return g_open.load(); }
 void menu_setup_mode(bool on) { g_setup.store(on); }
+// (render thread, before the menu's frame) last frame's rectangle, in the window's pixels
+extern "C" bool menu_live_picture_px(float r[4]) {
+    if (g_setup.load() || !g_open.load() || !g_hole_set) return false;
+    ImVec2 fb = ImGui::GetIO().DisplayFramebufferScale;
+    float sx = fb.x > 0 ? fb.x : 1, sy = fb.y > 0 ? fb.y : 1;
+    r[0] = g_hole[0] * sx, r[1] = g_hole[1] * sy, r[2] = g_hole[2] * sx, r[3] = g_hole[3] * sy;
+    return true;
+}
 bool menu_live_picture(float x0, float y0, float x1, float y1) {
     if (g_setup.load() || !g_open.load()) return false;  // (the start page: no game behind it)
     g_hole[0] = x0, g_hole[1] = y0, g_hole[2] = x1, g_hole[3] = y1;
@@ -2576,13 +2584,16 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         around(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130), 0);
         // a window in the middle with the game around it: about 68% x 80% of the picture; on small screens (the Steam
         // Deck's 1280 x 800) nearly all of it, so the sidebar leaves the rows room (0.4.1)
-        bool small = io.DisplaySize.x <= 1600;
-        float w = small ? io.DisplaySize.x * 0.94f : fminf(io.DisplaySize.x * 0.68f, 1800 * scale);
-        float h = small ? io.DisplaySize.y * 0.92f : fminf(io.DisplaySize.y * 0.80f, 1200 * scale);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        // (branch menu-odyssey-look, owner 2026-11-20: the whole screen, the game seen only in the live picture)
+        float w = io.DisplaySize.x, h = io.DisplaySize.y;
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));  // (painted below, around the live picture)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28 * scale, 18 * scale));
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::PopStyleVar(3);
         ImGui::PopStyleColor();
         {
             ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();

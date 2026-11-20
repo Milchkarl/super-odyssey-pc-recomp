@@ -1880,6 +1880,24 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
         vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+        {   // the settings menu's live picture (branch menu-odyssey-look): the whole window's picture, smaller, in the
+            // rectangle the menu leaves open - black first, where the game doesn't fill its window (bars)
+            extern bool menu_live_picture_px(float r[4]);
+            extern void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh);
+            float h[4];
+            if (menu_live_picture_px(h) && h[2] > h[0] + 4 && h[3] > h[1] + 4 && g_vk.sc_extent.width && g_vk.sc_extent.height) {
+                VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
+                                        .clearValue.color.float32 = {0, 0, 0, 1}};
+                int32_t x0 = (int32_t)fmaxf(0, h[0]), y0 = (int32_t)fmaxf(0, h[1]);
+                uint32_t x1 = (uint32_t)fminf(h[2], (float)g_vk.sc_extent.width), y1 = (uint32_t)fminf(h[3], (float)g_vk.sc_extent.height);
+                if (x1 > (uint32_t)x0 && y1 > (uint32_t)y0) {
+                    VkClearRect cr = {.rect = {{x0, y0}, {x1 - x0, y1 - y0}}, .baseArrayLayer = 0, .layerCount = 1};
+                    vkCmdClearAttachments(cb, 1, &ca, 1, &cr);
+                    float sx = (h[2] - h[0]) / g_vk.sc_extent.width, sy = (h[3] - h[1]) / g_vk.sc_extent.height;
+                    vk_present_draw_again(cb, h[0] + v[0] * sx, h[1] + v[1] * sy, v[2] * sx, v[3] * sy);
+                }
+            }
+        }
         vk_checkpoint(cb, "menu overlay");
         vk_queue_lock();  // (ImGui's first frame uploads its fonts through the queue)
         menu_render((void *)cb, g_vk.sc_extent.width, g_vk.sc_extent.height);
