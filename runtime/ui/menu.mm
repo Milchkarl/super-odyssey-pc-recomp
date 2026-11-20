@@ -882,6 +882,13 @@ static void tab_display(void) {
                    "corners of the picture.");
     }
     {
+        static const char *nv[] = {"Cropped sides", "Full width"};
+        opt_choice("Narrow picture view", &g_settings.narrow_full, nv, 2, 0,
+                   "In a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck). Cropped sides: the 16:9 view's "
+                   "height, a little cut off at the left and right. Full width: everything the 16:9 view shows, and more "
+                   "above and below.");
+    }
+    {
         static const char *pos[] = {"Centered (16:9)", "Edges"};
         opt_choice("HUD position (wide)", &g_settings.hud_edges, pos, 2, 1,
                    "In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, "

@@ -17,6 +17,8 @@ static const OptionNote k_option_notes[] = {
     {"VSync", "Lines the frames up with the screen's refreshes, so the picture never tears (splits in two).",
      "Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen."},
     {"Aspect ratio", "The picture's shape. 16:9 is the Switch's.", "16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck."},
+    {"Narrow picture view", "What a picture narrower than 16:9 (16:10, 4:3) shows: cut sides, or the full width and more above and below.",
+     "Full width shows the whole picture; Cropped sides (the default) keeps the 16:9 view's height."},
     {"HUD position (wide)", "Where the coin counters and other HUD go on a picture wider than 16:9.", "Edges when Aspect ratio is Fill on a wide screen (the Steam Deck's default); otherwise it changes nothing."},
     {"Console mode", "Whether the game thinks the Switch is docked to a TV or held in the hands.",
      "Docked for the best picture (the default). Handheld for longer battery life on a handheld PC."},
