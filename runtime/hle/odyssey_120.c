@@ -7,6 +7,7 @@
 // The hooks are always in; the menu switches between it and the stock 60 FPS loop while the game runs.
 // Keep the full framework update and draw path, including graphics housekeeping and the
 // HUD, and run GameSystem::movement at most once per two VI ticks.
+#include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -82,6 +83,20 @@ bool odyssey_motion_enabled(void) {
         motion = !mode || !strcmp(mode, "1");
     }
     return motion != 0;
+}
+
+// The camera between ticks only where Mario is drawn between ticks too (his pose sampled: odyssey_pose.c - 1.0.0).
+// 1.4.1 has no pose sampling (CalculateWorldMtx is inlined there): moving its camera alone put Mario at a different
+// place against the camera every other frame - a doubled Mario (owner, 2026-11-20, 120 FPS: "he looks like he's
+// doubling"; an orbit-only camera still moved him ~0.15 deg back and forth on screen). There the camera stays on the
+// tick, as at 60. ODYSSEY_CAMERA_INBETWEEN=0/1 overrides (tests).
+static bool camera_inbetween(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("ODYSSEY_CAMERA_INBETWEEN");
+        on = e && *e ? atoi(e) != 0 : odyssey_pose_enabled();
+    }
+    return on;
 }
 
 // 90: the camera between the last two ticks' (draw_lead + 1/2 ticks back from the last; the draw-only frames: none)
@@ -170,8 +185,8 @@ static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_
 // target / up at +0x38) is made. 1.0.0: the copy at x23, the scene x19, the camera it copies x25. 1.4.1: the copy is on
 // the stack at x29 - 0xf0, the scene x19, the camera x0 - and the hook runs one store early: the eye's x and y are
 // still in x8 (stur x8, [x29, #-0xb8] comes next), so they are placed in the copy first and handed back through x8.
-// (Until 2026-11-20 1.4.1 read 1.0.0's registers: its camera was never moved between ticks above 60 FPS - only Mario
-// was - the camera stepping at 60 while Mario moved at the frame rate: "not smooth at all".)
+// (Until 2026-11-20 1.4.1 read 1.0.0's registers - garbage, rejected. With the right ones its camera moved between
+// ticks while Mario, not sampled on 1.4.1, didn't: a doubled Mario. 1.4.1 keeps it on the tick: camera_inbetween.)
 // ODYSSEY_LOG_CAMERA=1 (frame pacing tests): each stage draw's camera as drawn - time, extra draw, Mario's lead, tick,
 // eye and target, then the same as the game made them (raw: without the in-between camera) ("[camera] ...")
 void odyssey_camera_draw(Cpu *c) {
@@ -186,11 +201,15 @@ void odyssey_camera_draw(Cpu *c) {
     if (v141) memcpy(pose, &c->x[8], 8);
     float raw[6];
     memcpy(raw, pose, sizeof raw);
-    if (camera_draw_inner(c, cam, draw_scene, source, pose) && v141) memcpy(&c->x[8], pose, 8);
-    if (lg)
-        LOG("[camera] %.3f %d %.3f %llu %.3f %.3f %.3f %.3f %.3f %.3f raw %.3f %.3f %.3f %.3f %.3f %.3f\n", plat_now_ns() / 1e6,
-            extra_draw, draw_lead, (unsigned long long)simulation_tick, pose[0], pose[1], pose[2], pose[3], pose[4], pose[5],
-            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
+    if (camera_inbetween() && camera_draw_inner(c, cam, draw_scene, source, pose) && v141) memcpy(&c->x[8], pose, 8);
+    if (lg) {  // (and Mario's position at the last tick: where he is drawn when his pose isn't sampled - 1.4.1)
+        extern bool odyssey_player_position(float p[3]);
+        float m[3] = {0, 0, 0};
+        odyssey_player_position(m);
+        LOG("[camera] %.3f %d %.3f %llu %.3f %.3f %.3f %.3f %.3f %.3f raw %.3f %.3f %.3f %.3f %.3f %.3f mario %.3f %.3f %.3f\n",
+            plat_now_ns() / 1e6, extra_draw, draw_lead, (unsigned long long)simulation_tick, pose[0], pose[1], pose[2], pose[3],
+            pose[4], pose[5], raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], m[0], m[1], m[2]);
+    }
 }
 
 static void quality_reduce_off(Cpu *c) { (void)c; }  // (dynamic resolution off: the Reduce nerve does nothing)
