@@ -8,6 +8,7 @@
 // Keep the full framework update and draw path, including graphics housekeeping and the
 // HUD, and run GameSystem::movement at most once per two VI ticks.
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -560,6 +561,165 @@ static void player_movement(Cpu *c) {
         (unsigned long long)updates, pos[0], pos[1], pos[2]);
 }
 
+// ---- sead::SZSDecompressor::streamDecomp, native (the game's Yaz0 / SZS decoder)
+// The kingdoms' archives are SZS files decoded a chunk at a time by this function - in the recompiled code a byte-by-
+// byte state machine several times slower than native. As a kingdom streams in (its first seconds, turning the camera
+// to new things) a decoder thread was busy ~96% of the time while the game's main thread waited for it: frames of
+// 30-50 ms (the owner's profile, 2026-11-20). The same function in C, from sead's (open-ead/sead
+// modules/src/resource/seadSZSDecompressor.cpp: readHeader_, streamDecomp, DecompContext::doCopy), on the same context
+// in game memory. ODYSSEY_SZS_NATIVE=0: the recompiled one; ODYSSEY_SZS_VERIFY=1: both, on copies, compared (tests).
+typedef struct {
+    uint64_t destp;
+    int32_t destCount, forceDestCount;
+    uint8_t flagMask, flags, packHigh, pad_;
+    int32_t step;  // (0 normal, 1 short, 2 long)
+    uint16_t lzOffset;
+    uint8_t headerSize, pad2_[5];
+} SzsCtx;
+_Static_assert(sizeof(SzsCtx) == 0x20 && offsetof(SzsCtx, step) == 0x14 && offsetof(SzsCtx, lzOffset) == 0x18 &&
+               offsetof(SzsCtx, headerSize) == 0x1a, "sead::SZSDecompressor::DecompContext");
+static bool szs_copy(SzsCtx *cx, uint32_t n) {  // (DecompContext::doCopy)
+    if ((uint32_t)cx->destCount < n) {
+        if (cx->forceDestCount == 0) return false;
+        n = (uint32_t)cx->destCount & 0xFFFF;
+    }
+    cx->destCount -= (int32_t)n;
+    uint8_t *d = (uint8_t *)(uintptr_t)cx->destp;
+    do { *d = *(d - cx->lzOffset); d++; } while (--n != 0);
+    cx->destp = (uint64_t)(uintptr_t)d;
+    cx->step = 0;
+    return true;
+}
+static int32_t szs_header(SzsCtx *cx, const uint8_t *src, uint32_t n) {  // (readHeader_)
+    int32_t len = 0;
+    while (cx->headerSize != 0) {
+        cx->headerSize -= 1;
+        if (cx->headerSize == 0xF) { if (*src != 0x59) return -1; }
+        else if (cx->headerSize == 0xE) { if (*src != 0x61) return -1; }
+        else if (cx->headerSize == 0xD) { if (*src != 0x7A) return -1; }
+        else if (cx->headerSize == 0xC) { if (*src != 0x30) return -1; }
+        else if (7 < cx->headerSize) cx->destCount |= (int32_t)((uint32_t)*src << (cx->headerSize - 8) * 8);
+        src++;
+        len += 1;
+        if (--n == 0 && cx->headerSize != 0) return len;
+    }
+    if (cx->forceDestCount < 1) return len;
+    if (cx->destCount <= cx->forceDestCount) return len;
+    cx->destCount = cx->forceDestCount;
+    return len;
+}
+static int32_t szs_stream(SzsCtx *cx, const uint8_t *src, uint32_t n) {  // (streamDecomp)
+    if (cx->headerSize != 0) {
+        int32_t len = szs_header(cx, src, n);
+        if (len < 0) return len;
+        n -= (uint32_t)len;
+        src += len;
+        if (n == 0) return cx->headerSize == 0 ? cx->destCount : -1;
+    }
+    while (cx->destCount > 0) {
+        if (cx->step == 2) {
+            if (!szs_copy(cx, (uint32_t)*src + 0x12)) return -2;
+        } else if (cx->step == 1) {
+            cx->lzOffset = (uint16_t)((((cx->packHigh << 8) & 0xf00) | *src) + 1);
+            uint32_t k = cx->packHigh >> 4;
+            if (k != 0) {
+                if (!szs_copy(cx, k + 2)) return -2;
+            } else cx->step = 2;
+        } else {
+            if (cx->flagMask == 0) {
+                cx->flags = *src++;
+                cx->flagMask = 0x80;
+                if (--n == 0) break;
+            }
+            if ((cx->flags & cx->flagMask) == 0) {
+                cx->packHigh = *src;
+                cx->step = 1;
+            } else {
+                uint8_t *d = (uint8_t *)(uintptr_t)cx->destp;
+                *d = *src;
+                cx->destp++;
+                cx->destCount -= 1;
+            }
+            cx->flagMask >>= 1;
+        }
+        if (--n == 0) break;
+        src++;
+    }
+    if (cx->destCount == 0 && cx->forceDestCount == 0 && 0x20 < n) return -1;
+    return cx->destCount;
+}
+// sead::ParallelSZSDecompressor::DecompThread::calc_(long) natively - the decoder threads' work (virtual: hooked; the
+// streamDecomp it calls directly is not), 1.0.0 0xb628b4 / 1.4.1 0x97e420, the same 30 instructions in both
+// (tools/dis141.py): stop once the context has failed (+0x190 < 0); decode the half of the double buffer this call is
+// for (+0x180 the buffer, +0x18c a half's size, +0x188 the bytes read) into the context at +0x100; a finished (0) or
+// failed (< 0, kept at +0x190) decode signals the event at +0x120; then always the one at +0x150 (the reader's). The
+// decode runs off the core gate (as szs_calc), the signals in the game's own code. ODYSSEY_SZS_NATIVE=0: the
+// recompiled calc_; ODYSSEY_SZS_VERIFY=1: the recompiled one runs, with the native decode checked against it.
+static GuestFn original_szs_calc;
+static GuestFn szs_stream_orig;  // (the recompiled streamDecomp: ODYSSEY_SZS_VERIFY)
+static uint64_t szs_signal;  // (the event's signal: 1.0.0 0xb644b4, 1.4.1 0x979a50)
+static void szs_calc_native(Cpu *c) {
+    static int verify = -1;
+    if (verify < 0) verify = getenv("ODYSSEY_SZS_VERIFY") && atoi(getenv("ODYSSEY_SZS_VERIFY"));
+    static bool logged;
+    if (!logged) { logged = true; LOG("[szs] SZS decoding runs natively%s\n", verify ? " (checked against the game's own)" : ""); }
+    uint64_t self = c->x[0];
+    if (*(const int32_t *)(uintptr_t)(self + 0x190) < 0) return;
+    uint64_t buf = *(const uint64_t *)(uintptr_t)(self + 0x180);
+    uint32_t half = *(const uint32_t *)(uintptr_t)(self + 0x18c), part = (uint32_t)c->x[1] - 1;
+    uint32_t total = *(const uint32_t *)(uintptr_t)(self + 0x188), left = total - half * part;
+    const uint8_t *src = (const uint8_t *)(uintptr_t)((part & 1) == 0 ? buf : buf + half);
+    uint32_t n = half < left ? half : left;
+    SzsCtx *cx = (SzsCtx *)(uintptr_t)(self + 0x100);
+    if (verify) {
+        // (tests) the game's own streamDecomp and the native one, each on a copy of the context and of the output
+        // (with the 4 KB before it, the furthest a copy reaches back), compared - before the real decode, so nothing
+        // has been signalled yet; then the game's own calc_ does the real one
+        static _Atomic uint64_t calls, bad;
+        uint64_t room = (uint64_t)n * 0x5b + 0x400;  // (the most a chunk can expand: 3 bytes for 0x111)
+        uint8_t *ba = malloc(0x1000 + room), *bb = malloc(0x1000 + room);
+        if (ba && bb && szs_stream_orig) {
+            SzsCtx a = *cx, b = *cx;
+            memcpy(ba, (const uint8_t *)(uintptr_t)cx->destp - 0x1000, 0x1000);
+            memcpy(bb, ba, 0x1000);
+            a.destp = (uint64_t)(uintptr_t)(ba + 0x1000), b.destp = (uint64_t)(uintptr_t)(bb + 0x1000);
+            int32_t r = szs_stream(&a, src, n);
+            Cpu t = *c;
+            t.x[0] = (uint64_t)(uintptr_t)&b, t.x[1] = (uint64_t)(uintptr_t)src, t.x[2] = n;
+            t.sp = (c->sp - 0x800) & ~0xFull;
+            szs_stream_orig(&t);
+            int32_t r0 = (int32_t)t.x[0];
+            uint64_t wa = a.destp - (uint64_t)(uintptr_t)(ba + 0x1000), wb = b.destp - (uint64_t)(uintptr_t)(bb + 0x1000);
+            bool same = r == r0 && wa == wb && a.destCount == b.destCount && a.flagMask == b.flagMask && a.flags == b.flags &&
+                        a.packHigh == b.packHigh && a.step == b.step && a.lzOffset == b.lzOffset && a.headerSize == b.headerSize &&
+                        wa <= room && !memcmp(ba + 0x1000, bb + 0x1000, wa);
+            uint64_t k = atomic_fetch_add(&calls, 1) + 1;
+            if (!same) {
+                uint64_t e = atomic_fetch_add(&bad, 1) + 1;
+                if (e <= 20) LOG("[szs] native decode DIFFERS: result %d / %d, wrote %llu / %llu, left %d / %d (n %u)\n", r, r0,
+                                 (unsigned long long)wa, (unsigned long long)wb, a.destCount, b.destCount, n);
+            }
+            if (k % 100 == 0) LOG("[szs] verify: %llu chunks, %llu differ\n", (unsigned long long)k, (unsigned long long)atomic_load(&bad));
+        }
+        free(ba);
+        free(bb);
+        kernel_ungated_begin();
+        original_szs_calc(c);
+        kernel_ungated_end();
+        return;
+    }
+    kernel_ungated_begin();  // (the core's other threads run meanwhile)
+    int32_t r = szs_stream(cx, src, n);
+    kernel_ungated_end();
+    if (r <= 0) {
+        if (r < 0) *(int32_t *)(uintptr_t)(self + 0x190) = r;
+        c->x[0] = self + 0x120;
+        guest_call(c, szs_signal);
+    }
+    c->x[0] = self + 0x150;
+    guest_call(c, szs_signal);
+}
+
 static GuestFn original_szs_device;
 static void szs_device(Cpu *c) {  // (sead::SZSDecompressor::tryDecompFromDevice: read + decode, off the core gate)
     static bool logged;
@@ -587,8 +747,7 @@ static void szs_decoder(Cpu *c) {  // (1.4.1 0x97dae0: the decoder's virtual ent
     kernel_ungated_end();
 }
 
-static GuestFn original_szs_calc;
-static void szs_calc(Cpu *c) {
+static void szs_calc(Cpu *c) {  // (ODYSSEY_SZS_NATIVE=0: the recompiled calc_, off the core gate)
     static bool logged;
     if (!logged) { logged = true; LOG("[szs] decompression runs off the core gate\n"); }
     kernel_ungated_begin();  // (the core's other threads run meanwhile)
@@ -647,10 +806,20 @@ void odyssey_native_120_boot(void) {
         // changes hands only at a function call, and the decode loop has none - a game thread waited ~20 ms for the
         // core whenever a model or effect loaded (hitting things, busy scenes): a late frame. The decode runs without
         // the core now (the signal after it takes the core back). ODYSSEY_SZS_UNGATED=0: as before.
-        const char *e = getenv("ODYSSEY_SZS_UNGATED");
+        const char *e = getenv("ODYSSEY_SZS_UNGATED"), *nat = getenv("ODYSSEY_SZS_NATIVE");
         uint64_t decomp = main->base + 0x97e420;
+        szs_signal = main->base + 0x979a50;
+        szs_stream_orig = dispatch_lookup(main->base + 0x97cfd0);
         if ((!e || atoi(e) != 0) && (original_szs_calc = dispatch_lookup(decomp)))
-            hle_override(decomp, szs_calc, "SZS decompression off the core gate");
+            hle_override(decomp, nat && !atoi(nat) ? szs_calc : szs_calc_native,
+                         nat && !atoi(nat) ? "SZS decompression off the core gate" : "SZS decompression (native)");
+    } else {  // (1.0.0: DecompThread::calc_ by name, the native one only)
+        const char *nat = getenv("ODYSSEY_SZS_NATIVE");
+        uint64_t decomp = main->base + 0xb628b4;
+        szs_signal = main->base + 0xb644b4;
+        szs_stream_orig = dispatch_lookup(main->base + 0xb63808);
+        if ((!nat || atoi(nat) != 0) && (original_szs_calc = dispatch_lookup(decomp)))
+            hle_override(decomp, szs_calc_native, "SZS decompression (native)");
     }
     {   // sead::SZSDecompressor::tryDecompFromDevice (its vtable; 1.0.0 by name): a loading thread (priority 45) reads a
         // compressed file and decodes it in a loop without calls, holding its core - the game's main thread (44, on the
