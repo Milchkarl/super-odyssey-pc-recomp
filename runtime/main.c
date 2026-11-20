@@ -221,6 +221,7 @@ int main(int argc, char **argv) {
     const char *root = "extracted";  // (in the data root)
     bool build_romfs = false;
     const char *prepare = NULL;
+    const char *unpack_seed = NULL;  // --unpack-seed <out>: the shipped pipeline seed, unpacked there
     static char arg_root[1024];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--play")) {  // straight into the game, without the configuration page
@@ -232,6 +233,7 @@ int main(int argc, char **argv) {
             continue;
         }
         else if (!strcmp(argv[i], "--build-romfs")) build_romfs = true;
+        else if (!strcmp(argv[i], "--unpack-seed") && i + 1 < argc) unpack_seed = argv[++i];  // (tools/release.sh)
         else if (!strcmp(argv[i], "--prepare-shaders") && i + 1 < argc) prepare = argv[++i];
         else if (!strcmp(argv[i], "--data-root") && i + 1 < argc) {  // (the game's own, for its shader preparation)
 #ifdef _WIN32
@@ -246,6 +248,18 @@ int main(int argc, char **argv) {
     rt_paths_init();  // the data root becomes the working directory (runtime/paths.h)
 #ifndef __APPLE__
     // --prepare-shaders <list>: the shader preparation's own process, started by the game (runtime/nvn/vulkan/exec.c)
+#ifndef __APPLE__
+    if (unpack_seed) {  // (after rt_paths_init: the seed is found next to the executable)
+        extern bool vk_seed_unpack(const char *src, const char *dst);
+        char seed[1100];
+        bool ok = rt_resource("pipeline-seed.bin.zst", "data/pipeline-seed.bin.zst", seed, sizeof seed) &&
+                  vk_seed_unpack(seed, unpack_seed);
+        LOG("pipeline seed %s\n", ok ? "unpacked" : "not unpacked");
+        return ok ? 0 : 1;
+    }
+#else
+    (void)unpack_seed;
+#endif
     if (prepare) {
         extern int vk_prepare_main(const char *list);
         return vk_prepare_main(prepare);

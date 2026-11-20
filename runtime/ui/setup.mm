@@ -40,6 +40,9 @@
 #include "setup.h"
 #include "steam_shortcut.h"
 
+#ifndef __APPLE__
+extern "C" bool vk_seed_unpack(const char *src, const char *dst);  // runtime/nvn/vulkan/shaders.c
+#endif
 extern "C" {
 #include "../diagnostics.h"
 #include "../gamebuild.h"
@@ -423,7 +426,11 @@ static void *work(void *) {
         // load_pipeline_recipes keeps the ones this GPU supports), unless this PC has recorded its own already
         char seed[1100];
         mkdir("cache", 0755);
-        if (!file_exists("cache/graphics-pipelines.bin") && rt_resource("pipeline-seed.bin", "data/pipeline-seed.bin", seed, sizeof seed))
+        // (packed with zstd since 0.5.1: runtime/nvn/vulkan/shaders.c vk_seed_unpack; a plain one still works)
+        if (file_exists("cache/graphics-pipelines.bin")) {}
+        else if (rt_resource("pipeline-seed.bin.zst", "data/pipeline-seed.bin.zst", seed, sizeof seed))
+            LOG("[setup] pipeline seed: %s\n", vk_seed_unpack(seed, "cache/graphics-pipelines.bin") ? "unpacked" : "unpacking failed");
+        else if (rt_resource("pipeline-seed.bin", "data/pipeline-seed.bin", seed, sizeof seed))
             LOG("[setup] pipeline seed: %s\n", copy_file_to(seed, "cache/graphics-pipelines.bin") ? "copied" : "copy failed");
         set_step("Compiling shaders...");
         g_frac = 0.55f;

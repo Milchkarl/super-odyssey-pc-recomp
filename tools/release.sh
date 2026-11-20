@@ -37,7 +37,9 @@ SSH="/c/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes -o ConnectTimeout=10"
 SCP="/c/Windows/System32/OpenSSH/scp.exe -q -o BatchMode=yes"
 export MSYS_NO_PATHCONV=1  # (Git Bash would rewrite /tmp/... and /retest-style arguments)
 say() { echo; echo "== $*"; }
-trap 'echo "(work folder kept: $WORK)"' EXIT
+# (the seed check's link to TESTDATA's game files - step 3b - is removed whatever happens: deleting the work folder
+# through it would delete those files)
+trap '[ -e "$WORK/seedcheck/extracted" ] && cmd //c rmdir "$(cygpath -w "$WORK/seedcheck/extracted")" > /dev/null 2>&1; echo "(work folder kept: $WORK)"' EXIT
 
 probe() {  # url -> runs the catalog probe on it, fails unless both of its checks find the window
     gh workflow run probe.yml --repo "$PROBE" -f "url=$1" >/dev/null
@@ -78,6 +80,33 @@ mkdir -p "$WORK/win" && /c/Windows/System32/tar.exe -xf "$ZIP" -C "$WORK/win"
 grep -aE "FATAL|\*\*\* " "$WORK/windows.log" && { echo "the Windows run hit an error ($WORK/windows.log)"; exit 1; }
 [ -f "$WORK/windows-play.png" ] || { echo "the Windows run never reached gameplay ($WORK/windows.log)"; exit 1; }
 echo "ok: $(grep -a fps "$WORK/windows.log" | tail -1 | cut -c1-50); look at $WORK/windows-play.png"
+
+say "3b/7  Windows: the shipped pipeline seed against this build's shaders"
+# The setup compiles the pipelines in pipeline-seed.bin ahead. Its recipes name translated shaders by key, so a change
+# to the shader translator can leave them pointing at nothing: 0.5.0 shipped a seed whose recipes were 63% unusable
+# (4,318 of 6,905), and a new player's opening stuttered on what should have been ready. The zip's own setup passes are
+# run here on a fresh cache (the game files linked from TESTDATA) and the release stops if more than 5% are left out.
+# Regenerate the seed with tools/make_pipeline_seed.py (see its docstring).
+SEEDROOT="$WORK/seedcheck"
+mkdir -p "$SEEDROOT/cache"
+cmd //c mklink //J "$(cygpath -w "$SEEDROOT/extracted")" "$(cygpath -w "$TESTDATA/extracted")" > /dev/null
+( cd "$WORK/win/Super Odyssey PC Recomp" &&
+  ./SuperOdysseyRecomp.exe --unpack-seed "$(cygpath -w "$SEEDROOT/cache/graphics-pipelines.bin")" > "$WORK/seed-unpack.log" 2>&1
+  for pass in all recorded; do
+      ODYSSEY_PRECOMPILE_MEM_MB=0 timeout 1800 ./SuperOdysseyRecomp.exe --prepare-shaders $pass --data-root "$(cygpath -w "$SEEDROOT")" \
+          > "$WORK/seed-$pass.log" 2>&1
+  done ) || true
+SEEDLINE=$(grep -a "\[prep\] recorded " "$WORK/seed-recorded.log" | tail -1)
+[ -n "$SEEDLINE" ] || { echo "the seed check's pipeline pass didn't run ($WORK/seed-recorded.log)"; exit 1; }
+read -r SG SC SU <<< "$(echo "$SEEDLINE" | sed -E 's/.*recorded ([0-9]+) graphics and ([0-9]+) compute pipelines, ([0-9]+) unavailable.*/\1 \2 \3/')"
+echo "$SEEDLINE"
+if [ $((SU * 100)) -gt $(((SG + SC + SU) * 5)) ]; then
+    echo "the pipeline seed is out of date: $SU of $((SG + SC + SU)) recipes can't be built by this build's setup."
+    echo "Regenerate data/pipeline-seed.bin.zst (tools/make_pipeline_seed.py) - not releasing."
+    exit 1
+fi
+cmd //c rmdir "$(cygpath -w "$SEEDROOT/extracted")" > /dev/null 2>&1 || true
+echo "ok: $SU of $((SG + SC + SU)) left out"
 
 say "4/7  Linux on the Steam Deck"
 if [ -n "$DECK" ] && timeout 15 $SSH "$DECK" true 2>/dev/null; then

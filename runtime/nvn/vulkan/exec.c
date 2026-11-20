@@ -5886,11 +5886,18 @@ static int prepare_recorded_pipelines(void) {
     uint64_t budget = (limit ? strtoull(limit, NULL, 10) : 3072ull) * 1048576ull;
     uint64_t baseline = plat_private_bytes();
     uint32_t next = start, graphics = 0, compute = 0;
+    // ODYSSEY_PREP_KEPT_OUT=<file> (tools/make_pipeline_seed.py): the recipes this pass could build, as a seed file -
+    // what of an older seed still names shaders of the current translator
+    const char *kept_out = getenv("ODYSSEY_PREP_KEPT_OUT");
+    PipeRecipe *kept = kept_out ? malloc(h.count * sizeof *kept) : NULL;
+    uint32_t nkept = 0;
     while (next < h.count) {
         const PipeRecipe *r = &recipes[next++];
         uint64_t hash = pipe_recipe_hash(r);
-        if (r->spv[1]) graphics += warm_graphics_pipeline(r, hash, libraries);
-        else compute += prewarm_compute(r, hash);
+        bool built = r->spv[1] ? warm_graphics_pipeline(r, hash, libraries) : prewarm_compute(r, hash);
+        if (r->spv[1]) graphics += built;
+        else compute += built;
+        if (built && kept) kept[nkept++] = *r;
         if ((next - start) % 16 == 0 || next == h.count) {
             f = fopen("cache/prepare.progress", "w");
             if (f) { fprintf(f, "%u %u 2\n", next, h.count); fclose(f); }
@@ -5903,6 +5910,18 @@ static int prepare_recorded_pipelines(void) {
         graphics, compute, next - start - graphics - compute, start, next, h.count);
     LOG("[prep]   left out: %u already there or no room, %u state out of range, %u without their shaders, %u failed to build\n",
         g_warm_miss[0], g_warm_miss[1], g_warm_miss[2], g_warm_miss[3]);
+    if (kept) {
+        PipeRecipeHeader kh = {.version = 1, .size = sizeof(PipeRecipe), .count = nkept,
+                               .checksum = hash_words(0, kept, nkept * sizeof *kept)};  // (all-zero UUID: a seed)
+        FILE *kf = fopen(kept_out, "wb");
+        if (kf) {
+            fwrite(&kh, sizeof kh, 1, kf);
+            fwrite(kept, sizeof *kept, nkept, kf);
+            fclose(kf);
+            LOG("[prep] %u buildable recipes written to %s\n", nkept, kept_out);
+        }
+        free(kept);
+    }
     if (next == h.count) {
         remove(RECORDED_NEXT);
         return 0;
