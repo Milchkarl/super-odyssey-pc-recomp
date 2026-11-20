@@ -721,6 +721,9 @@ static bool choice(const char *label, int *value, const char *const *names, int 
         ImGui::EndCombo();
     }
     if (ImGui::IsItemFocused() && !ImGui::IsPopupOpen("##c")) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
             *value = (*value + 1) % n; changed = true;
         }
@@ -756,6 +759,9 @@ static bool slider(const char *label, int *value, int lo, int hi, int step, cons
     ImGui::SetNextItemWidth(-1);
     bool changed = ImGui::SliderInt("##s", value, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         int v = *value;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) v += step;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) v -= step;

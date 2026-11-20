@@ -119,11 +119,14 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
                            ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
             if (ImGui::GetKeyData(k)->DownDuration > 1.0f) g_held = true;
-        // left / right belong to the row (navigation would otherwise try to move sideways)
+    }
+    // left / right belong to the selected row - every row: greyed-out ones, buttons, and on the frame it is entered
+    // (navigation would otherwise move sideways: with the tabs on top that jumped to a tab or to the far side of the
+    // page, owner 2026-11-20)
+    if (foc)
         for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
                            ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
             ImGui::SetKeyOwner(k, ImGui::GetItemID());
-    }
     if (foc) g_desc_focus = desc ? desc : "", g_title_focus = label;
     if (hov) g_desc_hover = desc ? desc : "", g_title_hover = label;
     if (g_desc_first.empty() && desc) g_desc_first = desc, g_title_first = label;
