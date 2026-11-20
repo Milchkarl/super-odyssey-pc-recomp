@@ -2098,8 +2098,13 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
         bool sel = t.id == show;
         float r = 7 * scale, fs = ImGui::GetFontSize() * fsc;
         ImVec2 q(p.x + w, p.y + item_h);
-        if (sel) bdl->AddRectFilled(p, q, kAccent, r);
-        else if (hov || foc) bdl->AddRectFilled(p, q, theme_u32(kSurfaceHoverV), r);
+        // (the shown tab: a lighter surface with a red line under its name; red as an accent, not a fill)
+        if (sel || hov || foc) bdl->AddRectFilled(p, q, theme_u32(sel ? kBoxV : kSurfaceHoverV), r);
+        if (sel) {
+            float lw2 = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * fsc, FLT_MAX, 0, tr(t.name)).x;
+            float ly = q.y - fmaxf(3, 5 * scale);
+            bdl->AddRectFilled(ImVec2(p.x + (w - lw2) * 0.5f, ly), ImVec2(p.x + (w + lw2) * 0.5f, ly + fmaxf(2, 3 * scale)), kAccent, 2 * scale);
+        }
         if (foc) bdl->AddRect(ImVec2(p.x + 1, p.y + 1), ImVec2(q.x - 1, q.y - 1), kGold, r, 0, fmaxf(2, 2.5f * scale));
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, tr(t.name));
         bdl->AddText(ImGui::GetFont(), fs, ImVec2(p.x + (w - ts.x) * 0.5f, p.y + (item_h - fs) * 0.5f),

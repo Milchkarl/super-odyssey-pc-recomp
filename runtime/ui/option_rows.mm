@@ -165,24 +165,30 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     dl->PushClipRect(p, ImVec2(p.x + split - pad * 0.5f, p.y + h), true);
     dl->AddText(font, fs * ls, ImVec2(p.x + pad, p.y + (h - fs * ls) * 0.5f), label_col, t.c_str());
     dl->PopClipRect();
-    if (tog >= 0) {  // On | Off: the chosen half red, the other dark
+    if (tog >= 0) {  // On | Off: a segmented control - the chosen half lighter with a short red line under its word
         float hw = bw * 0.5f;
         const char *names[2] = {tr("On"), tr("Off")};
+        dl->AddRectFilled(b0, b1, theme_u32(kSidebarV), r);
         for (int k = 0; k < 2; k++) {
             ImVec2 a(b0.x + k * hw, b0.y), z(b0.x + (k + 1) * hw, b1.y);
             bool chosen = (k == 0) == (tog == 1);
-            ImU32 fill = off ? theme_u32(kSurfaceV) : chosen ? theme_u32(lit ? kAccentHotV : kAccentRestV) : theme_u32(kSidebarV);
-            dl->AddRectFilled(a, z, fill, r, k == 0 ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
+            if (chosen) dl->AddRectFilled(a, z, theme_u32(off ? kSurfaceV : lit ? kBoxHotV : kBoxV), r,
+                                          k == 0 ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
             ImVec2 ts = ImGui::CalcTextSize(names[k]);
-            dl->AddText(ImVec2((a.x + z.x - ts.x) * 0.5f, p.y + (h - fs) * 0.5f),
-                        off ? kTextOff : chosen ? kText : theme_u32(kTextDimV, 0.7f), names[k]);
+            float tx = (a.x + z.x - ts.x) * 0.5f, ty = p.y + (h - fs) * 0.5f;
+            dl->AddText(ImVec2(tx, ty), off ? kTextOff : chosen ? kText : theme_u32(kTextDimV, 0.55f), names[k]);
+            if (chosen && !off) {
+                float lw2 = fmaxf(ts.x, fs * 1.2f), ly = b1.y - fmaxf(3, 4 * g_scale);
+                float lx0 = (a.x + z.x - lw2) * 0.5f;
+                dl->AddRectFilled(ImVec2(lx0, ly), ImVec2(lx0 + lw2, ly + fmaxf(2, 2.5f * g_scale)), kAccent, 2 * g_scale);
+            }
         }
         if (clicked && !off && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {  // (a click on the chosen half: nothing)
             float mx = ImGui::GetIO().MousePos.x;
             if (mx >= b0.x && ((mx < b0.x + hw) == (tog == 1))) step = 0;
         }
     } else if (has_box) {
-        dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kAccentHotV : kAccentRestV), r);  // (bright only where the cursor is)
+        dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kBoxHotV : kBoxV), r);  // (charcoal; red only for the arrows)
         float aw = fs * 0.36f, agap = fs * 0.5f, cy = p.y + h * 0.5f;
         float inner = bw - (arrows ? 2 * (aw + agap * 1.4f) : agap * 2);  // (room for the value and its tag)
         float vw0 = ImGui::CalcTextSize(value.c_str()).x, vs = 1;
@@ -191,7 +197,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         if (tag && vw0 + tagw > inner) tag = NULL, tagw = 0;  // (no room: the value keeps its size)
         if (vw0 > inner && vw0 > 0) vs = fmaxf(0.7f, inner / vw0);
         if (arrows) {
-            ImU32 ac = off ? kTextOff : kText;
+            ImU32 ac = off ? kTextOff : theme_u32(kAccentV, lit ? 1.0f : 0.85f);  // (the red accent)
             float lx = b0.x + agap, rx = b1.x - agap - aw;
             dl->AddTriangleFilled(ImVec2(lx, cy), ImVec2(lx + aw, cy - aw * 0.8f), ImVec2(lx + aw, cy + aw * 0.8f), ac);
             dl->AddTriangleFilled(ImVec2(rx + aw, cy), ImVec2(rx, cy - aw * 0.8f), ImVec2(rx, cy + aw * 0.8f), ac);
