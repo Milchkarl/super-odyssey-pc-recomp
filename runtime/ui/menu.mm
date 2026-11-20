@@ -858,11 +858,11 @@ static void tab_display(void) {
         static const int vs_mode[] = {VSYNC_ON, VSYNC_FAST, VSYNC_ADAPTIVE, VSYNC_OFF};
         int vi = 3;
         for (int i = 0; i < 4; i++) if (vs_mode[i] == g_settings.vsync) vi = i;
-        if (opt_choice("VSync", &vi, vs, 4, 3,  /* (the default, Off: settings.c) */
+        if (opt_choice("VSync", &vi, vs, 4, 1,  /* (the default, Fast: settings.c) */
                        "On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits "
                        "a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no "
-                       "tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive "
-                       "(Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames "
+                       "tearing and no waiting - the screen shows the newest finished frame at each refresh (the default). Adaptive "
+                       "(Relaxed): as On, but a late frame goes out at once (tearing only then). Off: frames "
                        "go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver "
                        "lacks one, the closest it has is used.")) {
             g_settings.vsync = vs_mode[vi];
@@ -935,7 +935,7 @@ static void tab_graphics(void) {
             res[i] = res_lab[i];
         }
     }
-    enum { RES_MATCH_AT = 4 };
+    enum { RES_DISPLAY_AT = 3, RES_MATCH_AT = 4 };  // (100%: the default since 2026-11-20)
     enum { NRES = sizeof res_mode / sizeof res_mode[0] };
     {
         int ri = RES_MATCH_AT;
@@ -947,8 +947,8 @@ static void tab_graphics(void) {
         char at[160];
         snprintf(at, sizeof at, tr("Rendering at %.0f x %.0f."), output_game_w() * sx, output_game_h() * sy);  // (handheld: 1280 x 720 base)
         int n = snprintf(d, sizeof d, "%s\n\n%s", tr("How sharp the 3D image is - each choice shows the size it renders at in this window "
-                                      "and picture shape. The default, shown as your screen's resolution: that resolution (at least the "
-                                      "Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
+                                      "and picture shape. Shown as your screen's resolution: that resolution (at least the "
+                                      "Switch's 1600 x 900). 100% (the default): exactly your screen's pixels (Steam Deck: 1280 x 800). "
                                       "Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of "
                                       "the display, for slower machines; the fixed sizes render at exactly that, above the "
                                       "screen's for a sharper picture (supersampling)."), at);
@@ -956,11 +956,11 @@ static void tab_graphics(void) {
             snprintf(d + n, sizeof d - n, tr(" Dynamic: %.0f%% of the display right now."), output_scale_dynamic_factor() * 100);
 #ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
         if (vk_temporal_enabled()) {
-            snprintf(d, sizeof d, "%s\n\n%s", tr("Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
+            snprintf(d, sizeof d, "%s\n\n%s", tr("Your screen's resolution lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
                      "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes."), at);
         }
 #endif
-        if (opt_choice("Internal resolution", &ri, res, NRES, RES_MATCH_AT, d, false)) g_settings.res_mode = res_mode[ri];
+        if (opt_choice("Internal resolution", &ri, res, NRES, RES_DISPLAY_AT, d, false)) g_settings.res_mode = res_mode[ri];
     }
 #ifdef __APPLE__
     {   // macOS's own upscaler next to bilinear (Windows / Linux: AMD FSR 1 is in the Upscaling list below)
@@ -979,7 +979,7 @@ static void tab_graphics(void) {
 #endif
     opt_section("Anti-aliasing");
     static const char *aa[AA_COUNT] = {"Off", "SMAA", "FXAA"};
-    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_FXAA,
+    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_OFF,
                "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
                "blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every "
                "high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. "
@@ -1243,7 +1243,7 @@ static void tab_performance(void) {
                                          "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
                                          "crashes, set it to Off."),
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        if (opt_choice("Multithreaded rendering", &v, rt, 3, 0, d, false)) g_settings.record_thread = v - 1;
+        if (opt_choice("Multithreaded rendering", &v, rt, 3, 1, d, false)) g_settings.record_thread = v - 1;
     }
 #endif
 #ifdef _WIN32
@@ -1303,16 +1303,16 @@ static void tab_performance(void) {
                        "missing, but the game pauses while the shader builds (a short hitch)."))
             g_settings.shader_wait = !async;  // (opt_toggle flipped it)
     }
-    opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, true,
+    opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,
                "On: the lighting the game sets up on the first frame of a kingdom is built with less GPU work, for a "
                "shorter hitch as it appears. Turn it off if the lighting looks wrong right after arriving somewhere. "
                "settings.ini has a line for each of its four parts (arrival_mip_views, arrival_barriers, "
                "arrival_precreate, arrival_submit). Changes at once.");
     {
         static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
-        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_AUTO,
+        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_NORMAL,
                    "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
-                   "RAM with an NVIDIA GPU). Low builds each shader the first time it is drawn: a short stutter the first "
+                   "RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first "
                    "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
                    "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
     }

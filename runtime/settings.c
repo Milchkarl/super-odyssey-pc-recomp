@@ -63,7 +63,7 @@ Settings g_settings = {
     .fsr1_sharpness = 90,
     .deband = true,
     .hud_sharpen = true,
-    .antialias = AA_FXAA,
+    .antialias = AA_OFF,  // (owner 2026-11-20: the defaults for everyone - Off)
     .rumble = true,
     .rumble_strength = 100,
     .motion = true,
@@ -72,18 +72,21 @@ Settings g_settings = {
     .mouse_camera = true,
     .mouse_menus = true,
     // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
-    // (always the full resolution) and VSync off.
+    // (always the full resolution). VSync Fast (Mailbox) since 2026-11-20 (owner: no tearing, little delay).
     .game_dynres = false,
-    .vsync = VSYNC_OFF,
+    .vsync = VSYNC_FAST,
+    .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
+    .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
     .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
-    .fast_arrival = true, .arrival_mip_views = true, .arrival_barriers = true, .arrival_precreate = true, .arrival_submit = true,
+    // (Faster kingdom arrival off by default since 2026-11-20 - owner; its four parts stay on, used once it is turned on)
+    .fast_arrival = false, .arrival_mip_views = true, .arrival_barriers = true, .arrival_precreate = true, .arrival_submit = true,
     .early_fences = 1,   // (on: nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default, every platform)
-    .record_thread = -1,  // (Auto: on with an NVIDIA GPU, the only kind it has been tested on - nvn/vulkan/exec.c dq_enabled)
+    .record_thread = 0,  // (Off for everyone - owner 2026-11-20; -1 Auto: on with an NVIDIA GPU, nvn/vulkan/exec.c dq_enabled)
     // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22, #37, #106. 5% as Switch
     // emulators; it was 10%, then the owner asked for 5 with finer control, 2026-11-19)
     .stick_deadzone_l = 5, .stick_deadzone_r = 5,
@@ -105,7 +108,7 @@ volatile bool g_app_unfocused;
 static void settings_steam_deck(void) {
     // (Multithreaded rendering off here: one scripted run in four with it on hung the Deck's GPU - "illegal register
     // access in command stream", a GPU reset - while never with it off; owner 2026-11-16: off on the Deck until found)
-    g_settings.record_thread = -1;  // (Auto: off with its AMD GPU)
+    g_settings.record_thread = 0;  // (Off, as everywhere)
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
     g_settings.hud_edges = 1;

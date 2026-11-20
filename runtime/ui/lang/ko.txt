@@ -108,7 +108,7 @@ Show Mario's position ||| 마리오 위치 표시
 Mario's position in the kingdom, in metres. Useful for bug reports. ||| 왕국 안에서 마리오의 위치 (미터 단위)입니다. 버그 보고에 유용합니다.
 Shaders ||| 셰이더
 Memory use ||| 메모리 사용
-Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of RAM with an NVIDIA GPU). Low builds each shader the first time it is drawn: a short stutter the first time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about 3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start. ||| 보통은 지역이 불러오는 모든 것의 셰이더를 미리 만들어 끊김을 줄입니다 (NVIDIA GPU에서 RAM 약 9 GB). 낮음은 각 셰이더를 처음 그릴 때 만듭니다: 처음에 짧게 끊기며 약 6.5 GB. 자동은 RAM이 12 GB 미만인 PC에서 낮음을 고릅니다. 게임 자체에 약 3.5 GB가 필요하므로 RAM 4 GB로는 부족합니다. 다음 시작 시 적용됩니다.
+Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about 3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start. ||| 보통은 지역이 불러오는 모든 것의 셰이더를 미리 만들어 끊김을 줄입니다 (NVIDIA GPU에서 RAM 약 9 GB, 기본값). 낮음은 각 셰이더를 처음 그릴 때 만듭니다: 처음에 짧게 끊기며 약 6.5 GB. 자동은 RAM이 12 GB 미만인 PC에서 낮음을 고릅니다. 게임 자체에 약 3.5 GB가 필요하므로 RAM 4 GB로는 부족합니다. 다음 시작 시 적용됩니다.
 Normal ||| 보통
 Low ||| 낮음
 Long ||| 길게
@@ -242,10 +242,10 @@ Edges ||| 가장자리
 In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, the life gauge, the button guides and the mini map go to the picture's corners, as on a 16:9 screen. Centered: the whole HUD in a 16:9 box in the middle. Menus and messages stay in the middle either way. ||| 16:9보다 넓은 화면 (21:9, 32:9, 울트라와이드에서 창 채우기)에서. 가장자리: 코인과 문 카운터, 체력 게이지, 버튼 안내, 미니맵이 16:9 화면처럼 그림의 모서리로 갑니다. 가운데: HUD 전체가 가운데 16:9 상자 안에 있습니다. 메뉴와 메시지는 어느 쪽이든 가운데에 남습니다.
 Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and the world where they are at that moment (no generated in-between images); gameplay itself - physics, enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast. 60 FPS matches the Switch and uses the least power. Changes at once. ||| 60을 넘으면 게임이 초당 그만큼의 프레임을 그립니다. 각 프레임은 그 순간의 마리오, 카메라, 세계를 보여 주는 실제 프레임입니다 (생성된 중간 이미지 없음). 게임 플레이 자체 - 물리, 적, 타이머 - 는 게임 본래의 초당 60단계를 유지합니다. 디스플레이 주사율이나 그 약수를 고르세요 (144 Hz 화면: 72 또는 144). 그만큼 빠르게 그릴 수 있는 PC가 필요합니다. 60 FPS는 Switch와 같고 전력을 가장 적게 씁니다. 바로 바뀝니다.
 # 0.3.2 / 1.0 additions (#63)
-How sharp the 3D image is - each choice shows the size it renders at in this window and picture shape. The default, shown as your screen's resolution: that resolution (at least the Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of the display, for slower machines; the fixed sizes render at exactly that, above the screen's for a sharper picture (supersampling). ||| 3D 화면이 얼마나 선명한지 정합니다. 각 항목에는 이 창과 화면 비율에서 렌더링되는 크기가 표시됩니다. 기본값(화면 해상도로 표시): 그 해상도로 렌더링합니다(최소 Switch의 1600 x 900). 100%: 화면의 픽셀 수 그대로(Steam Deck: 1280 x 800). 다이내믹: GPU가 최대 속도를 유지할 수 있는 만큼 선명하게. 75% / 50% / 25%: 느린 PC를 위한 화면 대비 비율. 고정 크기는 정확히 그 크기로 렌더링하며, 화면보다 크면 더 선명한 화면(슈퍼샘플링)이 됩니다.
+How sharp the 3D image is - each choice shows the size it renders at in this window and picture shape. Shown as your screen's resolution: that resolution (at least the Switch's 1600 x 900). 100% (the default): exactly your screen's pixels (Steam Deck: 1280 x 800). Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of the display, for slower machines; the fixed sizes render at exactly that, above the screen's for a sharper picture (supersampling). ||| 3D 화면이 얼마나 선명한지 정합니다. 각 항목에는 이 창과 화면 비율에서 렌더링되는 크기가 표시됩니다. 화면 해상도로 표시: 그 해상도로 렌더링합니다(최소 Switch의 1600 x 900). 100%(기본값): 화면의 픽셀 수 그대로(Steam Deck: 1280 x 800). 다이내믹: GPU가 최대 속도를 유지할 수 있는 만큼 선명하게. 75% / 50% / 25%: 느린 PC를 위한 화면 대비 비율. 고정 크기는 정확히 그 크기로 렌더링하며, 화면보다 크면 더 선명한 화면(슈퍼샘플링)이 됩니다.
 Rendering at %.0f x %.0f. ||| %.0f x %.0f로 렌더링 중입니다.
  Dynamic: %.0f%% of the display right now. |||  다이내믹: 지금 화면의 %.0f%%.
-Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes. ||| 화면 해상도(기본값)에서는 시간적 업스케일러가 평소 입력 크기를 고릅니다. 고정 해상도는 그 크기를 대신합니다. 화면 해상도 이상에서는 업스케일링을 건너뜁니다. 같은 크기에서는 Native AA/DLAA가 적용됩니다.
+Your screen's resolution lets the temporal upscaler choose its usual input size. A fixed resolution overrides that size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes. ||| 화면 해상도에서는 시간적 업스케일러가 평소 입력 크기를 고릅니다. 고정 해상도는 그 크기를 대신합니다. 화면 해상도 이상에서는 업스케일링을 건너뜁니다. 같은 크기에서는 Native AA/DLAA가 적용됩니다.
 Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. (MSAA isn't offered: the game lights its scene in several full-screen passes after the geometry, where MSAA has nothing to work on - a higher internal resolution, 2x and up, is the supersampling that works.) ||| 게임 화면을 창 크기에 맞추기 전에 계단 현상을 부드럽게 합니다. SMAA: 가장자리를 찾아 그 부분만 섞어 텍스처는 선명하게 유지합니다(더 좋은 화질). FXAA: 대비가 큰 모든 가장자리를 한 번에 부드럽게 하는 빠른 방식으로, GPU 부담이 가장 적고 약간 더 부드럽습니다. 내부 해상도가 낮을 때 가장 유용합니다. (MSAA는 제공하지 않습니다: 게임이 지오메트리 다음에 여러 전체 화면 패스로 장면에 조명을 입히기 때문에 MSAA가 작동할 부분이 없습니다 - 2x 이상의 높은 내부 해상도가 효과가 있는 슈퍼샘플링입니다.)
 How the picture is upscaled to the window. Off: the game renders plainly at the internal resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and sharpening of each frame - set Internal resolution below your screen's (75% for example); at your screen's resolution there is nothing to scale. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4 and Intel XeSS: temporal upscaling and anti-aliasing from several frames - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 화면을 창 크기로 업스케일하는 방식입니다. 끄기: 게임이 내부 해상도로 그대로 렌더링하고 일반 쌍선형 필터로 크기를 맞춥니다. AMD FSR 1: 프레임마다 가장자리를 고려한 업스케일링과 샤프닝 - 내부 해상도를 화면보다 낮게(예: 75%) 설정하세요. 화면 해상도에서는 업스케일할 것이 없습니다. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4, Intel XeSS: 여러 프레임을 이용한 시간적 업스케일링과 안티앨리어싱 - 낮은 내부 해상도에서 더 선명하며, 이를 지원하는 GPU와 드라이버가 필요합니다. 각 방식은 자체 모드와 샤프닝 설정을 유지합니다. 플레이 중에 바뀝니다.
 AMD FSR 4 (Beta) ||| AMD FSR 4 (베타)
@@ -298,7 +298,7 @@ Up to date ||| 최신 버전
 Checking... ||| 확인 중...
 Didn't work ||| 실패
 Not set up ||| 설정 안 됨
-On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 기본 수직 동기화 - 각 프레임이 화면의 다음 새로 고침을 기다리며 찢어짐이 없습니다(늦은 프레임은 새로 고침 한 번을 통째로 기다림, G-Sync / FreeSync에서는 화면이 게임을 따라감). 빠름(Mailbox): 찢어짐도 대기도 없음 - 화면이 새로 고침마다 가장 최근에 완성된 프레임을 보여줍니다. 적응형(Relaxed): 켜기와 같지만 늦은 프레임은 즉시 나갑니다(그때만 찢어짐). 끄기(기본값): 프레임이 완성되는 즉시 나갑니다 - 입력 지연이 가장 적고 찢어짐이 있습니다. GPU나 드라이버가 지원하지 않으면 가장 가까운 방식이 사용됩니다.
+On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh (the default). Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off: frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| 켜기: 기본 수직 동기화 - 각 프레임이 화면의 다음 새로 고침을 기다리며 찢어짐이 없습니다(늦은 프레임은 새로 고침 한 번을 통째로 기다림, G-Sync / FreeSync에서는 화면이 게임을 따라감). 빠름(Mailbox): 찢어짐도 대기도 없음 - 화면이 새로 고침마다 가장 최근에 완성된 프레임을 보여줍니다(기본값). 적응형(Relaxed): 켜기와 같지만 늦은 프레임은 즉시 나갑니다(그때만 찢어짐). 끄기: 프레임이 완성되는 즉시 나갑니다 - 입력 지연이 가장 적고 찢어짐이 있습니다. GPU나 드라이버가 지원하지 않으면 가장 가까운 방식이 사용됩니다.
 Fast (Mailbox) ||| 빠름 (Mailbox)
 Adaptive (Relaxed) ||| 적응형 (Relaxed)
 Smooth color gradients ||| 부드러운 색상 그라데이션
@@ -361,7 +361,7 @@ Desktop (the default). ||| 데스크톱(기본값).
 How many times a second the screen updates (exclusive full screen only). ||| 화면이 1초에 몇 번 갱신되는지입니다(전용 전체 화면에서만).
 Auto (the default). ||| 자동(기본값).
 Lines the frames up with the screen's refreshes, so the picture never tears (splits in two). ||| 프레임을 화면 갱신에 맞춰 화면이 찢어지지(둘로 갈라지지) 않게 합니다.
-Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen. ||| 입력 지연이 가장 적은 끄기(기본값). 찢어짐이 보이면 빠름. G-Sync / FreeSync 화면에서는 켜기.
+Fast (the default): no tearing, little delay. Off for the lowest input delay. On with a G-Sync / FreeSync screen. ||| 빠름(기본값): 찢어짐 없이 지연이 적음. 입력 지연을 가장 줄이려면 끄기. G-Sync / FreeSync 화면에서는 켜기.
 The picture's shape. 16:9 is the Switch's. ||| 화면의 비율입니다. 16:9가 Switch의 비율입니다.
 16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck. ||| Switch 화면은 16:9, 넓은 화면과 Steam Deck에서는 채우기.
 Where the coin counters and other HUD go on a picture wider than 16:9. ||| 화면이 16:9보다 넓을 때 코인 카운터 같은 HUD가 놓이는 위치입니다.
@@ -371,11 +371,11 @@ Docked for the best picture (the default). Handheld for longer battery life on a
 Lets the game lower its resolution when a scene is busy, as the Switch does. ||| Switch처럼 장면이 복잡할 때 게임이 해상도를 낮추게 합니다.
 Off (the default): always sharp. ||| 끄기(기본값): 항상 선명합니다.
 How many pixels the game draws: more is sharper but more work for the graphics card. ||| 게임이 그리는 픽셀 수입니다: 많을수록 선명하지만 그래픽 카드의 부담이 커집니다.
-Your screen's resolution (the default). 75% on a slow graphics card. ||| 화면 해상도(기본값). 느린 그래픽 카드에서는 75%.
+100% (the default): your screen's resolution. 75% on a slow graphics card. ||| 100%(기본값): 화면 해상도. 느린 그래픽 카드에서는 75%.
 How a lower resolution is stretched to the window. ||| 낮은 해상도를 창 크기로 늘리는 방법입니다.
 MetalFX. ||| MetalFX.
 Smooths jagged edges. ||| 계단 현상을 부드럽게 합니다.
-FXAA (the default). SMAA for slightly cleaner edges. ||| FXAA(기본값). 조금 더 깔끔한 가장자리를 원하면 SMAA.
+Off (the default). FXAA or SMAA for smoother edges. ||| 끄기(기본값). 더 부드러운 가장자리를 원하면 FXAA 또는 SMAA.
 Draws fewer pixels and rebuilds a sharp picture from them, for more FPS. ||| 픽셀을 적게 그리고 그것으로 선명한 화면을 다시 만들어 FPS를 높입니다.
 Off on a fast PC (the default). NVIDIA DLSS on an RTX card, or AMD FSR, when you need more FPS. ||| 빠른 PC에서는 끄기(기본값). FPS가 더 필요하면 RTX 카드는 NVIDIA DLSS, 그 외에는 AMD FSR.
 Adds a made-up frame between each two real ones, for smoother motion. ||| 진짜 프레임 두 개 사이마다 만들어 낸 프레임을 넣어 움직임을 더 부드럽게 합니다.
@@ -405,7 +405,7 @@ On (the default). ||| 켜기(기본값).
 Lets the game start its next frame while the graphics card finishes the last one, for more FPS. ||| 그래픽 카드가 이전 프레임을 마치는 동안 게임이 다음 프레임을 시작해 FPS를 높입니다.
 On (the default). Off if objects flicker. ||| 켜기(기본값). 물체가 깜빡이면 끄기.
 Uses one more CPU core to feed the graphics card, for more FPS. ||| CPU 코어를 하나 더 써서 그래픽 카드에 일을 넘겨 FPS를 높입니다.
-Auto (the default): on with NVIDIA cards, off with AMD and Intel ones and on the Steam Deck. ||| 자동(기본값): NVIDIA 카드에서는 켜기, AMD와 Intel 카드 및 Steam Deck에서는 끄기.
+Off (the default). On with an NVIDIA card for more FPS in busy places. ||| 끄기(기본값). NVIDIA 카드에서 복잡한 장소의 FPS를 높이려면 켜기.
 How many frames a second the game draws. The Switch draws 60. ||| 게임이 1초에 그리는 프레임 수입니다. Switch는 60입니다.
 60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC. ||| 60 FPS(기본값, Switch와 같음). PC가 안정적으로 유지하면 화면의 주사율. 60을 넘으면 가장 복잡한 곳(높은 곳에서 본 뉴 동크 시티)에서는 어떤 PC에서도 프레임이 떨어질 수 있습니다.
 A small frame rate counter in the corner. ||| 구석에 작은 프레임 레이트 표시를 띄웁니다.
@@ -482,3 +482,5 @@ Bloom quality ||| 블룸 품질
 The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, and stretches it over the screen; its edges along bright sky and lights then show small steps, more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as on the Switch. Changes at once. ||| 게임은 빛 번짐(블룸, 빛줄기)을 화면 너비의 4분의 1 크기인 작은 이미지로 그린 뒤 화면 전체로 늘립니다. 그래서 밝은 하늘과 조명 가장자리에 작은 계단이 보이며, 선명한 고해상도 화면에서 더 눈에 띕니다. 높음: 더 부드러운 필터로 늘려서 가장자리가 고르게 흐려집니다. 빛 번짐의 모양과 세기, 디테일은 게임 그대로입니다(더 높은 해상도로 그리지는 않습니다). 높음은 왕국 뒤편의 뿌연 먼 지평선도 부드럽게 합니다(하늘에 늘려 그린 작은 그림이라 텍셀이 블록과 얼룩으로 보입니다). GPU 시간이 조금 듭니다(빠른 그래픽 카드, 4K에서 프레임당 약 0.3ms). Switch: Switch와 같습니다. 즉시 적용됩니다.
 Smoother edges on the glow around bright sky and lights, and a smoother far horizon. ||| 밝은 하늘과 조명 주변 빛 번짐의 가장자리와 먼 지평선이 더 부드러워집니다.
 Switch (the default, as on the Switch). High at high resolutions. ||| Switch(기본값, Switch와 같음). 높은 해상도에서는 높음.
+Normal (the default). Low on a PC with less than 12 GB of RAM. ||| 보통(기본값). RAM이 12GB 미만인 PC에서는 낮음.
+(Recommended) ||| (권장)

@@ -74,6 +74,10 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         desc = noted.c_str();
     }
     std::string value = tr(value_en.c_str());
+    // "(Recommended)" beside the recommended value (option_notes.h tagged): smaller and dimmer than the value, and
+    // dropped - never squeezing the label - where the row has no room for it
+    const char *tag = NULL;
+    if (const OptionNote *n = option_note(label_en); n && n->tagged && value_en == n->tagged) tag = tr("(Recommended)");
     if (g_indent) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + g_indent * 28 * g_scale);  // (an option of the row above)
     ImVec2 p = ImGui::GetCursorScreenPos();
     float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetFontSize() * 1.9f;
@@ -132,6 +136,10 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     float lw = ImGui::CalcTextSize(t.c_str()).x, vw0 = value.empty() ? 0 : ImGui::CalcTextSize(value.c_str()).x;
     float vblock = vw0 + (arrows && !value.empty() ? 2 * (aw0 + gap0) : 0);
     float room = w - 2 * pad - (value.empty() ? 0 : gap0 * 1.5f);
+    const float tag_s = 0.78f;  // (the tag's size against the value's)
+    float tagw = tag ? ImGui::CalcTextSize(tag).x * tag_s + fs * 0.35f : 0;
+    if (tag && lw + vblock + tagw > room) tag = NULL, tagw = 0;  // (no room: the label and value keep their size)
+    vw0 += tagw, vblock += tagw;
     float ls = 1, vs = 1;
     if (lw + vblock > room && lw > 0) {
         ls = fmaxf(0.7f, (room - vblock) / lw);
@@ -162,6 +170,10 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         float vw = vw0 * vs, vx = right - vw;
         dl->AddText(font, fs * vs, ImVec2(vx, p.y + (h - fs * vs) * 0.5f), off ? kTextOff : changed ? ImGui::ColorConvertFloat4ToU32(kAccentSoftV)
                                                                  : theme_u32(kTextV, 0.78f), value.c_str());
+        if (tag) {  // (after the value, on its baseline: smaller, dim)
+            float ts = fs * vs * tag_s, tx = vx + (vw0 - tagw) * vs + fs * 0.35f * vs;
+            dl->AddText(font, ts, ImVec2(tx, p.y + (h - fs * vs) * 0.5f + (fs * vs - ts) * 0.8f), off ? kTextOff : kTextDim, tag);
+        }
     }
     ImGui::PopID();
     return step;

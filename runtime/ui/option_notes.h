@@ -4,7 +4,9 @@
 #pragma once
 #include <string.h>
 
-typedef struct { const char *label, *summary, *recommended; } OptionNote;
+// tagged: the value (English, as the row shows it) that gets a "(Recommended)" tag beside it in the row (owner
+// 2026-11-20: Early frame hand-off On, Frame rate 60 FPS); NULL for the rest.
+typedef struct { const char *label, *summary, *recommended, *tagged; } OptionNote;
 
 static const OptionNote k_option_notes[] = {
     // ---- Display
@@ -13,7 +15,7 @@ static const OptionNote k_option_notes[] = {
     {"Display resolution", "The size of the window, or of the screen mode in exclusive full screen.", "Desktop (the default)."},
     {"Refresh rate", "How many times a second the screen updates (exclusive full screen only).", "Auto (the default)."},
     {"VSync", "Lines the frames up with the screen's refreshes, so the picture never tears (splits in two).",
-     "Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen."},
+     "Fast (the default): no tearing, little delay. Off for the lowest input delay. On with a G-Sync / FreeSync screen."},
     {"Aspect ratio", "The picture's shape. 16:9 is the Switch's.", "16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck."},
     {"HUD position (wide)", "Where the coin counters and other HUD go on a picture wider than 16:9.", "Edges when Aspect ratio is Fill on a wide screen (the Steam Deck's default); otherwise it changes nothing."},
     {"Console mode", "Whether the game thinks the Switch is docked to a TV or held in the hands.",
@@ -21,9 +23,9 @@ static const OptionNote k_option_notes[] = {
     {"Dynamic resolution", "Lets the game lower its resolution when a scene is busy, as the Switch does.", "Off (the default): always sharp."},
     // ---- Graphics
     {"Internal resolution", "How many pixels the game draws: more is sharper but more work for the graphics card.",
-     "Your screen's resolution (the default). 75% on a slow graphics card."},
+     "100% (the default): your screen's resolution. 75% on a slow graphics card."},
     {"Spatial upscaler", "How a lower resolution is stretched to the window.", "MetalFX."},
-    {"Anti-aliasing", "Smooths jagged edges.", "FXAA (the default). SMAA for slightly cleaner edges."},
+    {"Anti-aliasing", "Smooths jagged edges.", "Off (the default). FXAA or SMAA for smoother edges."},
     {"Upscale method", "Draws fewer pixels and rebuilds a sharp picture from them, for more FPS.",
      "Off on a fast PC (the default). NVIDIA DLSS on an RTX card, or AMD FSR, when you need more FPS."},
     {"Frame generation", "Adds a made-up frame between each two real ones, for smoother motion.",
@@ -55,11 +57,11 @@ static const OptionNote k_option_notes[] = {
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
     // ---- Performance
     {"Early frame hand-off", "Lets the game start its next frame while the graphics card finishes the last one, for more FPS.",
-     "On (the default). Off if objects flicker."},
+     "On (the default). Off if objects flicker.", "On"},
     {"Multithreaded rendering", "Uses one more CPU core to feed the graphics card, for more FPS.",
-     "Auto (the default): on with NVIDIA cards, off with AMD and Intel ones and on the Steam Deck."},
+     "Off (the default). On with an NVIDIA card for more FPS in busy places."},
     {"Frame rate", "How many frames a second the game draws. The Switch draws 60.",
-     "60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC."},
+     "60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC.", "60 FPS"},
     {"Show FPS", "A small frame rate counter in the corner.", "Off (the default)."},
     {"Performance overlay", "Frame rate, frame times, and how busy the graphics card, CPU and memory are.",
      "Off (the default). On to find out why a scene is slow."},
@@ -79,7 +81,7 @@ static const OptionNote k_option_notes[] = {
      "Only after a graphics driver update, or if stutter comes back."},
     {"Asynchronous shader building", "Keeps the game running while a new effect's shader is being prepared, instead of pausing.",
      "On (the default): no stutter."},
-    {"Memory use", "How much memory is used to prepare shaders ahead of time.", "Auto (the default)."},
+    {"Memory use", "How much memory is used to prepare shaders ahead of time.", "Normal (the default). Low on a PC with less than 12 GB of RAM."},
     {"Warm-up at start", "How long the game prepares the effects it has seen before, before you play.", "Auto (the default)."},
     {"Only set up shaders seen before", "When an area loads, prepares only shaders the game has drawn before.",
      "Off (the default). On with a slow CPU if the frame rate dips after loading."},
