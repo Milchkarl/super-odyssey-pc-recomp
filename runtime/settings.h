@@ -161,6 +161,7 @@ typedef struct {
                          // kingdom appears: ~950 copies)
     bool arrival_barriers;   // (settings.ini only) lighter barriers between those small passes (exec.c)
     bool arrival_precreate;  // (settings.ini only) a stage's render targets made while it loads, not at its first frame
+    bool arrival_submit;     // (settings.ini only) a frame with many passes handed to the GPU in parts (exec.c begin_pass)
     bool skip_intro;     // no Joy-Con tips screen timer before the title (runtime/hle/odyssey_120.c; read at start)
     int warmup;          // WARMUP_*: how long the start replays known pipelines (nvn/vulkan/exec.c vk_pipeline_prewarm)
     bool mute_unfocused; // no sound while the window isn't in front (services/audio.c)

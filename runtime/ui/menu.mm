@@ -1306,8 +1306,8 @@ static void tab_performance(void) {
     opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, true,
                "On: the lighting the game sets up on the first frame of a kingdom is built with less GPU work, for a "
                "shorter hitch as it appears. Turn it off if the lighting looks wrong right after arriving somewhere. "
-               "settings.ini has a line for each of its three parts (arrival_mip_views, arrival_barriers, "
-               "arrival_precreate). Changes at once.");
+               "settings.ini has a line for each of its four parts (arrival_mip_views, arrival_barriers, "
+               "arrival_precreate, arrival_submit). Changes at once.");
     {
         static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
         opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_AUTO,

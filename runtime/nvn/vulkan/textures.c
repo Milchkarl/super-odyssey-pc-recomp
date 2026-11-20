@@ -292,6 +292,7 @@ void vk_collect_dead(void) {
     ndead = k;
 }
 
+static __thread bool t_prefetch;  // (vk_tex_prefetch, below) uploading ahead of a first use
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->sx = b->scalable ? tex_factor(b, t, false) : 1;
@@ -375,9 +376,10 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     b->shared = !b->scalable && vk_image_share_small(&ci);  // (small: the compute queue's dispatches may read / write it)
     VkResult r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
     if (getenv("ODYSSEY_LOG_IMAGES"))
-        LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s\n",
+        LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s (frame %llu%s%s)\n",
             (void *)b->image, (void *)t, t->format, t->target, tw, th, depth, t->width, t->height, t->depth, layers, levels, samples,
-            (unsigned)flags, (unsigned)usage, (int)vf, (int)r, t->flags, b->scalable ? " scalable" : "");
+            (unsigned)flags, (unsigned)usage, (int)vf, (int)r, t->flags, b->scalable ? " scalable" : "",
+            (unsigned long long)renderer_present_count(), t_prefetch ? ", ahead" : "", t->no_prefetch ? ", passed over" : "");
     if (r != VK_SUCCESS) {
         LOG("[vk] image creation failed (%d): nvn fmt %#x %ux%ux%u target %u\n", r, t->format, t->width, t->height, t->depth, t->target);
         ci.format = vf = VK_FORMAT_R8G8B8A8_UNORM;
@@ -730,7 +732,7 @@ static bool upload_astc_gpu(NvnTexture *t, TexBackend *b, VkCommandBuffer cb, ui
 }
 
 uint64_t prof_tex_checks, prof_tex_samples, prof_tex_full, prof_tex_full_bytes, prof_tex_dyn, prof_tex_watch_skips;
-static __thread bool t_prefetch;  // (vk_tex_prefetch) uploading ahead of a first use
+// (t_prefetch: above)
 static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (!t->addr || t->target == 10) return;
     bool linear = nvn_flags_linear(t->flags);

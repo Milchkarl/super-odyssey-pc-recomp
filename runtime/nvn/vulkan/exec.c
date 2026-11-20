@@ -699,6 +699,8 @@ void vk_gpuprof_report(void) {
     gp_n = 0;
 }
 
+static int sub_passes;  // (passes begun since the last submission: arrival_submit, below)
+
 // Submit the pending work (if any). wait/signal: binary semaphores for presentation (may be null).
 static void queue_submit_now(const SubJob *j) {
     VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = j->ncb, .pCommandBufferInfos = j->cbs,
@@ -770,6 +772,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal, VkCommandBuffer extra
     submit_seq++;
     pthread_mutex_unlock(&seq_lock);
     cur_sub = (cur_sub + 1) % SUBS;
+    sub_passes = 0;
     stat_flushes++;
     cum_submits++;
     ring_retire();
@@ -803,6 +806,18 @@ uint64_t renderer_fence_seq(void);
 // Linux (with early fences): the submission is ended right after such a write - after the dispatch, or at the end of the
 // draw's pass - so the GPU runs the write early and a fence's wait for it doesn't wait for the rest of the frame.
 static bool g_split_pending;
+// "Faster kingdom arrival" / arrival_submit (settings.ini): a frame with many passes is handed to the GPU in parts. A
+// kingdom's first frame has ~1,300 passes (its lighting set-up) and ~4,900 draws: the GPU waited ~30-40 ms for all of
+// them to be recorded, then needed ~40 ms itself - one after the other. Ended every SPLIT_PASSES passes (normal frames
+// have ~90), the GPU runs the first parts while the rest is recorded (split_if_pending: at most 8 a frame, none while a
+// submission costs over a millisecond). ODYSSEY_ARRIVAL_SUBMIT=0: off; =<n>: every n passes.
+#define SPLIT_PASSES 150
+static int arrival_submit_every(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_SUBMIT"); env = e ? (atoi(e) > 1 ? atoi(e) : atoi(e) ? SPLIT_PASSES : 0) : -1; }
+    if (env >= 0) return env;
+    return g_settings.fast_arrival && g_settings.arrival_submit ? SPLIT_PASSES : 0;
+}
 static bool split_on_write(void) {
     static int on = -1;
     if (on < 0) {
@@ -2647,6 +2662,10 @@ static void begin_pass(void) {
     vk_end_pass();
     if (dl_on == 2) renderer_flush();  // (ODYSSEY_VK_DEVLOST_TRACE=2: each pass its own submission)
     st.rt_dirty = false;
+    {   // (arrival_submit) this many passes in the submission: it is handed to the GPU when this pass ends
+        int every = arrival_submit_every();
+        if (every && ++sub_passes >= every) g_split_pending = true;
+    }
     chain_guard++;
     VkCommandBuffer cb = vk_cmd();
     chain_guard--;
