@@ -1182,6 +1182,10 @@ static bool winimg_make(TexBackend *w) {
 
 // (render lock) src as a present draws it into the window (placement v, parameters pv: vk_present_draw), into the window
 // image w - what the presenter copies into the swapchain's
+// the game picture's shape as last presented (width / height of its place in the window; 0 before the first)
+static float g_picture_aspect;
+float renderer_picture_aspect(void) { return g_picture_aspect; }
+
 static bool compose(TexBackend *w, TexBackend *src, const float v[4], const float pv[8]) {
     if (!src || !src->image || !winimg_make(w)) return false;
     vk_end_pass();
@@ -1880,8 +1884,10 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
         vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
-        {   // the settings menu's live picture (branch menu-odyssey-look): the whole window's picture, smaller, in the
-            // rectangle the menu leaves open - black first, where the game doesn't fill its window (bars)
+        g_picture_aspect = v[3] > 0 ? v[2] / v[3] : 0;
+        {   // the settings menu's live picture (branch menu-odyssey-look): the game's picture - as placed in the window,
+            // without the window's bars - smaller, filling the rectangle the menu leaves open in its shape (16:9, or
+            // 21:9 with Aspect ratio Fill on an ultrawide screen)
             extern bool menu_live_picture_px(float r[4]);
             extern void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh);
             float h[4];
@@ -1893,8 +1899,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
                 if (x1 > (uint32_t)x0 && y1 > (uint32_t)y0) {
                     VkClearRect cr = {.rect = {{x0, y0}, {x1 - x0, y1 - y0}}, .baseArrayLayer = 0, .layerCount = 1};
                     vkCmdClearAttachments(cb, 1, &ca, 1, &cr);
-                    float sx = (h[2] - h[0]) / g_vk.sc_extent.width, sy = (h[3] - h[1]) / g_vk.sc_extent.height;
-                    vk_present_draw_again(cb, h[0] + v[0] * sx, h[1] + v[1] * sy, v[2] * sx, v[3] * sy);
+                    vk_present_draw_again(cb, h[0], h[1], h[2] - h[0], h[3] - h[1]);
                 }
             }
         }

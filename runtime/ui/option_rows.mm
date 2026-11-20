@@ -16,6 +16,7 @@
 #include "osk.h"
 #include "theme.h"
 
+extern "C" float renderer_picture_aspect(void);  // (runtime/nvn/vulkan/device.c)
 static float g_scale = 1;
 static std::string g_desc_hover, g_desc_focus, g_desc_shown;  // this frame's hovered / selected row, and the last shown
 static std::string g_desc_first;  // the page's first row (shown until a row is selected or hovered)
@@ -342,9 +343,10 @@ void opt_end(void) {
     // unpainted) - a setting that changes the picture shows there at once, at its real pixels
     {
         extern bool menu_live_picture(float x0, float y0, float x1, float y1);
-        // (in the screen's own shape: the whole of what the window shows, ultrawide too)
+        // (in the game picture's own shape: 16:9, or as wide as the screen with Aspect ratio Fill - ultrawide too)
         ImVec2 ds = ImGui::GetIO().DisplaySize;
-        float asp = ds.x > 0 && ds.y > 0 ? ds.x / ds.y : 16.0f / 9;
+        float asp = renderer_picture_aspect();
+        if (asp < 0.5f || asp > 6) asp = ds.x > 0 && ds.y > 0 ? ds.x / ds.y : 16.0f / 9;
         float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.55f;
         if (ph > maxh) ph = maxh, pw = ph * asp;
         float ox0 = x0, ox1 = x1;

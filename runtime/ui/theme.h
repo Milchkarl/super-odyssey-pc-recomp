@@ -12,9 +12,9 @@
 // values and the primary button, the coins' gold for the cursor - in the layout of the settings menus the owner likes:
 // tabs along the top, rows with a filled value box, the picture and the description on the right)
 static const ImVec4 kPanelV = THEME_RGB(0, 0, 0, 1);              // pitch black (owner 2026-11-20)          // the menu window, the start page's card
-static const ImVec4 kSidebarV = THEME_RGB(17, 25, 62, 1);           // the tab bar, the description card, info boxes
-static const ImVec4 kSurfaceV = THEME_RGB(26, 38, 88, 1);           // fields, buttons, rows
-static const ImVec4 kSurfaceHoverV = THEME_RGB(36, 52, 116, 1);     // ... under the mouse / the cursor
+static const ImVec4 kSidebarV = THEME_RGB(20, 20, 23, 1);           // the tab bar, the description card, info boxes
+static const ImVec4 kSurfaceV = THEME_RGB(31, 31, 35, 1);           // fields, buttons, rows
+static const ImVec4 kSurfaceHoverV = THEME_RGB(46, 46, 52, 1);     // ... under the mouse / the cursor
 static const ImVec4 kAccentV = THEME_RGB(228, 0, 25, 0.82f);           // Mario red: value boxes, the primary button
 static const ImVec4 kAccentRestV = THEME_RGB(228, 0, 25, 0.55f);       // value boxes of the rows the cursor isn't on
 static const ImVec4 kAccentHotV = THEME_RGB(240, 20, 40, 0.85f);       // ... the selected row's / under the mouse
@@ -23,8 +23,8 @@ static const ImVec4 kAccentDeepV = THEME_RGB(150, 0, 18, 1);        // pressed; 
 static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white)
 static const ImVec4 kGoldV = THEME_RGB(255, 206, 32, 1);            // coin gold: the cursor's outline, the selected tab
 static const ImVec4 kTextV = THEME_RGB(255, 255, 255, 1);
-static const ImVec4 kTextDimV = THEME_RGB(168, 182, 226, 1);        // secondary text, tabs not shown
-static const ImVec4 kTextOffV = THEME_RGB(86, 100, 150, 1);         // greyed out
+static const ImVec4 kTextDimV = THEME_RGB(172, 172, 180, 1);        // secondary text, tabs not shown
+static const ImVec4 kTextOffV = THEME_RGB(96, 96, 104, 1);         // greyed out
 static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.10f);       // separators
 static const ImVec4 kWarnV = THEME_RGB(224, 154, 43, 1);            // a conflict (one key bound twice)
 
