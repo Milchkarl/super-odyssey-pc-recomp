@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <atomic>
 #include <algorithm>
 #include <vector>
@@ -37,6 +38,7 @@ extern "C" {
 #include "../version.h"  // (APP_VERSION beside the name)
 #include "../ptbr_install.h"
 #include "../diagnostics.h"
+#include "../platform.h"
 #include "../settings.h"
 #include "../updater.h"
 #include "menu.h"
@@ -108,6 +110,129 @@ static void push(const QEvent &e) {
     pthread_mutex_unlock(&q_lock);
 }
 
+// ---- Menu recorder (Quit tab, Diagnostics: "Record menu input"; off until chosen, not saved): every input the window
+// gets - each controller button and stick direction with the controller it came from, mouse buttons with their click
+// count and source, touches, keys - whether or not the menu is open, and what the menu did with it: the events it took
+// per frame, the row the cursor is on, each row a press changed and how, tabs, opening and closing. One text line each,
+// with the time and the menu's frame, to menu-recording.txt beside the log (the game's folder when there is none).
+// For problems such as one press acting twice: two controllers sending the same press, a click and a touch together.
+static std::atomic<FILE *> g_rec{nullptr};
+static pthread_mutex_t g_rec_lock = PTHREAD_MUTEX_INITIALIZER;
+static char g_rec_path[1024];
+static uint64_t g_rec_t0;
+static std::atomic<int> g_rec_frame{0};
+extern "C" void menu_rec(const char *fmt, ...) {
+    FILE *f = g_rec.load();
+    if (!f) return;
+    char line[600];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    pthread_mutex_lock(&g_rec_lock);
+    if ((f = g_rec.load())) {
+        fprintf(f, "%9.3f s  frame %-7d %s\n", (SDL_GetTicksNS() - g_rec_t0) / 1e9, g_rec_frame.load(), line);
+        fflush(f);  // (a crash or a forced quit keeps every line)
+    }
+    pthread_mutex_unlock(&g_rec_lock);
+}
+static void rec_start(void) {
+    if (g_rec.load()) return;
+    const char *log = plat_log_path();
+    char dir[1024] = ".";
+    if (log && *log) {
+        strlcpy(dir, log, sizeof dir);
+        char *s = strrchr(dir, '/'), *b = strrchr(dir, '\\');
+        if (b > s) s = b;
+        if (s) *s = 0;
+        else strlcpy(dir, ".", sizeof dir);
+    }
+    snprintf(g_rec_path, sizeof g_rec_path, "%s/menu-recording.txt", dir);
+    FILE *f = fopen(g_rec_path, "w");
+    if (!f) { LOG("[menu] recording: could not open %s\n", g_rec_path); g_rec_path[0] = 0; return; }
+    g_rec_t0 = SDL_GetTicksNS();
+    fprintf(f, "Menu recording, %s %s\n", RT_APP_NAME, APP_VERSION);
+    int n = 0;
+    SDL_JoystickID *pads = SDL_GetGamepads(&n);
+    fprintf(f, "Controllers connected: %d\n", n);
+    for (int i = 0; pads && i < n; i++)
+        fprintf(f, "  pad %u \"%s\" %04x:%04x%s\n", (unsigned)pads[i], SDL_GetGamepadNameForID(pads[i]) ? SDL_GetGamepadNameForID(pads[i]) : "?",
+                SDL_GetGamepadVendorForID(pads[i]), SDL_GetGamepadProductForID(pads[i]),
+                SDL_IsJoystickVirtual(pads[i]) ? " (virtual)" : "");
+    SDL_free(pads);
+    fprintf(f, "\n");
+    g_rec.store(f);
+    LOG("[menu] recording menu input to %s\n", g_rec_path);
+}
+static void rec_stop(void) {
+    pthread_mutex_lock(&g_rec_lock);
+    FILE *f = g_rec.exchange(nullptr);
+    if (f) { fprintf(f, "(recording stopped)\n"); fclose(f); }
+    pthread_mutex_unlock(&g_rec_lock);
+    if (f) LOG("[menu] menu recording stopped: %s\n", g_rec_path);
+}
+static const char *rec_pad_button(int b) {
+    static const char *const n[] = {"A(south)", "B(east)", "X(west)", "Y(north)", "Back", "Guide", "Start", "LStick",
+                                    "RStick", "L", "R", "DpadUp", "DpadDown", "DpadLeft", "DpadRight", "Misc1",
+                                    "RPaddle1", "LPaddle1", "RPaddle2", "LPaddle2", "Touchpad"};
+    return b >= 0 && b < (int)(sizeof n / sizeof *n) ? n[b] : "?";
+}
+// the raw event, before the menu decides anything (menu_handle_event's first line)
+static void rec_event(const SDL_Event *e) {
+    static bool env_checked;  // ODYSSEY_MENU_RECORD=1 (e.g. Steam's launch options): recording from the start
+    if (!env_checked) {
+        env_checked = true;
+        const char *v = getenv("ODYSSEY_MENU_RECORD");
+        if (v && atoi(v)) rec_start();
+    }
+    if (!g_rec.load()) return;
+    const unsigned long long ms = (unsigned long long)(e->common.timestamp / 1000000);
+    switch (e->type) {
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        menu_rec("pad %u %-9s %s  (event time %llu ms)", (unsigned)e->gbutton.which, rec_pad_button(e->gbutton.button),
+                 e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? "down" : "up", ms);
+        break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: {  // (only crossing the menu's stick thresholds, not every movement)
+        static int8_t zone[64][6];
+        int a = e->gaxis.axis, w = (int)(e->gaxis.which & 63);
+        if (a < 0 || a > 5) break;
+        float v = e->gaxis.value / 32767.0f;
+        int z = v > 0.55f ? 1 : v < -0.55f ? -1 : 0;
+        if (z != zone[w][a]) {
+            zone[w][a] = (int8_t)z;
+            static const char *const an[] = {"LeftX", "LeftY", "RightX", "RightY", "LTrigger", "RTrigger"};
+            menu_rec("pad %u axis %s %s (%.2f)  (event time %llu ms)", (unsigned)e->gaxis.which, an[a],
+                     z > 0 ? "+" : z < 0 ? "-" : "centre", v, ms);
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        menu_rec("mouse %s button %d %s, clicks %d at %.0f,%.0f%s  (event time %llu ms)",
+                 e->button.which == SDL_TOUCH_MOUSEID ? "(from touch)" : e->button.which == SDL_PEN_MOUSEID ? "(from pen)" : "",
+                 e->button.button, e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "down" : "up", e->button.clicks, e->button.x,
+                 e->button.y, "", ms);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        menu_rec("mouse wheel %.1f,%.1f  (event time %llu ms)", e->wheel.x, e->wheel.y, ms);
+        break;
+    case SDL_EVENT_FINGER_DOWN: case SDL_EVENT_FINGER_UP:
+        menu_rec("touch %s at %.3f,%.3f  (event time %llu ms)", e->type == SDL_EVENT_FINGER_DOWN ? "down" : "up", e->tfinger.x,
+                 e->tfinger.y, ms);
+        break;
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:
+        menu_rec("key %s %s%s  (event time %llu ms)", SDL_GetScancodeName(e->key.scancode),
+                 e->type == SDL_EVENT_KEY_DOWN ? "down" : "up", e->key.repeat ? " (repeat)" : "", ms);
+        break;
+    case SDL_EVENT_GAMEPAD_ADDED: case SDL_EVENT_GAMEPAD_REMOVED:
+        menu_rec("pad %u %s", (unsigned)e->gdevice.which, e->type == SDL_EVENT_GAMEPAD_ADDED ? "connected" : "disconnected");
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED: case SDL_EVENT_WINDOW_FOCUS_LOST:
+        menu_rec("window focus %s", e->type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "gained" : "lost");
+        break;
+    default: break;
+    }
+}
+
 static void reset_menu_events(void) {
     pthread_mutex_lock(&q_lock);
     q_events.clear();
@@ -143,6 +268,7 @@ void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
     g_open.store(open);
+    menu_rec("menu %s", open ? "OPENED" : "CLOSED");
     reset_menu_events();
     input_reset();  // nothing held while the menu had focus leaks into the game
     bind_capture_cancel();
@@ -266,6 +392,7 @@ extern "C" bool menu_overlay_lockfree(void) { return !capturing() && (!menu_stat
 extern "C" bool menu_input_captured(void) { return capturing(); }
 
 bool menu_handle_event(const SDL_Event *e) {
+    rec_event(e);
     if (e->type == SDL_EVENT_DISPLAY_ADDED || e->type == SDL_EVENT_DISPLAY_REMOVED) {
         g_displays_dirty.store(true);
         g_want_window_apply.store(true);
@@ -682,7 +809,16 @@ static void drain_events(ImGuiIO &io) {
     std::vector<QEvent> ev;
     ev.swap(q_events);
     pthread_mutex_unlock(&q_lock);
+    g_rec_frame.store(ImGui::GetFrameCount());
     for (const QEvent &q : ev) {
+        if (g_rec.load()) switch (q.kind) {  // (the menu recorder: what reached the menu this frame)
+        case QEvent::KEY: menu_rec("  menu gets %s %s", ImGui::GetKeyName(q.key), q.down ? "down" : "up"); break;
+        case QEvent::ANALOG: menu_rec("  menu gets %s %.2f", ImGui::GetKeyName(q.key), q.value); break;
+        case QEvent::MOUSE_BUTTON: menu_rec("  menu gets mouse button %d %s", q.button, q.down ? "down" : "up"); break;
+        case QEvent::WHEEL: menu_rec("  menu gets wheel %.1f,%.1f", q.x, q.y); break;
+        case QEvent::RESET: menu_rec("  menu input reset"); break;
+        default: break;
+        }
         switch (q.kind) {
         case QEvent::KEY: io.AddKeyEvent(q.key, q.down); break;
         case QEvent::ANALOG: io.AddKeyAnalogEvent(q.key, q.value > 0.1f, q.value); break;
@@ -1564,6 +1700,15 @@ static void tab_quit(float scale) {
         else result = "Could not save";
     }
     if (report[0] && opt_action("Show report file", "", report)) diagnostics_show_report(report);
+    if (opt_action("Record menu input", g_rec.load() ? "Recording" : "Off",
+                   "For a problem with the menu (a press acting twice, the cursor jumping): records every press of the "
+                   "controller, mouse, touch screen and keyboard, and what the menu did with it, to a text file. Choose "
+                   "it, do what shows the problem, then choose it again to stop, and attach the file to the bug report. "
+                   "It keeps recording with the menu closed, until you stop it or quit. Nothing is uploaded.")) {
+        if (g_rec.load()) rec_stop();
+        else rec_start();
+    }
+    if (g_rec_path[0] && opt_action("Show recording file", "", g_rec_path)) diagnostics_show_report(g_rec_path);
     if (!checked_previous) {
         diagnostics_last_crash_info(previous, sizeof previous, previous_reason, sizeof previous_reason, NULL);
         checked_previous = true;
@@ -2059,6 +2204,10 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     int cur = 0;  // g_tab / g_tab_request hold ids
     for (int i = 0; i < ntabs; i++) if (tabs[i].id == g_tab) cur = i;
     if (!tabs[cur].on) cur = 0;
+    {   // (the menu recorder)
+        static int rec_last = -1000;
+        if (g_tab != rec_last) menu_rec("tab \"%s\"", tabs[cur].name ? tabs[cur].name : "?"), rec_last = g_tab;
+    }
     // L/R (or Q/E) switch tabs, skipping greyed-out ones (not while typing: Q / E are letters then, and the on-screen
     // keyboard has the controller)
     if (g_tab_request_ext >= 0) { g_tab_request = g_tab_request_ext; g_tab_request_ext = -1; }

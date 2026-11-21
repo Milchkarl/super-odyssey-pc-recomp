@@ -15,6 +15,7 @@
 #include "i18n.h"
 #include "osk.h"
 #include "theme.h"
+extern "C" void menu_rec(const char *fmt, ...);  // (menu.mm: the menu recorder)
 
 extern "C" float renderer_picture_aspect(void);  // (runtime/nvn/vulkan/device.c)
 static float g_scale = 1;
@@ -132,6 +133,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         static std::string last;
         static int nlog;
         if (last != label && nlog++ < 300) LOG("[menufocus] %s (ImGui frame %d)\n", label, ImGui::GetFrameCount());
+        if (last != label) menu_rec("cursor on \"%s\"", label_en);
         last = label;
     }
     if (hov) g_desc_hover = desc ? desc : "", g_title_hover = label;
@@ -230,6 +232,10 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         else dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + w + 1, p.y + h + 1), off ? theme_u32(kGoldV, 0.4f) : kGold, r + 1, 0, th);
     }
     ImGui::PopID();
+    if (step || (clicked && (off || blocked)))  // (the menu recorder: what a press did to this row)
+        menu_rec("row \"%s\" (value \"%s\"): %s%s", label_en, value_en.c_str(),
+                 step == 2 ? "pressed" : step > 0 ? "right" : step < 0 ? "left" : "click ignored",
+                 off ? " (greyed out)" : blocked ? " (left/right blocked this frame)" : clicked ? " - by a click or A" : "");
     return step;
 }
 

@@ -15,6 +15,8 @@ typedef union SDL_Event SDL_Event;
 
 // Main (UI) thread: returns true if the event was consumed by the menu (the game must not see it).
 bool menu_handle_event(const SDL_Event *e);
+// Menu recorder (Quit tab, Diagnostics: "Record menu input"): one line to its file while it records (menu.mm)
+void menu_rec(const char *fmt, ...);
 bool menu_is_open(void);
 bool menu_overlay_lockfree(void);  // only the passive overlay is visible, ready to draw without the render lock
 bool menu_stats_visible(void);
