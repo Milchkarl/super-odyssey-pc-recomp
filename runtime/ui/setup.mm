@@ -412,11 +412,16 @@ static void *work(void *) {
     set_step("Recompiling the game code...");
     int cores = SDL_GetNumLogicalCPUCores(), ram_gb = SDL_GetSystemRAM() / 1024;
     GameBuildOpts o = {code_progress, cores < ram_gb - 2 ? cores : ram_gb - 2 > 1 ? ram_gb - 2 : 1};
-    char why[256] = "";
+    char why[512] = "";
     if (!gamebuild_run(root.c_str(), &o, why, sizeof why)) {
         LOG("[setup] game code: %s\n", why);
-        fail("The game code didn't build", "Make sure there's about 2 GB free and try again. If it happens again, report it "
-                                           "with SuperOdysseyRecomp.log.");
+        if (strstr(why, "(the zig folder) doesn't run"))  // (#121: a damaged zig.exe - gamebuild.c asks it first)
+            fail("The game code builder can't run", "Its compiler (zig\\zig.exe) is probably damaged. Download the "
+                 "release again, extract it with Windows' Extract All or 7-Zip, and check that your antivirus didn't "
+                 "quarantine or change the zig folder.");
+        else
+            fail("The game code didn't build", "Make sure there's about 2 GB free and try again. If it happens again, "
+                 "report it with SuperOdysseyRecomp.log.");
         return NULL;
     }
     if (!setup_ready(root.c_str())) { fail("Game files incomplete", "Choose your game again."); return NULL; }
