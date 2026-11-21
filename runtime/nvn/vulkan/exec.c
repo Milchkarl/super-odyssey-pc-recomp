@@ -968,6 +968,7 @@ static void gw_open(int i) {  // (gw_lock)
     gw_tab[i] = gw_tab[--gw_n];
 }
 uint64_t vk_cq_completed(void);
+uint64_t vk_cq_last(void);
 static void gw_sweep_locked(uint64_t done, uint64_t cdone) {
     for (int i = 0; i < gw_n;)
         if (gw_tab[i].seq <= done && gw_tab[i].cseq <= cdone) gw_open(i);
@@ -1999,6 +2000,7 @@ void vk_prof_frame(uint64_t frame, uint64_t present_ns) {
 }
 
 const char *renderer_stats(void) {
+    { extern void vk_gmem_trace_report(void); vk_gmem_trace_report(); }
     static int dumps;
     if (dumps++ < 3) {
         LOG("[vk] command counts:");
@@ -6658,11 +6660,60 @@ static VkDescriptorBufferInfo ubo_span(VkSpan s, uint64_t size) {
     return (VkDescriptorBufferInfo){s.buf, s.off, size > max ? max : size};
 }
 
+// (debug, ODYSSEY_LOG_GMEM_RANGES=1) which heap MBs the gmem shaders' storage buffers and the in-place vertex reads use
+static int gt_on = -1;
+static uint8_t gt_sb[4096], gt_vx[4096];
+static uint64_t gt_draws, gt_nosb, gt_maxspan, gt_outside;
+static void gt_mark(uint8_t *m, uint64_t a, uint64_t sz) {
+    if (a < HEAP_BASE || !sz) return;
+    for (uint64_t p = (a - HEAP_BASE) >> 20; p <= (a - HEAP_BASE + sz - 1) >> 20 && p < 4096; p++) m[p] = 1;
+}
+static void gt_sbufs(int stage) {
+    if (gt_on < 0) { const char *e = getenv("ODYSSEY_LOG_GMEM_RANGES"); gt_on = e && atoi(e); }
+    if (!gt_on) return;
+    uint64_t lo = ~0ull, hi = 0; int n = 0;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[stage][i].addr, sz = st.sbuf[stage][i].size;
+        if (!a || !sz) continue;
+        if (a < HEAP_BASE || a - HEAP_BASE >= HEAP_MAX) { gt_outside++; continue; }
+        gt_mark(gt_sb, a, sz); n++;
+        if (a < lo) lo = a;
+        if (a + sz > hi) hi = a + sz;
+    }
+    gt_draws++;
+    if (!n) gt_nosb++;
+    else if (hi - lo > gt_maxspan) gt_maxspan = hi - lo;
+}
+void vk_gmem_trace_report(void) {
+    if (gt_on <= 0) return;
+    char runs[1536]; int k = 0; unsigned nsb = 0, nvx = 0;
+    runs[0] = 0;
+    for (int p = 0; p < 4096; p++) {
+        nsb += gt_sb[p]; nvx += gt_vx[p];
+        if (gt_sb[p] && (p == 0 || !gt_sb[p - 1]) && k < (int)sizeof runs - 32) {
+            int q = p; while (q + 1 < 4096 && gt_sb[q + 1]) q++;
+            k += snprintf(runs + k, sizeof runs - k, " %d-%d", p, q + 1);
+        }
+    }
+    LOG("[gmem-ranges] gmem binds %llu (no sbuf %llu, outside heap %llu), widest draw %llu KB, sbuf MBs %u:%s | in-place vertex MBs %u\n",
+        (unsigned long long)gt_draws, (unsigned long long)gt_nosb, (unsigned long long)gt_outside,
+        (unsigned long long)(gt_maxspan >> 10), nsb, runs, nvx);
+    gt_draws = gt_nosb = gt_outside = gt_maxspan = 0;
+    memset(gt_sb, 0, sizeof gt_sb); memset(gt_vx, 0, sizeof gt_vx);
+}
+
+uint64_t vk_cq_completed(void);
+uint64_t vk_cq_last(void);
+static int gwin_state;  // (the windowed heap import: below, gmem_info)
+static VkBuffer gwin_buf[6];
+static uint64_t gwin_base[6], gwin_size[6];
+
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
     static const uint8_t zeros[0x10000];
     if (k == 0) {
         uint32_t drv[0x800 / 4] = {0};
+        if (si->uses_gmem) gt_sbufs(stage);
         if (stage == 5) {
             drv[0x200 / 4] = gx; drv[0x204 / 4] = gy; drv[0x208 / 4] = gz;
             for (int i = 0; i < 16; i++) {
@@ -6685,6 +6736,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             // around Mario or rolled (a flat sheet).
             float maxpt = g_vk.props.limits.pointSizeRange[1] > 0 ? g_vk.props.limits.pointSizeRange[1] : 2048.0f;
             memcpy(&drv[0x610 / 4], &maxpt, 4);
+        }
+        if (gwin_state == 1 && si->uses_gmem && gwin_buf[stage]) {  // (windowed import: addresses within the stage's window)
+            uint32_t base = stage == 5 ? 0x310 : 0x110 + 0x100 * (stage == 1 ? 4 : 0);
+            for (int i = 0; i < 16; i++) {
+                uint64_t a = st.sbuf[stage][i].addr;
+                if (a < HEAP_BASE + gwin_base[stage] || a >= HEAP_BASE + gwin_base[stage] + gwin_size[stage]) continue;
+                a -= gwin_base[stage];
+                uint32_t *e = &drv[(base + 16 * i) / 4];
+                e[0] = (uint32_t)a; e[1] = (uint32_t)(a >> 32);
+            }
         }
         uint64_t size = si->cbuf_size[0] > sizeof drv ? sizeof drv : (si->cbuf_size[0] ? si->cbuf_size[0] : 256);
         if (size < 0x500 && stage == 5) size = 0x500;
@@ -6816,18 +6877,26 @@ fail:
     return false;
 }
 
-static bool gmem_import(uint64_t size) {
+// The memory type a host import of the heap gets (-1: none)
+static int gmem_host_type(void) {
     PFN_vkGetMemoryHostPointerPropertiesEXT props =
         (PFN_vkGetMemoryHostPointerPropertiesEXT)vkGetDeviceProcAddr(g_vk.dev, "vkGetMemoryHostPointerPropertiesEXT");
     VkMemoryHostPointerPropertiesEXT mp = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
     if (!props || props(g_vk.dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, (void *)(uintptr_t)HEAP_BASE, &mp) != VK_SUCCESS ||
         !mp.memoryTypeBits)
-        return false;
+        return -1;
+    return __builtin_ctz(mp.memoryTypeBits);
+}
+
+// Heap bytes [off, off + size) imported as a GPU buffer (its offset 0 = that heap offset)
+static bool gmem_import_range(uint64_t off, uint64_t size, VkBuffer *pbuf, VkDeviceMemory *pmem, uint32_t *ptype) {
+    int type = gmem_host_type();
+    if (type < 0) return false;
     VkImportMemoryHostPointerInfoEXT imp = {.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                                            .pHostPointer = (void *)(uintptr_t)HEAP_BASE};
+                                            .pHostPointer = (void *)(uintptr_t)(HEAP_BASE + off)};
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &imp, .allocationSize = size,
-                               .memoryTypeIndex = (uint32_t)__builtin_ctz(mp.memoryTypeBits)};
+                               .memoryTypeIndex = (uint32_t)type};
     VkDeviceMemory mem;
     if (vkAllocateMemory(g_vk.dev, &ai, NULL, &mem) != VK_SUCCESS) return false;
     VkExternalMemoryBufferCreateInfo eb = {.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
@@ -6839,6 +6908,16 @@ static bool gmem_import(uint64_t size) {
     vk_buffer_share(&bi);
     if (vkCreateBuffer(g_vk.dev, &bi, NULL, &buf) != VK_SUCCESS) { vkFreeMemory(g_vk.dev, mem, NULL); return false; }
     vkBindBufferMemory(g_vk.dev, buf, mem, 0);
+    *pbuf = buf; *pmem = mem; *ptype = (uint32_t)type;
+    return true;
+}
+
+static bool gmem_import(uint64_t size) {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    VkMemoryAllocateInfo ai = {0};
+    if (!gmem_import_range(0, size, &buf, &mem, &ai.memoryTypeIndex)) return false;
+    VkMemoryHostPointerPropertiesEXT mp = {.memoryTypeBits = 1u << ai.memoryTypeIndex};
     if (gmem_buf) {  // the heap grew: the old import may still be in use by submitted work
         vk_wait_seq(submit_seq);
         vkDestroyBuffer(g_vk.dev, gmem_buf, NULL);
@@ -6861,9 +6940,131 @@ static bool gmem_import(uint64_t size) {
 
 static uint64_t gmem_tried;  // heap size the import was last attempted for (gmem_info imports / re-imports)
 
+// Windowed import (#120, #99: 8 GB PCs with integrated graphics). The whole-heap import lands in a memory heap of about
+// half the RAM there (Windows' shared GPU memory, ~3.6 GB on an 8 GB laptop): the 3.1-3.2 GB import left nearly nothing,
+// and the next allocation failed with "out of graphics memory" ~12 s in. Yet shader global memory is only ever reached
+// through the storage buffers the game binds (NVN puts their addresses in the driver constants, cbuf 0, which this
+// renderer writes: cbuf_info), and those sit in a few MB of the heap (~3 MB in Cap Kingdom on 1.4.1). So when the import
+// would take more than half the heap's budget, only 16 MB-aligned windows around the bound storage buffers are imported
+// (each its own buffer; a new window overlapping or touching others absorbs them), each draw / dispatch binds the window
+// holding its buffers, and the addresses in its driver constants are rebased by the window's start: the shader's
+// address - HEAP_BASE is then the offset in the window, with no change to the shaders. The windows are the heap's own
+// pages: GPU stores land in guest memory as before (guarded writes unchanged). Vertex / index data: the vertex cache
+// uploads from the CPU instead of copying from the import; ranges it doesn't cache (GPU-written) are read in place from
+// a window. ODYSSEY_VK_GMEM_WINDOW=1 / 0 forces windows / the whole heap; ODYSSEY_VK_GMEM_BUDGET_MB=<MB> stands in for
+// the import heap's budget (to test a small heap on a big PC). docs/gmem-windowed-import.md.
+#define GWIN_ALIGN (16ull << 20)
+#define GWIN_MAX 32
+typedef struct { uint64_t lo, hi; VkBuffer buf; VkDeviceMemory mem; } GwinSpan;
+static GwinSpan gwin[GWIN_MAX];
+static int gwin_n;
+typedef struct { VkBuffer buf; VkDeviceMemory mem; uint64_t seq, cseq; } GwinDead;
+static GwinDead gwin_dead[GWIN_MAX * 2];
+static int gwin_ndead;
+static int gwin_state = -1;            // -1 not decided, 0 the whole heap, 1 windows
+static uint64_t gwin_heap, gwin_bytes, gwin_cap;
+static VkBuffer gwin_buf[6];           // the window each stage's current draw / dispatch binds (NULL: none, reads 0)
+static uint64_t gwin_base[6], gwin_size[6];
+static uint64_t prof_gwin_fail;
+
+static void gwin_decide(uint64_t want) {
+    const char *e = getenv("ODYSSEY_VK_GMEM_WINDOW"), *eb = getenv("ODYSSEY_VK_GMEM_BUDGET_MB");
+    int type = gmem_host_type();
+    VkPhysicalDeviceMemoryProperties pm;
+    vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+    uint32_t heap = type >= 0 ? pm.memoryTypes[type].heapIndex : 0;
+    VmaBudget bud[VK_MAX_MEMORY_HEAPS];
+    vmaGetHeapBudgets(g_vk.vma, bud);
+    uint64_t budget = eb ? strtoull(eb, NULL, 10) << 20 : bud[heap].budget;
+    gwin_state = e ? atoi(e) != 0 : want > budget / 2;
+    gwin_cap = budget / 8;
+    if (gwin_cap < (256ull << 20)) gwin_cap = 256ull << 20;
+    if (gwin_cap > (1024ull << 20)) gwin_cap = 1024ull << 20;
+    LOG("[vk] guest heap %llu MB; import heap %u: size %llu MB, budget %llu MB%s, used %llu MB -> %s\n",
+        (unsigned long long)(want >> 20), heap, (unsigned long long)(pm.memoryHeaps[heap].size >> 20),
+        (unsigned long long)(budget >> 20), eb ? " (ODYSSEY_VK_GMEM_BUDGET_MB)" : "", (unsigned long long)(bud[heap].usage >> 20),
+        gwin_state ? "imports of the windows shaders use" : "one import of the whole heap");
+}
+
+static void gwin_free_dead(bool all) {
+    uint64_t done = vk_completed_seq(), cdone = vk_cq_completed();
+    int k = 0;
+    for (int i = 0; i < gwin_ndead; i++) {
+        if (!all && (gwin_dead[i].seq > done || gwin_dead[i].cseq > cdone)) { gwin_dead[k++] = gwin_dead[i]; continue; }
+        vkDestroyBuffer(g_vk.dev, gwin_dead[i].buf, NULL);
+        vkFreeMemory(g_vk.dev, gwin_dead[i].mem, NULL);
+    }
+    gwin_ndead = k;
+}
+
+// The window holding heap offsets [lo, hi), imported if needed (-1: over the cap, or the import failed)
+static int gwin_span(uint64_t lo, uint64_t hi) {
+    for (int i = 0; i < gwin_n; i++)
+        if (gwin[i].lo <= lo && hi <= gwin[i].hi) return i;
+    uint64_t nlo = lo & ~(GWIN_ALIGN - 1), nhi = (hi + GWIN_ALIGN - 1) & ~(GWIN_ALIGN - 1);
+    if (nhi > gwin_heap) nhi = gwin_heap;
+    if (nhi <= nlo || hi > nhi) return -1;
+    bool absorb[GWIN_MAX] = {0}, more = true;
+    while (more) {  // (windows overlapping or touching it: merged into it)
+        more = false;
+        for (int i = 0; i < gwin_n; i++)
+            if (!absorb[i] && gwin[i].lo <= nhi && nlo <= gwin[i].hi) {
+                absorb[i] = more = true;
+                if (gwin[i].lo < nlo) nlo = gwin[i].lo;
+                if (gwin[i].hi > nhi) nhi = gwin[i].hi;
+            }
+    }
+    uint64_t freed = 0;
+    int nabs = 0;
+    for (int i = 0; i < gwin_n; i++) if (absorb[i]) freed += gwin[i].hi - gwin[i].lo, nabs++;
+    gwin_free_dead(false);
+    if (gwin_bytes - freed + (nhi - nlo) > gwin_cap || gwin_ndead + nabs > GWIN_MAX * 2 || gwin_n - nabs >= GWIN_MAX) {
+        if (prof_gwin_fail++ < 8)
+            LOG("[vk] guest heap window %llx-%llx not imported: %llu of %llu MB in windows\n", (unsigned long long)(HEAP_BASE + lo),
+                (unsigned long long)(HEAP_BASE + hi), (unsigned long long)(gwin_bytes >> 20), (unsigned long long)(gwin_cap >> 20));
+        return -1;
+    }
+    GwinSpan s = {nlo, nhi, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    uint32_t type;
+    if (!gmem_import_range(nlo, nhi - nlo, &s.buf, &s.mem, &type)) {
+        if (prof_gwin_fail++ < 8)
+            LOG("[vk] guest heap window %llx+%llu MB: import failed\n", (unsigned long long)(HEAP_BASE + nlo),
+                (unsigned long long)((nhi - nlo) >> 20));
+        return -1;
+    }
+    int k = 0;
+    for (int i = 0; i < gwin_n; i++) {  // (absorbed ones: freed once the work recorded so far is done)
+        if (!absorb[i]) { gwin[k++] = gwin[i]; continue; }
+        gwin_dead[gwin_ndead++] = (GwinDead){gwin[i].buf, gwin[i].mem, vk_pending_seq(), vk_cq_last()};
+    }
+    gwin_n = k;
+    gwin[gwin_n] = s;
+    gwin_bytes += (nhi - nlo) - freed;
+    LOG("[vk] guest heap window %llx-%llx imported (%llu MB; %d window%s, %llu MB)\n", (unsigned long long)(HEAP_BASE + nlo),
+        (unsigned long long)(HEAP_BASE + nhi), (unsigned long long)((nhi - nlo) >> 20), gwin_n + 1, gwin_n ? "s" : "",
+        (unsigned long long)(gwin_bytes >> 20));
+    return gwin_n++;
+}
+
+// This stage's draw / dispatch: the window holding all its storage buffers (gwin_buf / gwin_base / gwin_size)
+static void gwin_select(int stage) {
+    uint64_t lo = ~0ull, hi = 0;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[stage][i].addr, sz = st.sbuf[stage][i].size;
+        if (!a || !sz || a < HEAP_BASE || a - HEAP_BASE >= gwin_heap) continue;
+        uint64_t l = a - HEAP_BASE, h = l + sz > gwin_heap ? gwin_heap : l + sz;
+        if (l < lo) lo = l;
+        if (h > hi) hi = h;
+    }
+    int k = hi ? gwin_span(lo, hi) : (gwin_n ? 0 : -1);  // (no storage buffer: any window, nothing reads it)
+    gwin_buf[stage] = k >= 0 ? gwin[k].buf : VK_NULL_HANDLE;
+    gwin_base[stage] = k >= 0 ? gwin[k].lo : 0;
+    gwin_size[stage] = k >= 0 ? gwin[k].hi - gwin[k].lo : 0;
+}
+
 uint64_t prof_gmem_binds;  // (stats) draws and dispatches that bound the imported heap (shader global memory)
-static VkDescriptorBufferInfo gmem_info(void) {
-    prof_gmem_binds++;
+// The import (or the windows' decision), made on first use and again when the heap grows
+static void gmem_ready(void) {
     static int off = -1;
     if (off < 0) {
         const char *e = getenv("ODYSSEY_VK_NO_GMEM");
@@ -6872,14 +7073,28 @@ static VkDescriptorBufferInfo gmem_info(void) {
     }
     uint64_t want = (kernel_heap_size() + 0xFFFF) & ~0xFFFFull;
     if (want > HEAP_MAX) want = HEAP_MAX;
-    if (!off && want > gmem_size && !gmem_import(want)) {
+    if (!off && !gmem_placed && gwin_state < 0) gwin_decide(want);
+    if (!off && gwin_state == 1) gwin_heap = want;
+    else if (!off && want > gmem_size && !gmem_import(want)) {
         LOG("[vk] guest heap import failed (%llu MB): shader global memory reads return zero\n", (unsigned long long)(want >> 20));
         off = 1;
     }
+}
+
+static VkDescriptorBufferInfo gmem_info(void) {
+    prof_gmem_binds++;
+    gmem_ready();
     if (gmem_buf) return (VkDescriptorBufferInfo){gmem_buf, 0, gmem_size};
     static uint32_t zero[1024];
     VkSpan s = vk_transient_copy(zero, sizeof zero, 256);
     return (VkDescriptorBufferInfo){s.buf, s.off, sizeof zero};
+}
+
+// A stage's global memory binding: its window (gwin_select, made by stage_set) or the whole heap
+static VkDescriptorBufferInfo gmem_info_stage(int stage) {
+    VkDescriptorBufferInfo r = gmem_info();
+    if (gwin_state == 1 && gwin_buf[stage]) return (VkDescriptorBufferInfo){gwin_buf[stage], 0, gwin_size[stage]};
+    return r;  // (the whole heap; with windows and none for this stage, the zeros)
 }
 
 // Linear render targets written back to guest memory: a texture with a pitch (agl's createAglTextureDataLinear) that
@@ -6981,6 +7196,7 @@ uint64_t vk_cq_completed(void) {
     if (g_vk.ctimeline) vkGetSemaphoreCounterValue(g_vk.dev, g_vk.ctimeline, &v);
     return v;
 }
+uint64_t vk_cq_last(void) { return cq_value; }  // (the last compute queue submission)
 static VkCommandBuffer cq_begin(void) {
     int i = cq_slot;
     cq_slot = (cq_slot + 1) % CQB;
@@ -7097,6 +7313,8 @@ static bool gm_init(void) {
     return true;
 }
 
+static VkBuffer gfast_src;  // (gfast_prepare) the buffer the dispatch's storage is read from: the heap or its window
+static uint64_t gfast_src_size, gfast_base;  // (its size; its heap offset)
 static void gfast_prepare(VkCommandBuffer cb) {
     static int on = -1;
     if (on < 0) { const char *e = getenv("ODYSSEY_VK_GMEM_FAST"); on = !e || atoi(e) != 0; }
@@ -7104,12 +7322,18 @@ static void gfast_prepare(VkCommandBuffer cb) {
     gfast_n = 0;
     gmem_info();  // (the heap import, made on first use)
     gfast_info();
-    if (!on || !gmem_buf) return;
+    // (offsets below are in the buffer the shader reads: the whole heap, or with a windowed import the dispatch's window)
+    VkBuffer src = gmem_buf;
+    uint64_t base = 0, lim = gmem_size;
+    if (gwin_state == 1) { gwin_select(5); src = gwin_buf[5]; base = gwin_base[5]; lim = gwin_size[5]; }
+    gfast_src = src; gfast_src_size = lim; gfast_base = base;
+    if (!on || !src) return;
     struct { uint64_t lo, hi; } r[16], ex[16];
     int n = 0, nex = 0;
     for (int i = 0; i < 16; i++) {  // heap offsets of the bound storage buffers, 256-aligned
         uint64_t a = st.sbuf[5][i].addr, sz = st.sbuf[5][i].size;
-        if (!a || !sz || a < HEAP_BASE || a - HEAP_BASE + sz > gmem_size) continue;
+        if (!a || !sz || a < HEAP_BASE + base || a - HEAP_BASE - base + sz > lim) continue;
+        a -= base;
         {   // (exact, sorted, overlapping ones merged: the copy back)
             uint64_t elo = a - HEAP_BASE, ehi = elo + sz;
             int k = nex++;
@@ -7117,7 +7341,7 @@ static void gfast_prepare(VkCommandBuffer cb) {
             ex[k].lo = elo; ex[k].hi = ehi;
         }
         uint64_t lo = (a - HEAP_BASE) & ~255ull, hi = (a - HEAP_BASE + sz + 255) & ~255ull;
-        if (hi > gmem_size) hi = gmem_size;
+        if (hi > lim) hi = lim;
         int k = n++;
         while (k > 0 && r[k - 1].lo > lo) { r[k] = r[k - 1]; k--; }  // (insertion sort by start)
         r[k].lo = lo; r[k].hi = hi;
@@ -7147,8 +7371,8 @@ static void gfast_prepare(VkCommandBuffer cb) {
             LOG("\n");
         }
     }
-    vkCmdCopyBuffer(cb, gmem_buf, gfast_info().buffer, (uint32_t)m, cp);
-    if (gm_init()) vkCmdCopyBuffer(cb, gmem_buf, gfast_prev, (uint32_t)m, cp);  // (as before the dispatch: word-exact copy back)
+    vkCmdCopyBuffer(cb, src, gfast_info().buffer, (uint32_t)m, cp);
+    if (gm_init()) vkCmdCopyBuffer(cb, src, gfast_prev, (uint32_t)m, cp);  // (as before the dispatch: word-exact copy back)
     vk_full_barrier(cb);
     gmap_tab[GMAP_MAX * 4] = (uint32_t)m;
     memcpy(gfast_cp, cp, (size_t)m * sizeof cp[0]);
@@ -7174,7 +7398,7 @@ static bool gfast_finish(VkCommandBuffer cb, bool wait) {
     vk_full_barrier(cb);
     if (gfast_nback && gm_state == 1) {  // (word-exact: only the words the dispatch changed)
         VkDescriptorSet set = vk_alloc_set(gm_set);
-        VkDescriptorBufferInfo bf = {gfast_buf, 0, GFAST_SIZE}, bp = {gfast_prev, 0, GFAST_SIZE}, bh = gmem_info();
+        VkDescriptorBufferInfo bf = {gfast_buf, 0, GFAST_SIZE}, bp = {gfast_prev, 0, GFAST_SIZE}, bh = {gfast_src, 0, gfast_src_size};
         VkWriteDescriptorSet w[3];
         VkDescriptorBufferInfo *bi3[3] = {&bf, &bp, &bh};
         for (int i = 0; i < 3; i++)
@@ -7191,12 +7415,12 @@ static bool gfast_finish(VkCommandBuffer cb, bool wait) {
             vkCmdPushConstants(cb, gm_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pcv, pcv);
             vkCmdDispatch(cb, (pcv[2] + 63) / 64, 1, 1);
         }
-    } else if (gfast_nback) vkCmdCopyBuffer(cb, gfast_info().buffer, gmem_buf, (uint32_t)gfast_nback, gfast_back);
+    } else if (gfast_nback) vkCmdCopyBuffer(cb, gfast_info().buffer, gfast_src, (uint32_t)gfast_nback, gfast_back);
     vk_full_barrier(cb);
     bool guard = wait && gw_guard_on();
     if (guard)
         for (int i = 0; i < gfast_nback; i++)
-            gw_record(HEAP_BASE + gfast_back[i].dstOffset, HEAP_BASE + gfast_back[i].dstOffset + gfast_back[i].size,
+            gw_record(HEAP_BASE + gfast_base + gfast_back[i].dstOffset, HEAP_BASE + gfast_base + gfast_back[i].dstOffset + gfast_back[i].size,
                       g_on_cq ? cq_value + 1 : 0);  // (on the compute queue: the submission it is about to make)
     else if (wait) vk_note_guest_write_k(1);
     gfast_n = 0;
@@ -7312,9 +7536,9 @@ static bool vcache_lookup(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceS
             vc_on = 0;
         }
     }
-    if (!vc_on || !gmem_buf || size > VC_MAX_RANGE) return false;
+    if (!vc_on || (!gmem_buf && gwin_state != 1) || size > VC_MAX_RANGE) return false;
     uint64_t lo = (addr - HEAP_BASE) & ~(VC_PAGE - 1), hi = (addr - HEAP_BASE + size + VC_PAGE - 1) & ~(VC_PAGE - 1);
-    if (hi > gmem_size) return false;
+    if (hi > (gmem_buf ? gmem_size : gwin_heap)) return false;
     uint64_t pend = vk_pending_seq();
     uint64_t h = (lo * 0x9E3779B97F4A7C15ull) ^ (hi * 0xC2B2AE3D27D4EB4Full);
     uint32_t slot = (uint32_t)(h ^ (h >> 32)) & (VC_TAB - 1), free_slot = ~0u, old_slot = ~0u;
@@ -7402,10 +7626,13 @@ void vc_flush(void) {
             if (nc == 64) { nc = 1; cp[0] = (VkBufferCopy){e->lo, 0, e->hi - e->lo}; break; }  // (scattered: the whole range)
             cp[nc++] = (VkBufferCopy){o, o - e->lo, VC_PAGE};
         }
-        if (nc) {
-            vkCmdCopyBuffer(cb, gmem_buf, e->buf, (uint32_t)nc, cp);
-            for (int k = 0; k < nc; k++) prof_vc_copied += cp[k].size;
+        if (nc && gmem_buf) vkCmdCopyBuffer(cb, gmem_buf, e->buf, (uint32_t)nc, cp);
+        else for (int k = 0; k < nc; k++) {  // (windowed import: no heap buffer to copy from - uploaded from the CPU)
+            VkSpan sp = vk_transient_copy((const void *)(uintptr_t)(HEAP_BASE + cp[k].srcOffset), cp[k].size, 16);
+            VkBufferCopy c = {sp.off, cp[k].dstOffset, cp[k].size};
+            vkCmdCopyBuffer(cb, sp.buf, e->buf, 1, &c);
         }
+        for (int k = 0; k < nc; k++) prof_vc_copied += cp[k].size;
         e->gen = g;
     }
     vc_npend = 0;
@@ -7432,9 +7659,20 @@ static bool guest_direct(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSi
     bool copy = forced >= 0 ? forced : false;
 #endif
     if (copy || addr < HEAP_BASE) return false;
+    if (gwin_state == 1) {  // (windowed import: the vertex cache, else in place from a window - GPU-written data among it)
+        if (addr - HEAP_BASE + size > gwin_heap) return false;
+        if (vcache_lookup(addr, size, buf, off)) return true;
+        if (gt_on > 0) gt_mark(gt_vx, addr, size);
+        int k = gwin_span(addr - HEAP_BASE, addr - HEAP_BASE + size);
+        if (k < 0) return false;
+        *buf = gwin[k].buf;
+        *off = addr - HEAP_BASE - gwin[k].lo;
+        return true;
+    }
     if (addr + size > HEAP_BASE + gmem_size && kernel_heap_size() != gmem_tried) { gmem_tried = kernel_heap_size(); gmem_info(); }
     if (!gmem_buf || addr + size > HEAP_BASE + gmem_size) return false;
     if (vcache_lookup(addr, size, buf, off)) return true;
+    if (gt_on > 0) gt_mark(gt_vx, addr, size);
     *buf = gmem_buf;
     *off = addr - HEAP_BASE;
     return true;
@@ -7464,6 +7702,11 @@ void vk_exec_reset(void) {
     }
     gmem_size = gmem_tried = 0;
     gmem_placed = false;
+    for (int i = 0; i < gwin_n; i++) gwin_dead[gwin_ndead++] = (GwinDead){gwin[i].buf, gwin[i].mem, 0, 0};
+    gwin_free_dead(true);  // (the GPU is idle here)
+    gwin_n = 0;
+    gwin_bytes = 0;
+    memset(gwin_buf, 0, sizeof gwin_buf);
     for (int i = 0; i < VC_TAB; i++)  // (the vertex cache: copies of the old pages)
         if (vc_tab[i].buf) vmaDestroyBuffer(g_vk.vma, vc_tab[i].buf, vc_tab[i].mem);
     memset(vc_tab, 0, sizeof vc_tab);
@@ -7601,6 +7844,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     int n = 0;
     int sg = stage == 1 ? 1 : 0;
     float rs[66][4] = {{1, 1, 0, 0}};  // ([65]: mirror mode, renderer.m)
+    if (si->uses_gmem) { gmem_ready(); if (gwin_state == 1) gwin_select(stage); }  // (before cbuf 0: its addresses)
     if (rscale_row0) memcpy(rs[0], rscale_row0, 16);
     rs[65][0] = g_mirror_w;
     for (int i = 0; i < p->nbinds; i++) {
@@ -7628,7 +7872,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             bi[n] = cbuf_info(stage, si, (int)b->binding, gx, gy, gz);
             w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-            bi[n] = b->binding == GFAST_BUFFER_INDEX ? gfast_info() : gmem_info();
+            bi[n] = b->binding == GFAST_BUFFER_INDEX ? gfast_info() : gmem_info_stage(stage);
             w[n].pBufferInfo = &bi[n];
         } else {
             continue;  // rscale / tint: written below, once the textures (and their scales) are known
