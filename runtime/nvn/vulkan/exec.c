@@ -8206,6 +8206,37 @@ static bool topology(uint32_t mode, VkPrimitiveTopology *t, uint8_t *cls) {
     }
 }
 
+// (HUD layer) The game reads its picture while its layouts are in the layer - other than its copy into the window's
+// texture: it keeps the frame (a capture drawn again in the next frames, while a stage loads after Mario's death:
+// the scene came back for ~0.7 s between the closed wipe and the coin count, as the capture had no wipe in it -
+// issue #114, docs/death-screen-114.md). The layer goes into the picture first, as the game had drawn it there
+// (hud_flush). A few times a session (title, stage changes, deaths): the HUD stays on the layer otherwise.
+// ODYSSEY_HUD_READ_FLUSH=0: not (as 0.5.4).
+static void hud_read_flush(NvnTexture *dst) {
+    static int env = -1;
+    if (env < 0) { const char *e = getenv("ODYSSEY_HUD_READ_FLUSH"); env = !e || atoi(e) != 0; }
+    if (!env || (dst && dst->window)) return;
+    if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    hud_flush(cb, hud.target);
+    static int n;
+    if (n++ < 3)
+        LOG("[hud] frame %llu: the game read its picture under the layer (into %ux%u f%#x)\n",
+            (unsigned long long)renderer_present_count(), dst ? dst->width : 0, dst ? dst->height : 0, dst ? dst->format : 0);
+}
+// (what the layer holds belongs to the picture as it is: drawn in this frame, or in an earlier one with the picture
+// not drawn into since - a frame the game doesn't draw, where it only keeps its last picture)
+static inline bool hud_layer_pending(void) { return hud.on && hud.target && hud.written && hud.written >= hud.drawn; }
+static void hud_read_check(Prog *pr) {
+    NvnTexture *dst = st.rt.ncolor ? st.rt.color[0] : NULL;
+    if (dst == hud.target) return;  // (into the picture itself: begin_pass)
+    ShaderInfo *infos[2] = {pr->vi, pr->fi};
+    for (int sg = 0; sg < 2; sg++)
+        for (int i = 0; i < infos[sg]->ntex; i++)
+            if (shader_texture_object(sg, &infos[sg]->tex[i]) == hud.target) { hud_read_flush(dst); return; }
+}
+
 static void draw_(CmdRec *r, bool indexed);
 static void draw(CmdRec *r, bool indexed) {
     PROF_T0();
@@ -8509,6 +8540,7 @@ static void draw_(CmdRec *r, bool indexed) {
     }
     if (ct_on()) ct_draw(pr, "draw");
     alias_draw_check();
+    if (hud_layer_pending() && !hud_want) hud_read_check(pr);
     resolve_feedback(pr);
     {   // (direct depth reads) a depth / stencil write after this pass sampled its depth: in a new pass
         bool writes_ds = st.rt.depth && ((st.ds[0] && st.ds[1]) || (st.ds[3] && ((st.stencil_mask[0] | st.stencil_mask[1]) & 0xFF)));
@@ -9928,6 +9960,7 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
                            (unsigned long long)renderer_present_count());
     }
     vk_end_pass();
+    if (st_ == hud.target && dt != st_ && hud_layer_pending()) hud_read_flush(dt);
     if (dl_on == 2) renderer_flush();  // (ODYSSEY_VK_DEVLOST_TRACE=2: each copy its own submission, waited on)
     gp_mark(vk_cmd(), "copy texture %ux%u -> %ux%u", st_->width, st_->height, dt->width, dt->height);
     dl_note("copy texture %ux%u f%#x -> %ux%u f%#x (%p -> %p)", st_->width, st_->height, st_->format, dt->width, dt->height,
