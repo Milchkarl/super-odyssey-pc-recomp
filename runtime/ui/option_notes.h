@@ -84,6 +84,8 @@ static const OptionNote k_option_notes[] = {
     {"Asynchronous shader building", "Keeps the game running while a new effect's shader is being prepared, instead of pausing.",
      "On (the default): no stutter."},
     {"Memory use", "How much memory is used to prepare shaders ahead of time.", "Normal (the default). Low on a PC with less than 12 GB of RAM."},
+    {"Low GPU memory mode", "Makes only the parts of the game's memory the graphics need visible to the GPU (applies at the next start).",
+     "Off (the default). On if the game crashes with Out of graphics memory on a laptop with integrated graphics."},
     {"Warm-up at start", "How long the game prepares the effects it has seen before, before you play.", "Auto (the default)."},
     {"Only set up shaders seen before", "When an area loads, prepares only shaders the game has drawn before.",
      "Off (the default). On with a slow CPU if the frame rate dips after loading."},

@@ -492,3 +492,7 @@ Normal (the default). Low on a PC with less than 12 GB of RAM. ||| 보통(기본
 (Recommended) ||| (권장)
 Bottom left (the default), or as you like. ||| 왼쪽 아래(기본값), 또는 원하는 대로.
 Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms. ||| Switch(기본값, Switch와 같음). 빠른 PC에서는 높음. 매우 높음은 복잡한 왕국에서 프레임 레이트를 절반으로 줄일 수 있습니다.
+Low GPU memory mode ||| GPU 메모리 절약 모드
+For PCs with integrated graphics and 8 GB of RAM where the game crashes with "Out of graphics memory" a few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start. ||| 내장 그래픽과 8GB RAM을 쓰는 PC에서 게임이 몇 초 만에 "Out of graphics memory"(그래픽 메모리 부족)로 꺼질 때 쓰세요. 켜기: 게임 메모리 전체(약 3GB) 대신 그래픽에 필요한 부분만 GPU에 보이게 합니다. 끄기(기본값): 이전처럼 전체를 보이게 합니다. 다음 실행부터 적용됩니다.
+Makes only the parts of the game's memory the graphics need visible to the GPU (applies at the next start). ||| 게임 메모리 중 그래픽에 필요한 부분만 GPU에 보이게 합니다(다음 실행부터 적용).
+Off (the default). On if the game crashes with Out of graphics memory on a laptop with integrated graphics. ||| 끄기(기본값). 내장 그래픽 노트북에서 Out of graphics memory로 꺼지면 켜세요.

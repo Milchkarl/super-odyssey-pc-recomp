@@ -78,6 +78,7 @@ Settings g_settings = {
     .vsync = VSYNC_OFF,
     .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
     .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
+    .low_gpu_memory = false,  // (owner 2026-11-20: opt-in, not chosen by the GPU memory's size)
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -399,6 +400,7 @@ void settings_load(void) {
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
         else if (!strcmp(key, "record_thread")) g_settings.record_thread = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
+        else if (!strcmp(key, "low_gpu_memory")) g_settings.low_gpu_memory = atoi(val) != 0;
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -545,6 +547,7 @@ void settings_save(void) {
     fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");
     fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
+    fprintf(f, "low_gpu_memory = %d\n", g_settings.low_gpu_memory);
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
     fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);

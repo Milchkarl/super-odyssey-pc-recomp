@@ -243,7 +243,8 @@ static void classify(bool crashed, char *head, size_t hn, char *advice, size_t a
     if (fatal && (has(msg, "out of memory for a texture") || vk == -2 || has(msg, "OUT_OF_DEVICE_MEMORY"))) {
         snprintf(head, hn, "Out of graphics memory (VRAM)");
         snprintf(advice, an, "Lower the internal resolution (Graphics), set Performance > Memory use to Low and close other "
-                 "programs. With integrated graphics, graphics memory is the PC's RAM and page file.");
+                 "programs. With integrated graphics, graphics memory is the PC's RAM and page file: turn on Performance > "
+                 "Low GPU memory mode.");
     } else if (fatal && (vk == -1 || has(msg, "out of host memory") || has(msg, "out of memory") || has(msg, "cannot allocate"))) {
         snprintf(head, hn, "Out of memory (RAM)");
         snprintf(advice, an, "%s", mem_advice);
