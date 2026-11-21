@@ -1160,7 +1160,9 @@ static void tab_graphics(void) {
                    "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
                    "simpler versions and fade out farther away. High: twice the Switch's distances, Very high: four "
                    "times. Faraway objects then also keep moving, as they do near you. Costs CPU and GPU time in "
-                   "large kingdoms. The landscape itself is unchanged. Switch: as on the Switch. Changes at once.",
+                   "large kingdoms. Very high is heavy: in New Donk City it halved the frame rate on a fast PC (120 "
+                   "to about 60 FPS); High costs nothing there. The landscape itself is unchanged. Switch: as on the Switch. Changes "
+                   "at once.",
                    false);
     }
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
