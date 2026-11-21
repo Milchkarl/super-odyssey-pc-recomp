@@ -88,3 +88,17 @@ part to watch.
   16 MB pieces are accepted are what the reporter's test will show. The log lines above say it.
 - 1.0.0 (the reporter's version, 3200 MB heap): the windows are made from what the game binds, wherever it is.
 - The remaining memory on such a PC: the rest of the game's GPU memory (textures, render targets) still has to fit.
+
+## Draft reply for #120 (for the owner to approve; not posted)
+
+> Thanks for the detailed reports - your analysis was right. The game imported its whole 3.2 GB heap into GPU memory
+> for shader access, which on an 8 GB laptop with integrated graphics takes almost all of the shared GPU memory.
+>
+> The test build below imports only the parts of the heap the shaders use (about 32 MB in our tests) when the GPU
+> memory is small. It is only tested on a desktop PC with the GPU memory limit simulated, not on integrated graphics yet.
+>
+> Could you try it? Unzip it and replace `SuperOdysseyRecomp.exe` in your 0.5.3 folder (keep a copy of the old one).
+> Please tell us whether it gets past the first ~12 seconds, and if it still crashes, attach the crash report.
+> The lines starting with `[vk] guest heap` in the log are the ones we need.
+>
+> Test build: <link>
