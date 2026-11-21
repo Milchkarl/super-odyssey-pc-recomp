@@ -464,7 +464,7 @@ In the game's own menus (title, file select, pause menu, shops, dialogue): left 
 Sharper HUD and menus ||| 더 선명한 HUD와 메뉴
 The game's HUD, text and menus are drawn from artwork made for the Switch's 720 lines; enlarged on a bigger screen their edges turn soft. On: they are sharpened on screens of 900 lines and more (nothing below - a Steam Deck's screen stays as it is), the more the bigger the screen, without adding outlines or halos. It makes edges crisper, not more detailed. Off: as the game draws them. Changes at once. ||| 게임의 HUD, 글자와 메뉴는 Switch의 720줄에 맞춰 만든 그림으로 그려집니다. 더 큰 화면에서는 확대되어 가장자리가 흐려집니다. 켬: 900줄 이상의 화면에서 선명하게 합니다(그 아래에서는 적용되지 않음 - Steam Deck 화면은 그대로). 화면이 클수록 더 강하게, 윤곽선이나 후광 없이 적용됩니다. 가장자리가 또렷해질 뿐 세부가 늘어나지는 않습니다. 끔: 게임이 그리는 그대로. 바로 적용됩니다.
 Crisper edges on the game's HUD, text and menus on large screens. ||| 큰 화면에서 게임의 HUD, 글자와 메뉴의 가장자리가 더 또렷해집니다.
-On (the default). Off if the HUD looks too hard to you. ||| 켬(기본값). HUD가 너무 딱딱해 보이면 끄세요.
+Off (the default). On if the HUD looks soft on a large screen; it can make edges look jagged. ||| 끄기(기본값). 큰 화면에서 HUD가 흐릿해 보이면 켜기. 가장자리가 계단처럼 보일 수 있습니다.
 Frame rate counter ||| 프레임 레이트 표시
 Gyro sensitivity ||| 자이로 감도
 How far turning the controller turns what the game aims with motion (first-person views, aiming Cappy). 100% is the controller's own movement. ||| 컨트롤러를 돌렸을 때 게임이 모션으로 조준하는 대상(1인칭 시점, 캐피 조준)이 얼마나 돌아가는지 정합니다. 100%는 컨트롤러의 실제 움직임 그대로입니다.

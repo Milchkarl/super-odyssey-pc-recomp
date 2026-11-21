@@ -55,7 +55,7 @@ static const OptionNote k_option_notes[] = {
     {"Draw distance", "Objects and detailed models appear from farther away.",
      "Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms."},
     {"Sharper HUD and menus", "Crisper edges on the game's HUD, text and menus on large screens.",
-     "On (the default). Off if the HUD looks too hard to you."},
+     "Off (the default). On if the HUD looks soft on a large screen; it can make edges look jagged."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
     // ---- Performance
     {"Early frame hand-off", "Lets the game start its next frame while the graphics card finishes the last one, for more FPS.",

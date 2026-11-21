@@ -63,7 +63,7 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
-    .hud_sharpen = true,
+    .hud_sharpen = false,  // (owner 2026-11-21: off by default - sharpening the 720-line HUD art made it look aliased)
     .antialias = AA_OFF,  // (owner 2026-11-20: the defaults for everyone - Off)
     .rumble = true,
     .rumble_strength = 100,

@@ -1206,7 +1206,7 @@ static void tab_graphics(void) {
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
                "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
                "Costs almost nothing. Off: the picture exactly as on the Switch.");
-    opt_toggle("Sharper HUD and menus", &g_settings.hud_sharpen, true,
+    opt_toggle("Sharper HUD and menus", &g_settings.hud_sharpen, false,
                "The game's HUD, text and menus are drawn from artwork made for the Switch's 720 lines; enlarged on a "
                "bigger screen their edges turn soft. On: they are sharpened on screens of 900 lines and more "
                "(nothing below - a Steam Deck's screen stays as it is), the more the bigger the screen, without "
@@ -1273,24 +1273,6 @@ static void tab_performance(void) {
                    "default. If you see flickering or broken objects, turn it off.");
         g_settings.early_fences = on;
     }
-#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
-    {
-        static const int rt_start = g_settings.record_thread;  // (read at start)
-        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
-        static char autolab[48];
-        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
-        const char *rt[] = {autolab, "Off", "On"};
-        char d[1100];
-        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
-                                         "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
-                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
-                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
-                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
-                                         "crashes, set it to Off."),
-                 rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        if (opt_choice("Multithreaded rendering", &v, rt, 3, 1, d, false)) g_settings.record_thread = v - 1;
-    }
-#endif
 #ifdef _WIN32
     {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
         static const char *lln[] = {"Off", "On", "On + Boost"};
@@ -1348,11 +1330,6 @@ static void tab_performance(void) {
                        "missing, but the game pauses while the shader builds (a short hitch)."))
             g_settings.shader_wait = !async;  // (opt_toggle flipped it)
     }
-    opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,
-               "On: the lighting the game sets up on the first frame of a kingdom is built with less GPU work, for a "
-               "shorter hitch as it appears. Turn it off if the lighting looks wrong right after arriving somewhere. "
-               "settings.ini has a line for each of its four parts (arrival_mip_views, arrival_barriers, "
-               "arrival_precreate, arrival_submit). Changes at once.");
     {
         static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
         opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_NORMAL,
@@ -1371,12 +1348,36 @@ static void tab_performance(void) {
                    "Normal: up to 15 s and 3 GB. Long: up to 30 s and 12 GB (at most half of this PC's memory). Applies "
                    "at the next start.", false);
     }
+    opt_section("Experimental");
+    // (owner 2026-11-21: what is off by default because it can misbehave sits here, not among the everyday options)
+#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
+    {
+        static const int rt_start = g_settings.record_thread;  // (read at start)
+        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
+        static char autolab[48];
+        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
+        const char *rt[] = {autolab, "Off", "On"};
+        char d[1100];
+        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
+                                         "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
+                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
+                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
+                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
+                                         "crashes, set it to Off."),
+                 rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
+        if (opt_choice("Multithreaded rendering", &v, rt, 3, 1, d, false)) g_settings.record_thread = v - 1;
+    }
+#endif
+    opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,
+               "On: the lighting the game sets up on the first frame of a kingdom is built with less GPU work, for a "
+               "shorter hitch as it appears. Turn it off if the lighting looks wrong right after arriving somewhere. "
+               "settings.ini has a line for each of its four parts (arrival_mip_views, arrival_barriers, "
+               "arrival_precreate, arrival_submit). Changes at once.");
     opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
                "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
                "the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS "
                "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
                "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
-    opt_section("Experimental");
     opt_toggle("Preload area shaders (more RAM)", &g_settings.shader_preload, false,
                "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
                "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
