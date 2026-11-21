@@ -487,8 +487,43 @@ static TexBackend *tex_backend(NvnTexture *t) {
     if (b) {
         // output resolution changed, or smooth gradients switched on / off (create_image "Banding"): reallocate
         if (b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) || (b->debandable && !b->guest_format == vk_deband()))) {
+            // The old picture goes into the new image, scaled. Most of these targets are drawn anew every frame, but
+            // not all: the HUD's "Menu / Map" guide has a 70x40 backdrop (16:9 enough to be scaled with the screen's
+            // targets) that the game draws once and keeps. Re-created empty, it showed whatever the new memory held -
+            // a striped box under the life gauge after changing Aspect ratio in the menu while playing with DLSS /
+            // FSR on (anything that changes the internal resolution; owner, 0.5.4), or no backdrop at all.
+            // Colour images only (a blit can't scale depth; those are redrawn every frame). The old image stays
+            // alive until the submissions that use it are done (destroy_image defers it).
+            // ODYSSEY_RESCALE_KEEP=0: re-created empty, as before.
+            static int keep = -1;
+            if (keep < 0) { const char *e = getenv("ODYSSEY_RESCALE_KEEP"); keep = !e || !*e || atoi(e) != 0; }
+            VkImage old = b->image;
+            VkFormat old_format = b->format;
+            uint32_t ow = b->width, oh = b->height, ol = b->levels, on = b->layers;
+            bool blit = keep && old && b->aspect == VK_IMAGE_ASPECT_COLOR_BIT && b->samples <= 1 && b->depth <= 1 &&
+                        format_supports(old_format, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
             destroy_image(b);
             create_image(t, b);
+            if (blit && b->image && b->aspect == VK_IMAGE_ASPECT_COLOR_BIT && b->samples <= 1 && b->depth <= 1 && b->layers == on &&
+                format_supports(b->format, VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+                VkCommandBuffer cb = vk_upload_cmd();
+                for (uint32_t lv = 0; lv < ol && lv < b->levels; lv++) {
+                    uint32_t sw = ow >> lv ? ow >> lv : 1, sh = oh >> lv ? oh >> lv : 1;
+                    VkImageBlit br = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, on},
+                                      .srcOffsets = {{0, 0, 0}, {(int32_t)sw, (int32_t)sh, 1}},
+                                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, on},
+                                      .dstOffsets = {{0, 0, 0}, {(int32_t)level_w(b, lv), (int32_t)level_h(b, lv), 1}}};
+                    vkCmdBlitImage(cb, old, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &br, VK_FILTER_LINEAR);
+                }
+                VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+                VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+                vkCmdPipelineBarrier2(cb, &di);
+            }
+            // (one the CPU fills, not a render target: its bytes haven't changed, so nothing would upload them again -
+            // uploaded again at its next use, at the new size)
+            if (!b->gpu_owned && b->uploaded) b->uploaded = false, b->checked_frame = 0;
         }
         return b;
     }
