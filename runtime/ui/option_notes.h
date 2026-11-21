@@ -51,7 +51,7 @@ static const OptionNote k_option_notes[] = {
     {"Bloom quality", "Smoother edges on the glow around bright sky and lights, and a smoother far horizon.",
      "Switch (the default, as on the Switch). High at high resolutions."},
     {"Draw distance", "Objects and detailed models appear from farther away.",
-     "Switch (the default, as on the Switch). High on a fast PC."},
+     "Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms."},
     {"Sharper HUD and menus", "Crisper edges on the game's HUD, text and menus on large screens.",
      "On (the default). Off if the HUD looks too hard to you."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
