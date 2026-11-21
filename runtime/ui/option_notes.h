@@ -58,6 +58,7 @@ static const OptionNote k_option_notes[] = {
      "Off (the default). On if the HUD looks soft on a large screen; it can make edges look jagged."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
     // ---- Performance
+    {"Apply low-end PC preset", "Sets the lightest settings in one step.", "Only on a slow PC or integrated graphics."},
     {"Early frame hand-off", "Lets the game start its next frame while the graphics card finishes the last one, for more FPS.",
      "On (the default). Off if objects flicker.", "On"},
     {"Multithreaded rendering", "Uses one more CPU core to feed the graphics card, for more FPS.",

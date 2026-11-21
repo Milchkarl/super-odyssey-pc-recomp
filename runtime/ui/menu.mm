@@ -5,6 +5,7 @@
 #ifdef __APPLE__
 #import <Metal/Metal.h>
 #endif
+#include <string>
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <math.h>
@@ -1296,14 +1297,19 @@ static void tab_performance(void) {
                                              "180 FPS", "240 FPS", autolab};
         int pos = 0;
         for (int i = 0; i < FPS_COUNT; i++) if (order[i] == g_settings.frame_rate) pos = i;
-        opt_choice("Frame rate", &pos, fps, FPS_COUNT, 0,
+        // (owner 2026-11-21: say plainly that above 60 is not finished - on 1.4.1 the extra frames repeat the 60 updates)
+        static std::string fps_desc;
+        fps_desc = std::string(tr("Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates "
+                                  "for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between."))
+                   + "\n\n" + tr(
                    "Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and "
                    "the world where they are at that moment (no generated in-between images); gameplay itself - physics, "
                    "enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's "
                    "refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast - "
                    "60 FPS on a 144 Hz screen can't be smooth: frames alternate 2 and 3 refreshes (a judder no VSync "
                    "setting removes; G-Sync / FreeSync does). Match display picks that rate for you. "
-                   "60 FPS matches the Switch and uses the least power. Changes at once.", false);
+                   "60 FPS matches the Switch and uses the least power. Changes at once.");
+        opt_choice("Frame rate", &pos, fps, FPS_COUNT, 0, fps_desc.c_str(), false);
         g_settings.frame_rate = order[pos];
     }
 #endif
@@ -1342,6 +1348,21 @@ static void tab_performance(void) {
                "For PCs with integrated graphics and 8 GB of RAM where the game crashes with \"Out of graphics memory\" a "
                "few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, "
                "instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start.");
+    // (not the page's first row: A on entering the page would apply it)
+    opt_section("Presets");
+    if (opt_button("Apply low-end PC preset",
+                   "For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic resolution on, Console mode "
+                   "Handheld (the game's lighter rendering), Memory use Low, Frame rate 60, and anti-aliasing, upscaling, "
+                   "frame generation and the higher-quality picture options off. Every one of them can be changed back "
+                   "in its own place. Console mode and Memory use apply at the next start.")) {
+        g_settings.res_mode = RES_Q75, g_settings.game_dynres = true, g_settings.console_mode = CONSOLE_HANDHELD;
+        g_settings.memory = MEMORY_LOW, g_settings.frame_rate = FPS_60, g_settings.antialias = AA_OFF;
+        g_settings.temporal_off = true, g_settings.upscaler = UPSCALE_BILINEAR, g_settings.frame_gen = FG_OFF;
+        g_settings.shadow_quality = 0, g_settings.texture_detail = 0, g_settings.draw_distance = 0;
+        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0;
+        settings_save();
+        LOG("[menu] low-end PC preset applied\n");
+    }
     opt_section("Shaders - advanced");
     {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};

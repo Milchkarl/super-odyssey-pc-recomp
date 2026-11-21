@@ -496,3 +496,9 @@ Low GPU memory mode ||| GPU 메모리 절약 모드
 For PCs with integrated graphics and 8 GB of RAM where the game crashes with "Out of graphics memory" a few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start. ||| 내장 그래픽과 8GB RAM을 쓰는 PC에서 게임이 몇 초 만에 "Out of graphics memory"(그래픽 메모리 부족)로 꺼질 때 쓰세요. 켜기: 게임 메모리 전체(약 3GB) 대신 그래픽에 필요한 부분만 GPU에 보이게 합니다. 끄기(기본값): 이전처럼 전체를 보이게 합니다. 다음 실행부터 적용됩니다.
 Makes only the parts of the game's memory the graphics need visible to the GPU (applies at the next start). ||| 게임 메모리 중 그래픽에 필요한 부분만 GPU에 보이게 합니다(다음 실행부터 적용).
 Off (the default). On if the game crashes with Out of graphics memory on a laptop with integrated graphics. ||| 끄기(기본값). 내장 그래픽 노트북에서 Out of graphics memory로 꺼지면 켜세요.
+Presets ||| 프리셋
+Apply low-end PC preset ||| 저사양 PC 프리셋 적용
+For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic resolution on, Console mode Handheld (the game's lighter rendering), Memory use Low, Frame rate 60, and anti-aliasing, upscaling, frame generation and the higher-quality picture options off. Every one of them can be changed back in its own place. Console mode and Memory use apply at the next start. ||| 느린 PC와 내장 그래픽용: 내부 해상도 75%, 다이내믹 해상도 켜기, 콘솔 모드 휴대 모드(게임의 가벼운 렌더링), 메모리 사용 낮음, 프레임 레이트 60으로 설정하고 안티앨리어싱, 업스케일링, 프레임 생성, 고품질 화면 옵션을 끕니다. 각 옵션은 원래 자리에서 다시 바꿀 수 있습니다. 콘솔 모드와 메모리 사용은 다음 시작 시 적용됩니다.
+Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between. ||| 60 초과는 실험적 기능: 게임 버전 1.4.1에서는 추가 프레임이 게임의 60회 업데이트를 반복하므로 움직임은 여전히 60처럼 보입니다. 1.0.0에서는 마리오와 카메라가 그 사이에도 움직입니다.
+Sets the lightest settings in one step. ||| 가장 가벼운 설정을 한 번에 적용합니다.
+Only on a slow PC or integrated graphics. ||| 느린 PC나 내장 그래픽에서만.
