@@ -234,6 +234,7 @@ static bool g_code_only;                    // the files are there: only the gam
 static bool g_prepared_here;                // a shader preparation finished in this process (restart_after_prep)
 static volatile int g_cancel;
 static std::string g_job_game, g_job_keys, g_job_update;  // the choices the work runs with
+static bool g_cli;                          // RecompLauncher's setup step (setup_prepare_cli): no shader pass
 
 static void set_step(const char *s) {
     pthread_mutex_lock(&g_lock);
@@ -426,7 +427,7 @@ static void *work(void *) {
     }
     if (!setup_ready(root.c_str())) { fail("Game files incomplete", "Choose your game again."); return NULL; }
 #ifndef __APPLE__
-    if (!g_code_only) {
+    if (!g_code_only && !g_cli) {  // (the launcher's step has no window or GPU: the game prepares them at its first start)
         // (the release's pipeline seed is unpacked by vk_prepare_install: nvn/vulkan/device.c prep_seed)
         set_step("Compiling shaders...");
         g_frac = 0.55f;
@@ -441,6 +442,76 @@ static void *work(void *) {
     g_frac = 1;
     g_state = ST_DONE;
     return NULL;
+}
+
+// ------------------------------------------------------------------ RecompLauncher's setup step
+// main.c --prepare [--game <folder>]: what the installer does - the game files from the player's extracted folder, then
+// the game code - without a window, as RecompLauncher's recomplauncher.json `prepare` runs it. Progress goes to stdout as
+// "progress <0..1> <step>" lines, failures as their message and a non-zero exit. Without --game (the launcher rebuilding
+// from what it kept: an update, or a game set up before the launcher ran this step) the files already here are used
+// and only the game code is built, if it isn't current. The shaders are left to the game's first start (its own page).
+// Done: a file in the launcher's data folder (recomplauncher.json prepare.done), wherever the game's data is.
+static void cli_progress_print(float f, const std::string &step) {
+    if (!g_code_only && f < 1) f /= 0.55f;  // (the installer's bar: files and code up to 0.55, then shaders - not here)
+    printf("progress %.2f %s\n", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
+    fflush(stdout);
+}
+static void *cli_progress_thread(void *) {  // (while the work runs: a line when the step or the bar moves)
+    std::string last_step;
+    float last = -1;
+    while (g_state.load() == ST_BUSY) {
+        pthread_mutex_lock(&g_lock);
+        std::string step = g_step;
+        pthread_mutex_unlock(&g_lock);
+        float f = g_frac.load();
+        if (step != last_step || f - last >= 0.01f) cli_progress_print(f, step), last_step = step, last = f;
+        SDL_Delay(250);
+    }
+    return NULL;
+}
+extern "C" int setup_prepare_cli(const char *game) {
+    g_cli = true;
+    g_root = "extracted";  // (in the data root: rt_paths_init made it the working directory)
+    bool files_here = loader_peek_game("extracted/exefs/main") == GAME_ODYSSEY && data_there("extracted");
+    LOG("[setup] RecompLauncher setup step: game %s, data %s, game files %s\n", game && *game ? game : "(none)",
+        rt_data_root(), files_here ? "here" : "not here");
+    if (!game || !*game) {
+        if (!files_here) {
+            printf("No game files yet: choose your extracted game (the folder with exefs and romfs).\n");
+            fflush(stdout);
+            return 2;
+        }
+        g_code_only = true;
+    } else {
+        g_code_only = false;
+        g_job_game = game;
+    }
+    if (g_code_only && setup_ready("extracted")) {
+        cli_progress_print(1, "Ready to play");
+    } else {
+        g_state = ST_BUSY;
+        pthread_t th;
+        pthread_create(&th, NULL, cli_progress_thread, NULL);
+        work(NULL);
+        if (g_state.load() == ST_BUSY) g_state = ST_FAILED;  // (work returned without saying)
+        pthread_join(th, NULL);
+        if (g_state.load() != ST_DONE) {
+            pthread_mutex_lock(&g_lock);
+            std::string head = g_fail_head, hint = g_fail_hint;
+            pthread_mutex_unlock(&g_lock);
+            printf("%s: %s\n", head.empty() ? "Setup didn't finish" : head.c_str(), hint.c_str());
+            fflush(stdout);
+            return 1;
+        }
+        cli_progress_print(1, "Ready to play");
+    }
+    const char *rl = getenv("RECOMPLAUNCHER_DATA");
+    if (rl && *rl) {
+        std::string done = std::string(rl) + "/setup-done.txt";
+        FILE *f = fopen(done.c_str(), "w");
+        if (f) fprintf(f, "%s\n", rt_data_root()), fclose(f);
+    }
+    return 0;
 }
 
 // A shader preparation finished in this process (the setup's last step or the start page's): the game starts in a new

@@ -238,6 +238,8 @@ int main(int argc, char **argv) {
     bool build_romfs = false;
     const char *prepare = NULL;
     const char *unpack_seed = NULL;  // --unpack-seed <out>: the shipped pipeline seed, unpacked there
+    bool launcher_prepare = false;   // --prepare [--game <folder>]: RecompLauncher's setup step (setup.mm setup_prepare_cli)
+    const char *launcher_game = NULL;
     static char arg_root[1024];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--play")) {  // straight into the game, without the configuration page
@@ -251,6 +253,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--build-romfs")) build_romfs = true;
         else if (!strcmp(argv[i], "--unpack-seed") && i + 1 < argc) unpack_seed = argv[++i];  // (tools/release.sh)
         else if (!strcmp(argv[i], "--prepare-shaders") && i + 1 < argc) prepare = argv[++i];
+        else if (!strcmp(argv[i], "--prepare")) launcher_prepare = true;
+        else if (!strcmp(argv[i], "--game") && i + 1 < argc) launcher_game = argv[++i];
+        else if (!strncmp(argv[i], "--game=", 7)) launcher_game = argv[i] + 7;
         else if (!strcmp(argv[i], "--data-root") && i + 1 < argc) {  // (the game's own, for its shader preparation)
 #ifdef _WIN32
             _putenv_s("ODYSSEY_DATA_ROOT", argv[++i]);
@@ -262,6 +267,10 @@ int main(int argc, char **argv) {
         else if (argv[i][0] != '-') root = arg_root;
     }
     rt_paths_init();  // the data root becomes the working directory (runtime/paths.h)
+    if (launcher_prepare) {  // (no window, nothing else of the game: the game files and the game code, then exit)
+        extern int setup_prepare_cli(const char *game);
+        return setup_prepare_cli(launcher_game);
+    }
 #ifndef __APPLE__
     // --prepare-shaders <list>: the shader preparation's own process, started by the game (runtime/nvn/vulkan/exec.c)
 #ifndef __APPLE__
