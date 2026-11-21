@@ -801,6 +801,10 @@ static VkPresentModeKHR present_mode(void) {
             if ((uint32_t)m[i] < 4) snprintf(offered + strlen(offered), sizeof offered - strlen(offered), "%s%s", i ? ", " : "", names[m[i]]);
         LOG("[vk] present mode: %s (the driver offers %s)\n", (uint32_t)got < 4 ? names[got] : "?", offered);
     }
+    // (vi.c's vsync timer: with VSync Off an image is shown the moment it is presented - nothing of the display to
+    // lock to)
+    extern volatile bool g_present_immediate;
+    g_present_immediate = got == VK_PRESENT_MODE_IMMEDIATE_KHR;
     return got;
 }
 
