@@ -147,6 +147,10 @@ PREP_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h runtim
 PREP_ID := $(shell cat $(PREP_SRCS) | tr -d '\015' | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-12)
 $(B)/rt/nvn/vulkan/device.o: $(PREP_SRCS)
 $(B)/rt/nvn/vulkan/device.o: RTFLAGS += -DPREP_ID='"$(PREP_ID)"'
+# (the same hash labels the game's saved translations - maxwell_translator_stamp: a build's own date and time made every
+# release's players translate thousands of shaders again in their first kingdom, setup not being due)
+$(B)/rt/nvn/maxwell/translate.o: $(PREP_SRCS)
+$(B)/rt/nvn/maxwell/translate.o: RTFLAGS += -DTRANSLATOR_ID='"$(PREP_ID)"'
 $(B)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 # the setup page's build of it on the player's machine (runtime/gamebuild.c) uses the same flags
 $(B)/rt/gamebuild.o: $(GAMELIB_SRCS) Makefile
@@ -312,6 +316,7 @@ dist:
 	@[ -f build/upscalers/libxess.dll ] || { echo "tools/fetch_upscalers.sh first (DLSS, FSR, XeSS runtimes)"; exit 1; }
 	$(MAKE) B=$(WIN_B) DEPS=$(CURDIR)/build/deps-win $(WIN_B)/SuperOdysseyRecomp.exe
 	! nm $(WIN_B)/SuperOdysseyRecomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
+	$(GEN_VPY) tools/check_cpu_baseline.py $(WIN_B)/SuperOdysseyRecomp.exe --dispatched "$$($(CC) -print-file-name=libzstd.a)"  # (runs on AVX without AVX2: docs/CPU-BASELINE.md)
 	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src"
 	cp $(WIN_B)/SuperOdysseyRecomp.exe $(WIN_B)/SuperOdysseyRecomp.dll.a "$(DIST)/"
 	strip --strip-debug "$(DIST)/SuperOdysseyRecomp.exe"  # (its debug info names the build folder; exports stay)
@@ -320,7 +325,7 @@ dist:
 	cp -R build/zig-slim "$(DIST)/zig"
 	cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
 	    "$(DIST)/gamelib-src/"
-	cp runtime/nvn/vulkan/known_programs.txt third_party/imgui/misc/fonts/Roboto-Medium.ttf data/pipeline-seed.bin.zst 	    README.md LICENSE "$(DIST)/"
+	cp runtime/nvn/vulkan/known_programs.txt third_party/imgui/misc/fonts/Roboto-Medium.ttf data/pipeline-seed.bin.zst 	    README.md LICENSE recomplauncher.json "$(DIST)/"  # (recomplauncher.json: RecompLauncher's setup, next to the exe)
 	mkdir -p "$(DIST)/lang" && cp runtime/ui/lang/*.txt "$(DIST)/lang/"  # (the menu's translations: runtime/ui/i18n.mm)
 	mkdir -p "$(DIST)/fsr2" && cp third_party/fsr2/shaders/* third_party/fsr2/LICENSE.txt "$(DIST)/fsr2/"  # (FSR 2: runtime/nvn/vulkan/fsr2.c)
 	cp build/upscalers/*.dll "$(DIST)/"  # (loaded only when chosen in the menu)

@@ -143,6 +143,18 @@ void rt_paths_init(void) {
         const char *home = getenv("HOME");
         snprintf(root, sizeof root, "%s/Library/Application Support/" RT_BUNDLE_ID, home && *home ? home : "/tmp");
 #endif
+        // Started by RecompLauncher (its recomplauncher.json): everything in the data folder it gives
+        // (RECOMPLAUNCHER_DATA, <install>/recompdata), so the launcher moves, backs up and removes it with the game - unless
+        // the game is already set up in its usual place (players who installed through the launcher before it passed
+        // one): that stays where it is, nothing is moved.
+        const char *rl = getenv("RECOMPLAUNCHER_DATA");
+        if (rl && *rl) {
+            char main_nso[1100];
+            snprintf(main_nso, sizeof main_nso, "%s" SEP "extracted" SEP "exefs" SEP "main", root);
+            FILE *f = fopen(main_nso, "rb");
+            if (f) fclose(f), fprintf(stderr, "[paths] RecompLauncher: the game is set up in %s: kept there\n", root);
+            else snprintf(root, sizeof root, "%s", rl);
+        }
     }
     mkdirs(root);
     char msg[1400];

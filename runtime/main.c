@@ -211,6 +211,16 @@ static int test_crash(void *arg) {
 int main(int argc, char **argv) {
     plat_init();
     diagnostics_init();
+    {   // how it was started, when not plainly: arguments, and the switches that change the start (a launcher may pass
+        // them; a Recomp Launcher player's log, 2026-11-20, skipped the start page and setup without saying why)
+        char line[512] = "";
+        for (int i = 1; i < argc && strlen(line) < sizeof line - 64; i++) snprintf(line + strlen(line), sizeof line - strlen(line), " %s", argv[i]);
+        static const char *const vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_CONFIG", "ODYSSEY_PREPARE", "ODYSSEY_PRECOMPILE",
+                                           "ODYSSEY_DATA_ROOT", "ODYSSEY_SETTINGS", "ODYSSEY_HIDDEN"};
+        for (size_t i = 0; i < sizeof vars / sizeof *vars && strlen(line) < sizeof line - 64; i++)
+            if (getenv(vars[i])) snprintf(line + strlen(line), sizeof line - strlen(line), " %s=%s", vars[i], getenv(vars[i]));
+        if (line[0]) LOG("[start]%s\n", line);
+    }
     if (getenv("ODYSSEY_MEM_TRACE")) SDL_DetachThread(SDL_CreateThread(mem_trace, "memtrace", NULL));
 #ifdef _WIN32
     setvbuf(stderr, NULL, _IONBF, 0);  // the Windows CRT treats _IOLBF as full buffering
@@ -228,6 +238,8 @@ int main(int argc, char **argv) {
     bool build_romfs = false;
     const char *prepare = NULL;
     const char *unpack_seed = NULL;  // --unpack-seed <out>: the shipped pipeline seed, unpacked there
+    bool launcher_prepare = false;   // --prepare [--game <folder>]: RecompLauncher's setup step (setup.mm setup_prepare_cli)
+    const char *launcher_game = NULL;
     static char arg_root[1024];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--play")) {  // straight into the game, without the configuration page
@@ -241,6 +253,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--build-romfs")) build_romfs = true;
         else if (!strcmp(argv[i], "--unpack-seed") && i + 1 < argc) unpack_seed = argv[++i];  // (tools/release.sh)
         else if (!strcmp(argv[i], "--prepare-shaders") && i + 1 < argc) prepare = argv[++i];
+        else if (!strcmp(argv[i], "--prepare")) launcher_prepare = true;
+        else if (!strcmp(argv[i], "--game") && i + 1 < argc) launcher_game = argv[++i];
+        else if (!strncmp(argv[i], "--game=", 7)) launcher_game = argv[i] + 7;
         else if (!strcmp(argv[i], "--data-root") && i + 1 < argc) {  // (the game's own, for its shader preparation)
 #ifdef _WIN32
             _putenv_s("ODYSSEY_DATA_ROOT", argv[++i]);
@@ -252,6 +267,10 @@ int main(int argc, char **argv) {
         else if (argv[i][0] != '-') root = arg_root;
     }
     rt_paths_init();  // the data root becomes the working directory (runtime/paths.h)
+    if (launcher_prepare) {  // (no window, nothing else of the game: the game files and the game code, then exit)
+        extern int setup_prepare_cli(const char *game);
+        return setup_prepare_cli(launcher_game);
+    }
 #ifndef __APPLE__
     // --prepare-shaders <list>: the shader preparation's own process, started by the game (runtime/nvn/vulkan/exec.c)
 #ifndef __APPLE__

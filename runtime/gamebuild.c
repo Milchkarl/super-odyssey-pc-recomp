@@ -405,6 +405,25 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
     rt_remove_game_file(game_dir, GAMELIB_NAME);
     rt_remove_game_file(game_dir, GAMELIB_NAME ".id");
     mkdir(work, 0755);
+    if (t.zig) {
+        // (#121) The compiler runs at all: a damaged zig.exe (a 190 MB file a download or an unpacking tool cut short,
+        // or an antivirus changed) stopped with an illegal instruction on every file, and the setup said only "The game
+        // code didn't build" - the release's own zig.exe is the official 0.17.0 one, byte for byte. Asked once
+        // (`zig version`, a fraction of a second), and named when it fails.
+        char vlog[1200];
+        snprintf(vlog, sizeof vlog, "%s" SEP "zig-version.log", work);
+        char *argv[] = {t.cc, (char *)"version", NULL};
+        PlatProc vp = spawn(argv, vlog);
+        int r = vp ? plat_proc_wait(vp, true) : -1;
+        if (r != 0) {
+            LOG("[gamebuild] the compiler %s doesn't run (zig version: exit %d, %#x)\n", t.cc, r, (unsigned)r);
+            snprintf(why, why_size, "the compiler that comes with " RT_APP_NAME " (the zig folder) doesn't run on this PC "
+                     "(code %#x): its zig.exe is probably damaged. Download the release again, extract it with "
+                     "Windows' Extract All or 7-Zip, and check that your antivirus didn't quarantine or change it",
+                     (unsigned)r);
+            return false;
+        }
+    }
     if (t.zig) {  // its caches in the work folder too (deleted below), not ~/.cache: hundreds of MB, used once
         char zc[1200];
         snprintf(zc, sizeof zc, "%s" SEP "zig-cache", work);

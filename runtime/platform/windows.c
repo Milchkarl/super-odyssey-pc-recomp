@@ -130,8 +130,57 @@ void plat_thread_realtime(uint64_t period_ns) {
 static char g_log_path[MAX_PATH];
 const char *plat_log_path(void) { return g_log_path; }
 
+// Started by a launcher (RecompLauncher), stderr is the launcher's pipe. Before 2026-11-20 nothing was written to the
+// file then: crash reports had no log and no reason, no message box came up, and the launcher attached the shader
+// preparation's log instead (#115). Now the log goes to the file as without a console, and a thread passes what is
+// written on to the launcher's pipe (log_forward). The file is written first, so a crash report reads every line.
+// ODYSSEY_LOG_PIPE_ONLY=1 restores the old way (the pipe only).
+static HANDLE g_forward_to = INVALID_HANDLE_VALUE, g_forward_from = INVALID_HANDLE_VALUE;
+static CRITICAL_SECTION g_forward_lock;
+
+static void log_forward_now(void) {  // (what the file got since the last call, to the launcher's pipe)
+    if (g_forward_from == INVALID_HANDLE_VALUE) return;
+    EnterCriticalSection(&g_forward_lock);
+    static char buf[16384];
+    DWORD got = 0, put = 0;
+    while (g_forward_to != INVALID_HANDLE_VALUE && ReadFile(g_forward_from, buf, sizeof buf, &got, NULL) && got) {
+        if (!WriteFile(g_forward_to, buf, got, &put, NULL)) {  // (the launcher stopped reading: the file goes on alone)
+            CloseHandle(g_forward_to);
+            g_forward_to = INVALID_HANDLE_VALUE;
+        }
+    }
+    LeaveCriticalSection(&g_forward_lock);
+}
+
+static unsigned __stdcall log_forward(void *arg) {
+    (void)arg;
+    for (;;) {
+        log_forward_now();
+        if (g_forward_to == INVALID_HANDLE_VALUE) return 0;
+        Sleep(50);
+    }
+}
+
+static void log_forward_at_exit(void) { log_forward_now(); }
+
 static void log_to_file_without_console(void) {
-    if (GetStdHandle(STD_ERROR_HANDLE) && GetStdHandle(STD_ERROR_HANDLE) != INVALID_HANDLE_VALUE) return;  // console / pipe
+    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    bool piped = false;
+    if (err && err != INVALID_HANDLE_VALUE) {
+        // A console, or a file a parent gave us (the shader preparation's log): as it is. A pipe: file + forwarding,
+        // unless this is a process started again by one that forwards already (ODYSSEY_LOG_APPEND: it appends to the
+        // file the first one passes on).
+        // RecompLauncher's Play gives the game a file of its own (its game-output log), not a pipe: the same then, or
+        // the game's own log - what its crash report attaches - stayed as the last run without the launcher left it
+        // (seen 2026-11-21, launcher 0.90: SuperOdysseyRecomp.log untouched by a whole played session).
+        DWORD type = GetFileType(err);
+        bool launcher_file = type == FILE_TYPE_DISK && getenv("RECOMPLAUNCHER") && !getenv("ODYSSEY_LOG_APPEND");
+        if ((type != FILE_TYPE_PIPE && !launcher_file) || getenv("ODYSSEY_LOG_PIPE_ONLY")) return;
+        if (!getenv("ODYSSEY_LOG_APPEND") &&
+            !DuplicateHandle(GetCurrentProcess(), err, GetCurrentProcess(), &g_forward_to, 0, FALSE, DUPLICATE_SAME_ACCESS))
+            return;
+        piped = true;
+    }
     char exe[MAX_PATH];
     DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
     if (!n || n >= sizeof exe) return;
@@ -139,10 +188,35 @@ static void log_to_file_without_console(void) {
     if (slash) slash[1] = 0;
     snprintf(g_log_path, sizeof g_log_path, "%sSuperOdysseyRecomp.log", exe);
     bool append = getenv("ODYSSEY_LOG_APPEND") != NULL;
+    if (piped) {  // (a failed freopen closes stderr: with a pipe there is something to lose, so try the file first)
+        FILE *probe = fopen(g_log_path, "ab");
+        if (!probe) {
+            g_log_path[0] = 0;
+            if (g_forward_to != INVALID_HANDLE_VALUE) CloseHandle(g_forward_to), g_forward_to = INVALID_HANDLE_VALUE;
+            return;
+        }
+        fclose(probe);
+    }
     if (!freopen(g_log_path, append ? "ab" : "wb", stderr)) { g_log_path[0] = 0; return; }
     setvbuf(stderr, NULL, _IONBF, 0);
     _dup2(_fileno(stderr), _fileno(stdout));
     _putenv("ODYSSEY_LOG_APPEND=1");
+    if (g_forward_to != INVALID_HANDLE_VALUE) {
+        wchar_t wpath[MAX_PATH];
+        if (MultiByteToWideChar(CP_ACP, 0, g_log_path, -1, wpath, MAX_PATH))
+            g_forward_from = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (g_forward_from == INVALID_HANDLE_VALUE) {
+            CloseHandle(g_forward_to);
+            g_forward_to = INVALID_HANDLE_VALUE;
+            return;
+        }
+        InitializeCriticalSection(&g_forward_lock);
+        atexit(log_forward_at_exit);
+        HANDLE t = (HANDLE)_beginthreadex(NULL, 64 << 10, log_forward, NULL, 0, NULL);
+        if (t) CloseHandle(t);
+        fprintf(stderr, "[log] started with a piped output (a launcher): this file is written and passed on to it\n");
+    }
 }
 
 // The recompiled game code is compiled on this PC for the CPU it has (runtime/gamelib.c: AVX2 as built, or AVX /
@@ -304,6 +378,7 @@ void plat_heap_check(const char *where) {
 void plat_fatal_notice(void) {
     if (!g_log_path[0]) return;
     fflush(stderr);
+    log_forward_now();  // (a launcher gets the fatal lines before the box waits)
     static char text[2600];  // (the reason, what to try and the error line: runtime/diagnostics.c)
     diagnostics_fatal_text(text, sizeof text);
     size_t l = strlen(text);
@@ -422,6 +497,7 @@ void plat_exec(char *const argv[]) {
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD code = 0;
     GetExitCodeProcess(pi.hProcess, &code);
+    log_forward_now();  // (the new process appended to our log; ExitProcess skips atexit)
     ExitProcess(code);
 }
 

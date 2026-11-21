@@ -5,6 +5,7 @@
 #ifdef __APPLE__
 #import <Metal/Metal.h>
 #endif
+#include <string>
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <math.h>
@@ -33,6 +34,7 @@ extern "C" {
 #include "../hle.h"
 #include "../mods.h"
 #include "../localization.h"
+#include "../version.h"  // (APP_VERSION beside the name)
 #include "../ptbr_install.h"
 #include "../diagnostics.h"
 #include "../settings.h"
@@ -49,6 +51,10 @@ void controls_bindings_draw(float scale);  // controls_ui.mm
 static std::atomic<bool> g_open{false};
 static std::atomic<bool> g_quit_prompt{false};
 static std::atomic<bool> g_setup{false};  // the first-start setup page (setup.mm) instead of the menu
+// The live picture (option_rows.mm opt_end): the rectangle of the menu left open onto the game, this frame's and the
+// last one's (the menu is painted before the page says where it is)
+static float g_hole[4], g_hole_prev[4];
+static bool g_hole_set, g_hole_prev_set;
 static std::atomic<bool> g_text_busy{false};  // a text field / the on-screen keyboard has the keys (render thread: ui_text_busy)
 static std::atomic<bool> g_want_window_apply{false};
 static std::atomic<bool> g_draw_mouse_cursor{false};
@@ -113,6 +119,20 @@ static void reset_menu_events(void) {
 
 bool menu_is_open(void) { return g_open.load(); }
 void menu_setup_mode(bool on) { g_setup.store(on); }
+// (render thread, before the menu's frame) last frame's rectangle, in the window's pixels
+extern "C" bool menu_live_picture_px(float r[4]) {
+    if (g_setup.load() || !g_open.load() || !g_hole_set) return false;
+    ImVec2 fb = ImGui::GetIO().DisplayFramebufferScale;
+    float sx = fb.x > 0 ? fb.x : 1, sy = fb.y > 0 ? fb.y : 1;
+    r[0] = g_hole[0] * sx, r[1] = g_hole[1] * sy, r[2] = g_hole[2] * sx, r[3] = g_hole[3] * sy;
+    return true;
+}
+bool menu_live_picture(float x0, float y0, float x1, float y1) {
+    if (g_setup.load() || !g_open.load()) return false;  // (the start page: no game behind it)
+    g_hole[0] = x0, g_hole[1] = y0, g_hole[2] = x1, g_hole[3] = y1;
+    g_hole_set = true;
+    return true;
+}
 static void set_open(bool open);
 extern "C" void menu_test_open(void) {
     set_open(true);
@@ -319,6 +339,17 @@ bool menu_handle_event(const SDL_Event *e) {
         bool down = e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         bool chord = back_pad && back_pad == start_pad;
         SDL_JoystickID pad = e->gbutton.which;
+        {   // (diagnosis 2026-11-21, the Steam Deck: L / R stepped twice now and then, the menu opened on its last option)
+            // the first few hundred button events while a menu is open or opening, with the controller they came from
+            static int nlog;
+            if (nlog < 400 && (capturing() || e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK || e->gbutton.button == SDL_GAMEPAD_BUTTON_START ||
+                               e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+                nlog++;
+                LOG("[menukey] %s button %d pad %u \"%s\" %04x:%04x t=%llu ms\n", down ? "down" : "up", e->gbutton.button, (unsigned)pad,
+                    SDL_GetGamepadNameForID(pad) ? SDL_GetGamepadNameForID(pad) : "?", SDL_GetGamepadVendorForID(pad),
+                    SDL_GetGamepadProductForID(pad), (unsigned long long)(e->gbutton.timestamp / 1000000));
+            }
+        }
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK && (down || back_pad == pad)) back_pad = down ? pad : 0;
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START && (down || start_pad == pad)) start_pad = down ? pad : 0;
         if (down && !typing && !g_setup.load() &&
@@ -550,7 +581,7 @@ static void style_init(void) {
     c[ImGuiCol_TabDimmed] = c[ImGuiCol_TabDimmedSelected] = c[ImGuiCol_TabDimmedSelectedOverline] = none;
     c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.06f);
     c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrabActive] = c[ImGuiCol_ScrollbarGrabActive] = kTextV;
-    c[ImGuiCol_NavCursor] = kAccentV;  // (the controller / keyboard cursor: a red outline)
+    c[ImGuiCol_NavCursor] = kGoldV;  // (the controller / keyboard cursor: a coin-gold outline)
     c[ImGuiCol_SliderGrab] = ImVec4(1, 1, 1, 0.75f);
     c[ImGuiCol_Separator] = kLineV;
     c[ImGuiCol_TableRowBg] = none;
@@ -702,6 +733,9 @@ static bool choice(const char *label, int *value, const char *const *names, int 
         ImGui::EndCombo();
     }
     if (ImGui::IsItemFocused() && !ImGui::IsPopupOpen("##c")) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
             *value = (*value + 1) % n; changed = true;
         }
@@ -737,6 +771,9 @@ static bool slider(const char *label, int *value, int lo, int hi, int step, cons
     ImGui::SetNextItemWidth(-1);
     bool changed = ImGui::SliderInt("##s", value, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         int v = *value;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) v += step;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) v -= step;
@@ -882,6 +919,13 @@ static void tab_display(void) {
                    "corners of the picture.");
     }
     {
+        static const char *nv[] = {"Cropped sides", "Full width"};
+        opt_choice("Narrow picture view", &g_settings.narrow_full, nv, 2, 0,
+                   "In a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck). Cropped sides: the 16:9 view's "
+                   "height, a little cut off at the left and right. Full width: everything the 16:9 view shows, and more "
+                   "above and below.");
+    }
+    {
         static const char *pos[] = {"Centered (16:9)", "Edges"};
         opt_choice("HUD position (wide)", &g_settings.hud_edges, pos, 2, 1,
                    "In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, "
@@ -935,7 +979,7 @@ static void tab_graphics(void) {
             res[i] = res_lab[i];
         }
     }
-    enum { RES_MATCH_AT = 4 };
+    enum { RES_DISPLAY_AT = 3, RES_MATCH_AT = 4 };  // (100%: the default since 2026-11-20)
     enum { NRES = sizeof res_mode / sizeof res_mode[0] };
     {
         int ri = RES_MATCH_AT;
@@ -947,8 +991,8 @@ static void tab_graphics(void) {
         char at[160];
         snprintf(at, sizeof at, tr("Rendering at %.0f x %.0f."), output_game_w() * sx, output_game_h() * sy);  // (handheld: 1280 x 720 base)
         int n = snprintf(d, sizeof d, "%s\n\n%s", tr("How sharp the 3D image is - each choice shows the size it renders at in this window "
-                                      "and picture shape. The default, shown as your screen's resolution: that resolution (at least the "
-                                      "Switch's 1600 x 900). 100%: exactly your screen's pixels (Steam Deck: 1280 x 800). "
+                                      "and picture shape. Shown as your screen's resolution: that resolution (at least the "
+                                      "Switch's 1600 x 900). 100% (the default): exactly your screen's pixels (Steam Deck: 1280 x 800). "
                                       "Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of "
                                       "the display, for slower machines; the fixed sizes render at exactly that, above the "
                                       "screen's for a sharper picture (supersampling)."), at);
@@ -956,11 +1000,11 @@ static void tab_graphics(void) {
             snprintf(d + n, sizeof d - n, tr(" Dynamic: %.0f%% of the display right now."), output_scale_dynamic_factor() * 100);
 #ifndef __APPLE__  // (temporal upscaling: Windows, and FSR 2 on Linux)
         if (vk_temporal_enabled()) {
-            snprintf(d, sizeof d, "%s\n\n%s", tr("Your screen's resolution (the default) lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
+            snprintf(d, sizeof d, "%s\n\n%s", tr("Your screen's resolution lets the temporal upscaler choose its usual input size. A fixed resolution overrides that "
                      "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes."), at);
         }
 #endif
-        if (opt_choice("Internal resolution", &ri, res, NRES, RES_MATCH_AT, d, false)) g_settings.res_mode = res_mode[ri];
+        if (opt_choice("Internal resolution", &ri, res, NRES, RES_DISPLAY_AT, d, false)) g_settings.res_mode = res_mode[ri];
     }
 #ifdef __APPLE__
     {   // macOS's own upscaler next to bilinear (Windows / Linux: AMD FSR 1 is in the Upscaling list below)
@@ -979,7 +1023,7 @@ static void tab_graphics(void) {
 #endif
     opt_section("Anti-aliasing");
     static const char *aa[AA_COUNT] = {"Off", "SMAA", "FXAA"};
-    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_FXAA,
+    opt_choice("Anti-aliasing", &g_settings.antialias, aa, AA_COUNT, AA_OFF,
                "Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and "
                "blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every "
                "high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. "
@@ -1153,7 +1197,9 @@ static void tab_graphics(void) {
                    "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
                    "simpler versions and fade out farther away. High: twice the Switch's distances, Very high: four "
                    "times. Faraway objects then also keep moving, as they do near you. Costs CPU and GPU time in "
-                   "large kingdoms. The landscape itself is unchanged. Switch: as on the Switch. Changes at once.",
+                   "large kingdoms. Very high is heavy: in New Donk City it halved the frame rate on a fast PC (120 "
+                   "to about 60 FPS); High costs nothing there. The landscape itself is unchanged. Switch: as on the Switch. Changes "
+                   "at once.",
                    false);
     }
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
@@ -1161,12 +1207,17 @@ static void tab_graphics(void) {
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
                "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
                "Costs almost nothing. Off: the picture exactly as on the Switch.");
-    opt_toggle("Sharper HUD and menus", &g_settings.hud_sharpen, true,
-               "The game's HUD, text and menus are drawn from artwork made for the Switch's 720 lines; enlarged on a "
-               "bigger screen their edges turn soft. On: they are sharpened on screens of 900 lines and more "
-               "(nothing below - a Steam Deck's screen stays as it is), the more the bigger the screen, without "
-               "adding outlines or halos. It makes edges crisper, not more detailed. Off: as the game draws them. "
-               "Changes at once.");
+    {
+        static const char *hq[] = {"Switch", "High"};
+        opt_choice("HUD and menu quality", &g_settings.hud_quality, hq, 2, 0,
+                   "The game's HUD, text and menus are drawn from pictures made for the Switch's 720 lines; "
+                   "stretched over a bigger screen they turn soft and their curves wobble. High: they are enlarged "
+                   "with a filter that follows their edges - round shapes stay round and edges become crisp, without "
+                   "jagged steps, outlines or halos. It works on any screen larger than the Switch's and more the "
+                   "bigger the screen; a Steam Deck's own screen is too close to the Switch's to change. The "
+                   "pictures keep their detail (nothing is redrawn). Costs a little GPU time while a menu covers the "
+                   "screen. Switch: as the game draws them. Changes at once (the HUD may blink the first time).", false);
+    }
 #endif
     opt_end();
 }
@@ -1186,7 +1237,7 @@ static void tab_overlay(void) {
         static const char *const corners[OVERLAY_CORNER_COUNT] = {"Top right", "Top left", "Bottom right", "Bottom left"};
         static const char *const sizes[3] = {"Small", "Medium", "Large"};
         if (!g_settings.performance_overlay) opt_disable_next();
-        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_TOP_RIGHT,
+        opt_choice("Overlay position", &g_settings.overlay_corner, corners, OVERLAY_CORNER_COUNT, OVERLAY_BOTTOM_LEFT,
                    "The corner of the picture the performance overlay sits in.");
         if (!g_settings.performance_overlay) opt_disable_next();
         opt_choice("Overlay size", &g_settings.overlay_size, sizes, 3, 1, "The size of the performance overlay's text.");
@@ -1228,24 +1279,6 @@ static void tab_performance(void) {
                    "default. If you see flickering or broken objects, turn it off.");
         g_settings.early_fences = on;
     }
-#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
-    {
-        static const int rt_start = g_settings.record_thread;  // (read at start)
-        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
-        static char autolab[48];
-        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
-        const char *rt[] = {autolab, "Off", "On"};
-        char d[1100];
-        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
-                                         "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
-                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
-                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
-                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
-                                         "crashes, set it to Off."),
-                 rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        if (opt_choice("Multithreaded rendering", &v, rt, 3, 0, d, false)) g_settings.record_thread = v - 1;
-    }
-#endif
 #ifdef _WIN32
     {   // NVIDIA Reflex (sl_glue.cpp): the CPU waits just before a frame instead of queuing ahead - less input delay
         static const char *lln[] = {"Off", "On", "On + Boost"};
@@ -1269,14 +1302,19 @@ static void tab_performance(void) {
                                              "180 FPS", "240 FPS", autolab};
         int pos = 0;
         for (int i = 0; i < FPS_COUNT; i++) if (order[i] == g_settings.frame_rate) pos = i;
-        opt_choice("Frame rate", &pos, fps, FPS_COUNT, 0,
+        // (owner 2026-11-21: say plainly that above 60 is not finished - on 1.4.1 the extra frames repeat the 60 updates)
+        static std::string fps_desc;
+        fps_desc = std::string(tr("Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates "
+                                  "for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between."))
+                   + "\n\n" + tr(
                    "Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and "
                    "the world where they are at that moment (no generated in-between images); gameplay itself - physics, "
                    "enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's "
                    "refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast - "
                    "60 FPS on a 144 Hz screen can't be smooth: frames alternate 2 and 3 refreshes (a judder no VSync "
                    "setting removes; G-Sync / FreeSync does). Match display picks that rate for you. "
-                   "60 FPS matches the Switch and uses the least power. Changes at once.", false);
+                   "60 FPS matches the Switch and uses the least power. Changes at once.");
+        opt_choice("Frame rate", &pos, fps, FPS_COUNT, 0, fps_desc.c_str(), false);
         g_settings.frame_rate = order[pos];
     }
 #endif
@@ -1305,11 +1343,30 @@ static void tab_performance(void) {
     }
     {
         static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
-        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_AUTO,
+        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_NORMAL,
                    "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
-                   "RAM with an NVIDIA GPU). Low builds each shader the first time it is drawn: a short stutter the first "
+                   "RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first "
                    "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
                    "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
+    }
+    opt_toggle("Low GPU memory mode", &g_settings.low_gpu_memory, false,
+               "For PCs with integrated graphics and 8 GB of RAM where the game crashes with \"Out of graphics memory\" a "
+               "few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, "
+               "instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start.");
+    // (not the page's first row: A on entering the page would apply it)
+    opt_section("Presets");
+    if (opt_button("Apply low-end PC preset",
+                   "For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic resolution on, Console mode "
+                   "Handheld (the game's lighter rendering), Memory use Low, Frame rate 60, and anti-aliasing, upscaling, "
+                   "frame generation and the higher-quality picture options off. Every one of them can be changed back "
+                   "in its own place. Console mode and Memory use apply at the next start.")) {
+        g_settings.res_mode = RES_Q75, g_settings.game_dynres = true, g_settings.console_mode = CONSOLE_HANDHELD;
+        g_settings.memory = MEMORY_LOW, g_settings.frame_rate = FPS_60, g_settings.antialias = AA_OFF;
+        g_settings.temporal_off = true, g_settings.upscaler = UPSCALE_BILINEAR, g_settings.frame_gen = FG_OFF;
+        g_settings.shadow_quality = 0, g_settings.texture_detail = 0, g_settings.draw_distance = 0;
+        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0;
+        settings_save();
+        LOG("[menu] low-end PC preset applied\n");
     }
     opt_section("Shaders - advanced");
     {
@@ -1321,12 +1378,36 @@ static void tab_performance(void) {
                    "Normal: up to 15 s and 3 GB. Long: up to 30 s and 12 GB (at most half of this PC's memory). Applies "
                    "at the next start.", false);
     }
+    opt_section("Experimental");
+    // (owner 2026-11-21: what is off by default because it can misbehave sits here, not among the everyday options)
+#ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
+    {
+        static const int rt_start = g_settings.record_thread;  // (read at start)
+        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
+        static char autolab[48];
+        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
+        const char *rt[] = {autolab, "Off", "On"};
+        char d[1100];
+        snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
+                                         "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
+                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
+                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
+                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
+                                         "crashes, set it to Off."),
+                 rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
+        if (opt_choice("Multithreaded rendering", &v, rt, 3, 1, d, false)) g_settings.record_thread = v - 1;
+    }
+#endif
+    opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,
+               "On: the lighting the game sets up on the first frame of a kingdom is built with less GPU work, for a "
+               "shorter hitch as it appears. Turn it off if the lighting looks wrong right after arriving somewhere. "
+               "settings.ini has a line for each of its four parts (arrival_mip_views, arrival_barriers, "
+               "arrival_precreate, arrival_submit). Changes at once.");
     opt_toggle("Only set up shaders seen before", &g_settings.shader_known_only, false,
                "On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; "
                "the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS "
                "more in busy places), but a new area can stutter a little the first time things appear. Off (default): "
                "everything an area loads is prepared ahead. Applies to areas loaded from now on.");
-    opt_section("Experimental");
     opt_toggle("Preload area shaders (more RAM)", &g_settings.shader_preload, false,
                "Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. "
                "Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. "
@@ -1951,6 +2032,9 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
 }
 
 // Draw the settings tabs in the current window, with a Prelaunch tab when the launcher supplies one.
+static float hint_icon(ImDrawList *dl, ImVec2 at, float h, const char *tok, bool pad, int fam, float scale);
+static int hint_force(void);
+static float g_tabbar_ends;  // (the room the L / R icons take at each end of the tab bar)
 static void tabs_body(float scale, void (*prelaunch)(float)) {
     // (id: the page; -1 = Prelaunch)
     struct Tab { const char *name; int id; bool on; };
@@ -1977,6 +2061,8 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
                  : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1 : 0;
         if (step) {
+            static int nlog;
+            if (nlog++ < 200) LOG("[menutab] step %d from tab %d (ImGui frame %d)\n", step, tabs[cur].id, ImGui::GetFrameCount());
             int i = cur;
             do i = (i + step + ntabs) % ntabs; while (!tabs[i].on);
             g_tab_request = tabs[i].id;
@@ -1989,29 +2075,55 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     // categories in a column on the left, the page on the right. The controller's cursor on a category shows its page
     // at once; A / Enter / a click (or Right) goes into the page; B / Esc in a page comes back here (the menu window:
     // menu_sidebar_focused), B / Esc here closes. L / R (Q / E) switch categories from anywhere.
-    float side_w = 0;
-    {
-        float pad = 22 * scale;
-        for (int k = 0; k < ntabs; k++) side_w = fmaxf(side_w, ImGui::CalcTextSize(tr(tabs[k].name)).x);
-        side_w = fmaxf(side_w + 2 * pad + 8 * scale, 190 * scale);
-    }
+    // (branch menu-odyssey-look: the categories as tabs along the top, L / R (Q / E) drawn at its ends; the
+    // controller's cursor on a tab shows its page, Down / A / a click goes into it, B / Esc in a page comes back up)
     g_sidebar_was = g_sidebar_focused;
-    float item_h = ImGui::GetFontSize() * 2.05f;
+    float fs0 = ImGui::GetFontSize(), item_h = fs0 * 1.85f, bar_pad = 7 * scale;
     int show = g_tab_request >= 0 || g_tab_request == -1 ? g_tab_request : tabs[cur].id;  // (the page drawn this frame)
     bool enter_page = down_from_tab;
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kSidebarV);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12 * scale);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8 * scale, 8 * scale));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4 * scale));
-    ImGui::BeginChild("##nav", ImVec2(side_w, 0), ImGuiChildFlags_AlwaysUseWindowPadding,
-                      ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(bar_pad, bar_pad));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::BeginChild("##nav", ImVec2(0, item_h + 2 * bar_pad), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList *bdl = ImGui::GetWindowDrawList();
+    ImVec2 bp = ImGui::GetCursorScreenPos();
+    float bw = ImGui::GetContentRegionAvail().x;
+    {   // L / R at the ends: the player's own buttons (as the hint bar)
+        ImGuiContext *gc = ImGui::GetCurrentContext();
+        bool padsrc = hint_force() >= 0 ? hint_force() < 3 : gc->NavInputSource == ImGuiInputSource_Gamepad;
+        int fam = hint_force() >= 0 && hint_force() < 3 ? hint_force() : input_pad_family();
+        const char *lk = padsrc ? (fam == 2 ? "L1" : fam == 1 ? "LB" : "L") : "Q";
+        const char *rk = padsrc ? (fam == 2 ? "R1" : fam == 1 ? "RB" : "R") : "E";
+        float ih = fs0 * 1.05f, iy = bp.y + (item_h - ih) * 0.5f;
+        auto icon_w = [&](const char *tok) {  // (hint_icon's own widths, to place the right one)
+            ImFont *f = ImGui::GetFont();
+            if (padsrc) return fmaxf(f->CalcTextSizeA(ih * 0.6f, FLT_MAX, 0, tok).x + ih * 0.6f, ih * 1.25f);
+            return fmaxf(f->CalcTextSizeA(ih * 0.62f, FLT_MAX, 0, tok).x + ih * 0.56f, ih);
+        };
+        float lw = hint_icon(bdl, ImVec2(bp.x + 6 * scale, iy), ih, lk, padsrc, fam, scale);
+        float rw = icon_w(rk);
+        hint_icon(bdl, ImVec2(bp.x + bw - 6 * scale - rw, iy), ih, rk, padsrc, fam, scale);
+        g_tabbar_ends = fmaxf(lw, rw) + 18 * scale;
+    }
+    // the tabs centred between them, fitted: less padding first, then a smaller font (down to 70%)
+    float lo = bp.x + g_tabbar_ends, hi = bp.x + bw - g_tabbar_ends, room = hi - lo;
+    float textsum = 0;
+    for (int k = 0; k < ntabs; k++) textsum += ImGui::CalcTextSize(tr(tabs[k].name)).x;
+    float tpad = 20 * scale, fsc = 1;
+    if (textsum + 2 * ntabs * tpad > room) tpad = fmaxf(5 * scale, (room - textsum) / (2 * ntabs));
+    if (textsum + 2 * ntabs * tpad > room) fsc = fmaxf(0.7f, (room - 2 * ntabs * tpad) / textsum);
+    float total = textsum * fsc + 2 * ntabs * tpad, tx = lo + fmaxf(0, (room - total) * 0.5f);
     for (int k = 0; k < ntabs; k++) {
         const Tab &t = tabs[k];
         ImGui::PushID(t.id + 1000);
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        float w = ImGui::GetContentRegionAvail().x;
+        float w = ImGui::CalcTextSize(tr(t.name)).x * fsc + 2 * tpad;
+        ImVec2 p(tx, bp.y);
+        tx += w;
+        ImGui::SetCursorScreenPos(p);
         ImGui::BeginDisabled(!t.on);
-        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the tint and the bar)
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the fill and the gold outline)
         bool clicked = ImGui::InvisibleButton("##cat", ImVec2(w, item_h), ImGuiButtonFlags_EnableNav);
         ImGui::PopStyleColor();
         // (no Prelaunch in game: the cursor starts on the category that is shown)
@@ -2032,20 +2144,24 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             g_tab_request = show = t.id;
             if (ImGui::GetCurrentContext()->NavCursorVisible) enter_page = true;  // (A / Enter: into the page)
         }
-        if (foc && t.on && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
-                                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, false) ||
-                                          ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)))
+        if (foc && t.on && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_DownArrow, false)))
             enter_page = true;
         bool sel = t.id == show;
-        ImDrawList *dl = ImGui::GetWindowDrawList();
-        float r = 8 * scale, bar = fmaxf(2, 4 * scale), fs = ImGui::GetFontSize();
-        if (sel) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kAccentTintV), r);
-        else if (hov || foc) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kSurfaceHoverV), r);
-        if (sel || foc) dl->AddRectFilled(ImVec2(p.x, p.y + item_h * 0.22f), ImVec2(p.x + bar, p.y + item_h * 0.78f),
-                                          sel ? kAccent : kAccentDim, bar * 0.5f);
-        if (foc) dl->AddRect(p, ImVec2(p.x + w, p.y + item_h), sel ? theme_u32(kTextV, 0.55f) : kAccentDim, r, 0, fmaxf(1, 1.5f * scale));
-        dl->AddText(ImVec2(p.x + 18 * scale, p.y + (item_h - fs) * 0.5f), !t.on ? kTextOff : sel || foc || hov ? kText : kTextDim,
-                    tr(t.name));
+        float r = 7 * scale, fs = ImGui::GetFontSize() * fsc;
+        ImVec2 q(p.x + w, p.y + item_h);
+        // (the shown tab: a lighter surface with a red line under its name; red as an accent, not a fill)
+        if (sel || hov || foc) bdl->AddRectFilled(p, q, theme_u32(sel ? kBoxV : kSurfaceHoverV), r);
+        if (sel) {
+            float lw2 = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * fsc, FLT_MAX, 0, tr(t.name)).x;
+            float ly = q.y - fmaxf(3, 5 * scale);
+            bdl->AddRectFilled(ImVec2(p.x + (w - lw2) * 0.5f, ly), ImVec2(p.x + (w + lw2) * 0.5f, ly + fmaxf(2, 3 * scale)), kAccent, 2 * scale);
+        }
+        if (foc) bdl->AddRect(ImVec2(p.x + 1, p.y + 1), ImVec2(q.x - 1, q.y - 1), kGold, r, 0, fmaxf(2, 2.5f * scale));
+        ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, tr(t.name));
+        bdl->AddText(ImGui::GetFont(), fs, ImVec2(p.x + (w - ts.x) * 0.5f, p.y + (item_h - fs) * 0.5f),
+                     !t.on ? kTextOff : sel || foc || hov ? kText : kTextDim, tr(t.name));
         ImGui::EndDisabled();
         ImGui::PopID();
     }
@@ -2053,19 +2169,13 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
     g_sidebar_focused = focused_tab != -99;
-    ImGui::SameLine(0, 20 * scale);
+    ImGui::Dummy(ImVec2(0, 6 * scale));
 
     // ---- the page
     for (int k = 0; k < ntabs; k++) if (tabs[k].id == show) cur = k;
     g_tab = tabs[cur].id;
     opt_focus_first(enter_page);
     ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
-    {   // the page's title: the category, large
-        ImGui::PushFont(g_font_big);
-        ImGui::TextUnformatted(tr(tabs[cur].name));
-        ImGui::PopFont();
-        ImGui::Dummy(ImVec2(0, 2 * scale));
-    }
     // pages that aren't option rows (Controls, Prelaunch): their first control
     if (enter_page && (g_tab == -1 || g_tab == 8)) {
         opt_focus_first(false);
@@ -2523,16 +2633,36 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     }
 
     if (open) {
-        // dim the game behind the menu
-        ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130));
+        // dim the game behind the menu - all but the live picture's window onto it (last frame's place)
+        bool hole = g_hole_prev_set = g_hole_set;
+        memcpy(g_hole_prev, g_hole, sizeof g_hole);
+        g_hole_set = false;
+        const float *H = g_hole_prev;
+        auto around = [&](ImDrawList *dl, ImVec2 a, ImVec2 z, ImU32 col, float rr) {  // (a rectangle less the hole)
+            if (!hole) { dl->AddRectFilled(a, z, col, rr); return; }
+            dl->AddRectFilled(a, ImVec2(z.x, H[1]), col, rr, ImDrawFlags_RoundCornersTop);
+            dl->AddRectFilled(ImVec2(a.x, H[3]), z, col, rr, ImDrawFlags_RoundCornersBottom);
+            dl->AddRectFilled(ImVec2(a.x, H[1]), ImVec2(H[0], H[3]), col);
+            dl->AddRectFilled(ImVec2(H[2], H[1]), ImVec2(z.x, H[3]), col);
+        };
+        around(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130), 0);
         // a window in the middle with the game around it: about 68% x 80% of the picture; on small screens (the Steam
         // Deck's 1280 x 800) nearly all of it, so the sidebar leaves the rows room (0.4.1)
-        bool small = io.DisplaySize.x <= 1600;
-        float w = small ? io.DisplaySize.x * 0.94f : fminf(io.DisplaySize.x * 0.68f, 1800 * scale);
-        float h = small ? io.DisplaySize.y * 0.92f : fminf(io.DisplaySize.y * 0.80f, 1200 * scale);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        // (branch menu-odyssey-look, owner 2026-11-20: the whole screen, the game seen only in the live picture)
+        float w = io.DisplaySize.x, h = io.DisplaySize.y;
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));  // (painted below, around the live picture)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28 * scale, 18 * scale));
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor();
+        {
+            ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+            around(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y), theme_u32(kPanelV), ImGui::GetStyle().WindowRounding);
+        }
         ImFont *keep_big = g_font_big;  // (the window in the menu's font; header() uses g_font_big)
         g_font_big = g_menu_font_big;
         ImGui::PushFont(g_menu_font);
@@ -2548,6 +2678,12 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImGui::TextUnformatted(RT_APP_NAME);
         }
         ImGui::PopFont();
+        {
+
+            ImGui::SameLine(0, 14 * scale);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (ImGui::GetFontSize() * 0.45f));
+            ImGui::TextDisabled("%s", APP_VERSION);
+        }
         {
             float bx = 44 * scale;
             ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);

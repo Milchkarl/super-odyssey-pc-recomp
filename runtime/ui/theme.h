@@ -8,19 +8,26 @@
 
 #define THEME_RGB(r, g, b, a) ImVec4((r) / 255.0f, (g) / 255.0f, (b) / 255.0f, (a))
 // the palette
-static const ImVec4 kPanelV = THEME_RGB(14, 14, 17, 0.97f);         // the menu window, the start page's card
-static const ImVec4 kSidebarV = THEME_RGB(23, 23, 28, 1);           // the menu's sidebar (categories), info boxes
-static const ImVec4 kSurfaceV = THEME_RGB(29, 29, 34, 1);           // fields, buttons, rows
-static const ImVec4 kSurfaceHoverV = THEME_RGB(40, 40, 47, 1);      // ... under the mouse
-static const ImVec4 kAccentV = THEME_RGB(229, 37, 33, 1);           // red: the primary button, the selection's bar
-static const ImVec4 kAccentHotV = THEME_RGB(244, 62, 56, 1);        // ... the primary button under the mouse / cursor
-static const ImVec4 kAccentTintV = THEME_RGB(229, 37, 33, 0.17f);   // the selected row / sidebar entry
-static const ImVec4 kAccentDeepV = THEME_RGB(176, 24, 22, 1);       // pressed
+// (experiment, branch menu-odyssey-look: the game's own HUD colours - a deep navy for panels, Mario's red for the
+// values and the primary button, the coins' gold for the cursor - in the layout of the settings menus the owner likes:
+// tabs along the top, rows with a filled value box, the picture and the description on the right)
+static const ImVec4 kPanelV = THEME_RGB(0, 0, 0, 1);              // pitch black (owner 2026-11-20)          // the menu window, the start page's card
+static const ImVec4 kSidebarV = THEME_RGB(20, 20, 23, 1);           // the tab bar, the description card, info boxes
+static const ImVec4 kSurfaceV = THEME_RGB(31, 31, 35, 1);           // fields, buttons, rows
+static const ImVec4 kSurfaceHoverV = THEME_RGB(46, 46, 52, 1);     // ... under the mouse / the cursor
+static const ImVec4 kAccentV = THEME_RGB(228, 0, 25, 0.82f);           // Mario red: value boxes, the primary button
+static const ImVec4 kAccentRestV = THEME_RGB(228, 0, 25, 0.55f);       // value boxes of the rows the cursor isn't on
+static const ImVec4 kBoxV = THEME_RGB(44, 44, 50, 1);              // value boxes: a lighter charcoal than the rows
+static const ImVec4 kBoxHotV = THEME_RGB(58, 58, 66, 1);           // ... on the row the cursor is on
+static const ImVec4 kAccentHotV = THEME_RGB(240, 20, 40, 0.85f);       // ... the selected row's / under the mouse
+static const ImVec4 kAccentTintV = THEME_RGB(228, 0, 25, 0.22f);    // the selected tab
+static const ImVec4 kAccentDeepV = THEME_RGB(150, 0, 18, 1);        // pressed; a value box's inactive half
 static const ImVec4 kAccentSoftV = THEME_RGB(255, 255, 255, 1);     // a value that isn't the default (white)
+static const ImVec4 kGoldV = THEME_RGB(255, 206, 32, 1);            // coin gold: the cursor's outline, the selected tab
 static const ImVec4 kTextV = THEME_RGB(255, 255, 255, 1);
-static const ImVec4 kTextDimV = THEME_RGB(168, 168, 178, 1);        // secondary text, categories not shown
-static const ImVec4 kTextOffV = THEME_RGB(98, 98, 108, 1);          // greyed out
-static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.08f);       // separators
+static const ImVec4 kTextDimV = THEME_RGB(172, 172, 180, 1);        // secondary text, tabs not shown
+static const ImVec4 kTextOffV = THEME_RGB(96, 96, 104, 1);         // greyed out
+static const ImVec4 kLineV = THEME_RGB(255, 255, 255, 0.10f);       // separators
 static const ImVec4 kWarnV = THEME_RGB(224, 154, 43, 1);            // a conflict (one key bound twice)
 
 static inline ImU32 theme_u32(ImVec4 c, float alpha = -1) {
@@ -32,6 +39,7 @@ static inline ImU32 theme_u32(ImVec4 c, float alpha = -1) {
 #define kText theme_u32(kTextV)
 #define kTextDim theme_u32(kTextDimV)
 #define kTextOff theme_u32(kTextOffV)
+#define kGold theme_u32(kGoldV)
 
 // The icon's pipe (tools/make_icon.py) in a square of `size` at p: a green pipe with its wider lip, a light stripe and
 // a dark shade, and a small gold star above it. bg: the colour behind it (unused, kept for the callers).

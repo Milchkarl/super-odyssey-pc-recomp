@@ -801,6 +801,10 @@ static VkPresentModeKHR present_mode(void) {
             if ((uint32_t)m[i] < 4) snprintf(offered + strlen(offered), sizeof offered - strlen(offered), "%s%s", i ? ", " : "", names[m[i]]);
         LOG("[vk] present mode: %s (the driver offers %s)\n", (uint32_t)got < 4 ? names[got] : "?", offered);
     }
+    // (vi.c's vsync timer: with VSync Off an image is shown the moment it is presented - nothing of the display to
+    // lock to)
+    extern volatile bool g_present_immediate;
+    g_present_immediate = got == VK_PRESENT_MODE_IMMEDIATE_KHR;
     return got;
 }
 
@@ -1182,6 +1186,10 @@ static bool winimg_make(TexBackend *w) {
 
 // (render lock) src as a present draws it into the window (placement v, parameters pv: vk_present_draw), into the window
 // image w - what the presenter copies into the swapchain's
+// the game picture's shape as last presented (width / height of its place in the window; 0 before the first)
+static float g_picture_aspect;
+float renderer_picture_aspect(void) { return g_picture_aspect; }
+
 static bool compose(TexBackend *w, TexBackend *src, const float v[4], const float pv[8]) {
     if (!src || !src->image || !winimg_make(w)) return false;
     vk_end_pass();
@@ -1880,6 +1888,25 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
         vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+        g_picture_aspect = v[3] > 0 ? v[2] / v[3] : 0;
+        {   // the settings menu's live picture (branch menu-odyssey-look): the game's picture - as placed in the window,
+            // without the window's bars - smaller, filling the rectangle the menu leaves open in its shape (16:9, or
+            // 21:9 with Aspect ratio Fill on an ultrawide screen)
+            extern bool menu_live_picture_px(float r[4]);
+            extern void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh);
+            float h[4];
+            if (menu_live_picture_px(h) && h[2] > h[0] + 4 && h[3] > h[1] + 4 && g_vk.sc_extent.width && g_vk.sc_extent.height) {
+                VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
+                                        .clearValue.color.float32 = {0, 0, 0, 1}};
+                int32_t x0 = (int32_t)fmaxf(0, h[0]), y0 = (int32_t)fmaxf(0, h[1]);
+                uint32_t x1 = (uint32_t)fminf(h[2], (float)g_vk.sc_extent.width), y1 = (uint32_t)fminf(h[3], (float)g_vk.sc_extent.height);
+                if (x1 > (uint32_t)x0 && y1 > (uint32_t)y0) {
+                    VkClearRect cr = {.rect = {{x0, y0}, {x1 - x0, y1 - y0}}, .baseArrayLayer = 0, .layerCount = 1};
+                    vkCmdClearAttachments(cb, 1, &ca, 1, &cr);
+                    vk_present_draw_again(cb, h[0], h[1], h[2] - h[0], h[3] - h[1]);
+                }
+            }
+        }
         vk_checkpoint(cb, "menu overlay");
         vk_queue_lock();  // (ImGui's first frame uploads its fonts through the queue)
         menu_render((void *)cb, g_vk.sc_extent.width, g_vk.sc_extent.height);
@@ -2219,7 +2246,7 @@ static bool g_prepare_skipped;  // (the player said Later: not this start)
 #ifndef PREP_ID
 #define PREP_ID "dev"
 #endif
-#define PREP_REV 1
+#define PREP_REV 2  // (2, 0.5.2: saved translations labelled with PREP_ID - prepared once more so they match)
 // (a mark written the old way for the same shader sources: {PREP_ID "." PREP_REV, its "app <version>"} - 0.4.7 was
 // released from these sources, so its players are not prepared once more; void as soon as either changes)
 static const char *const prep_same_as[][2] = {{"50739c27e9a1.1", "0.4.7"}};
@@ -2265,15 +2292,17 @@ static void prep_mark_write(const char *key) {
 }
 static bool prepare_due(bool log, char key[64]) {
     key[0] = 0;
-    if (g_prepare_skipped) return false;
+    // (each way of not preparing says so when asked to log: a Recomp Launcher player's 0.5.1 log, 2026-11-20, had it
+    // due at the start page and never run, with no line saying why - ~1,000 shader builds while playing)
+    if (g_prepare_skipped) { if (log) LOG("[prep] not this start: put off (Later)\n"); return false; }
     const char *e = getenv("ODYSSEY_PREPARE");
-    if (e && !atoi(e)) return false;
+    if (e && !atoi(e)) { if (log) LOG("[prep] not this start: ODYSSEY_PREPARE=%s\n", e); return false; }
     const char *pe = getenv("ODYSSEY_PRECOMPILE");
-    if (pe && !atoi(pe)) return false;
+    if (pe && !atoi(pe)) { if (log) LOG("[prep] not this start: ODYSSEY_PRECOMPILE=%s\n", pe); return false; }
     struct stat st;
     // A recovery boot runs with fresh driver caches. The cache guard clears the completion marker so the
     // next normal boot prepares the shaders again.
-    if (cache_start_interrupted()) return false;
+    if (cache_start_interrupted()) { if (log) LOG("[prep] not this start: the last start ended early (a recovery start; the next one prepares)\n"); return false; }
     bool requested = vk_prepare_requested();
     bool cached = vk_spirv_cache_available();
     // (PREPARED_MARK: a full pass finished, or was closed by the player - written below. A cache without it was

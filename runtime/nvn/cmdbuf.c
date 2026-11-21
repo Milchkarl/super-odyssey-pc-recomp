@@ -31,7 +31,9 @@ typedef struct Arena {
 // Every alive list: its handle (the guest address it was begun at) -> its first record. Sorted by handle within
 // regions of 1 MB of guest memory (a hash table of regions): one sorted array of all of them - ~21,000 lists in New Donk
 // City - moved ~10,000 entries (300 KB) at every list begun, ~70 times a frame; a region holds a few hundred.
-typedef struct { uint64_t handle; CmdRec *rec; Arena *arena; } ListStart;
+// done: its recording has ended (nvnCommandBufferEndRecording). A list being recorded has no end record yet: cmd_list
+// doesn't hand it out (see there).
+typedef struct { uint64_t handle; CmdRec *rec; Arena *arena; bool done; } ListStart;
 static pthread_mutex_t g_list_lock = PTHREAD_MUTEX_INITIALIZER;
 #define LREG_SHIFT 20
 #define LREG_TAB 32768  // (more than the guest window has regions: 12.5 GB / 1 MB)
@@ -95,16 +97,52 @@ static _Atomic uint64_t g_list_gen;  // changes with every list begun or ended (
 static _Atomic uint64_t g_rec_bytes;  // (the status line: host memory of all records)
 uint64_t nvn_record_bytes(void) { return atomic_load(&g_rec_bytes); }
 
+// Freed blocks kept for the next ones of the same size: the game hands a command buffer new memory many times a frame
+// (nvnCommandBufferAddCommandMemory), each a block of 8x its size - allocated and freed every time, large ones were
+// fresh pages from the system each time (~8% of the game thread's busy time in the allocator, 2026-11-21). At most
+// BLOCK_CACHE blocks and BLOCK_CACHE_BYTES kept. ODYSSEY_NO_BLOCK_CACHE=1: as before.
+#define BLOCK_CACHE 64
+#define BLOCK_CACHE_BYTES (256ull << 20)
+static ArenaBlock *g_block_cache[BLOCK_CACHE];
+static int g_nblock_cache;
+static size_t g_block_cache_bytes;
+static pthread_mutex_t g_block_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool block_cache_on(void) { return !ENV_ON("ODYSSEY_NO_BLOCK_CACHE"); }
+
 static ArenaBlock *block_new(size_t cap) {
-    ArenaBlock *b = malloc(sizeof *b + cap);
+    ArenaBlock *b = NULL;
+    if (block_cache_on()) {
+        pthread_mutex_lock(&g_block_lock);
+        for (int i = g_nblock_cache - 1; i >= 0; i--)
+            if (g_block_cache[i]->cap == cap) {
+                b = g_block_cache[i];
+                g_block_cache[i] = g_block_cache[--g_nblock_cache];
+                g_block_cache_bytes -= cap;
+                break;
+            }
+        pthread_mutex_unlock(&g_block_lock);
+    }
+    if (!b) b = malloc(sizeof *b + cap);
     if (!b) FATAL("nvn: out of host memory for commands\n");
     b->next = NULL, b->cap = cap, b->used = 0;
     atomic_fetch_add(&g_rec_bytes, cap);
     return b;
 }
 
+static void block_free(ArenaBlock *b) {
+    atomic_fetch_sub(&g_rec_bytes, b->cap);
+    if (block_cache_on()) {
+        pthread_mutex_lock(&g_block_lock);
+        bool kept = g_nblock_cache < BLOCK_CACHE && g_block_cache_bytes + b->cap <= BLOCK_CACHE_BYTES;
+        if (kept) g_block_cache[g_nblock_cache++] = b, g_block_cache_bytes += b->cap;
+        pthread_mutex_unlock(&g_block_lock);
+        if (kept) return;
+    }
+    free(b);
+}
+
 static void arena_free(Arena *a) {
-    for (ArenaBlock *b = a->blocks, *n; b; b = n) n = b->next, atomic_fetch_sub(&g_rec_bytes, b->cap), free(b);
+    for (ArenaBlock *b = a->blocks, *n; b; b = n) n = b->next, block_free(b);
     free(a);
 }
 // With the render thread (rqueue.c) a list the game records over may still be queued or running there, or in a frame
@@ -186,6 +224,17 @@ CmdRec *cmd_list(uint64_t handle) {
     CmdRec *r = NULL;
     pthread_mutex_lock(&g_list_lock);
     ListStart *e = list_find(handle);
+    // A list the game is recording again right now (it began recording at that address and hasn't ended): the render
+    // thread runs behind the game, so a list queued earlier that calls this address can reach it mid-recording. Its
+    // records are unfinished - no end record - and walking them ran into uninitialised memory: an access violation in
+    // exec_list after an hour in Cascade Kingdom (#113). The call is skipped instead (one frame without those draws).
+    if (e && !e->done) {
+        pthread_mutex_unlock(&g_list_lock);
+        static _Atomic int unfinished;
+        if (atomic_fetch_add(&unfinished, 1) < 10)
+            LOG("[nvn] command handle %llx: its list is being recorded again (skipped)\n", (unsigned long long)handle);
+        return NULL;
+    }
     if (e) r = e->rec;
     pthread_mutex_unlock(&g_list_lock);
     if (!r) {
@@ -302,9 +351,9 @@ NVN(nvnCommandBufferBeginRecording) {
     if (e) {  // (begun there before without new memory: replaced)
         Arena *was = e->arena;
         was->live--;
-        *e = (ListStart){cb->start, r, cb->arena};
+        *e = (ListStart){cb->start, r, cb->arena, false};
         if (was != cb->arena) arena_release(was);
-    } else list_insert((ListStart){cb->start, r, cb->arena});
+    } else list_insert((ListStart){cb->start, r, cb->arena, false});
     atomic_fetch_add(&g_list_gen, 1);
     cb->arena->live++;
     {   // ODYSSEY_LOG_LIST_COUNT=1: how many lists are kept
@@ -319,6 +368,10 @@ NVN(nvnCommandBufferEndRecording) {
     NvnCmdBuf *cb = cb_of(A(0));
     rec(c, cb, CMD_END, 0);
     cb->recording = false;
+    pthread_mutex_lock(&g_list_lock);  // (the list is complete now: cmd_list hands it out)
+    ListStart *e = list_find(cb->start);
+    if (e) e->done = true;
+    pthread_mutex_unlock(&g_list_lock);
     plat_heap_check("EndRecording");
     static int log_end = -1;  // (not getenv at every list: on Windows it searches the environment by string each call -
                               // 8.7% of the game thread in New Donk City's slow frames, which record thousands of lists)

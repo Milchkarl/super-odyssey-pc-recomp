@@ -265,7 +265,7 @@ static volatile int g_on;
 static HANDLE g_thread, g_render, g_main;
 // ODYSSEY_SAMPLE_THREAD=main: the game's main thread (its logic and scene code: kernel.c), with ODYSSEY_SAMPLE_SLOW a
 // whole session long - the samples go round a ring and only those of the slow frames are kept (g_st)
-#define RING (1 << 15)
+#define RING (1 << 18)  // (=all: ~100 threads at 250 a second each - ~10 s of them; ~38 MB while sampling)
 static Stack *g_ring;
 static volatile LONG g_rn;
 static int g_ring_on;
@@ -323,7 +323,7 @@ static DWORD WINAPI ticker(void *a) {
                 if (g_ring_on) {
                     LONG i = InterlockedIncrement(&g_rn) - 1;
                     Stack *s = &g_ring[i & (RING - 1)];
-                    walk(&ctx, s, 0);
+                    walk(&ctx, s, g_nall ? g_all_id[k] : 0);
                     s->qpc = now.QuadPart;
                 } else {
                     LONG i = InterlockedIncrement(&g_n) - 1;
@@ -621,6 +621,8 @@ void sampler_frame(uint64_t frame) {
             }
             CloseHandle(snap);
             g_thread = g_all[0];
+            // (with ODYSSEY_SAMPLE_SLOW, as =main: a whole session long, only the slow frames' samples kept)
+            if (g_slow_ms > 0 && (g_ring = calloc(RING, sizeof *g_ring))) g_ring_on = 1;
         }
         else DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_thread, 0, FALSE, DUPLICATE_SAME_ACCESS);
         g_on = 1;

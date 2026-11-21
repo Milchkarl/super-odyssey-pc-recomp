@@ -7,7 +7,9 @@
 // The hooks are always in; the menu switches between it and the stock 60 FPS loop while the game runs.
 // Keep the full framework update and draw path, including graphics housekeeping and the
 // HUD, and run GameSystem::movement at most once per two VI ticks.
+#include <math.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +34,7 @@ static uint64_t texture_allocator, texture_calc, prepare_graphics;
 static uint64_t last_logic_slot, logic_ticks, controller_ticks, draws, trace_ns;
 static uint64_t simulation_tick, camera_matrix;
 static float draw_lead;  // (90) this draw shows Mario this many ticks past the last tick: -1/6, 1/6 or 1/2
+static float player_step[3];  // (the last tick's movement, for ODYSSEY_LOG_CAMERA: where Mario is drawn between ticks)
 static uint64_t stage_draw_ns;
 static GameplayClock recovery_clock;
 static bool recover_60;
@@ -83,8 +86,22 @@ bool odyssey_motion_enabled(void) {
     return motion != 0;
 }
 
+// The camera between ticks only where Mario is drawn between ticks too (his pose sampled: odyssey_pose.c - 1.0.0, and
+// 1.4.1 since 2026-11-21). Moving the camera alone (1.4.1 before its CalculateWorldMtx was found) put Mario at a
+// different place against the camera every other frame - a doubled Mario (owner, 2026-11-20, 120 FPS: "he looks like
+// he's doubling"; an orbit-only camera still moved him ~0.15 deg back and forth on screen). Without sampling
+// (ODYSSEY_POSE_120=0) the camera stays on the tick, as at 60. ODYSSEY_CAMERA_INBETWEEN=0/1 overrides (tests).
+static bool camera_inbetween(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("ODYSSEY_CAMERA_INBETWEEN");
+        on = e && *e ? atoi(e) != 0 : odyssey_pose_enabled();
+    }
+    return on;
+}
+
 // 90: the camera between the last two ticks' (draw_lead + 1/2 ticks back from the last; the draw-only frames: none)
-static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *pose) {
+static bool camera_draw_90(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t source, float *pose) {
     static __thread uint64_t scene, camera, tick;  // the last tick's camera (last) and the one before (before)
     static __thread float last[9], before[9];
     static __thread bool paired;  // before: the tick before's, the same scene and camera
@@ -95,9 +112,9 @@ static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *
         scene = draw_scene;
         camera = source;
         tick = simulation_tick;
-    } else if (draw_scene != scene || source != camera || simulation_tick != tick) return;
+    } else if (draw_scene != scene || source != camera || simulation_tick != tick) return false;
     float back = 0.5f - draw_lead;
-    if (!paired || back <= 0.001f) return;
+    if (!paired || back <= 0.001f) return false;
     if (back > 1.0f) back = 1.0f;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
     for (unsigned i = 0; i < 3; i++) {
@@ -112,28 +129,26 @@ static void camera_draw_90(Cpu *c, uint64_t draw_scene, uint64_t source, float *
         next_length += next_direction * next_direction;
     }
     // (the limits at 120, for a whole tick instead of half of one)
-    if (!(travel <= 160.0f * 160.0f && turn <= 0.16f * 0.16f && (travel > 0.0f || turn > 0.0f))) return;
-    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return;
+    if (!(travel <= 160.0f * 160.0f && turn <= 0.16f * 0.16f && (travel > 0.0f || turn > 0.0f))) return false;
+    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += back * (before[i] - pose[i]);
     Cpu draw = *c;
-    draw.x[0] = c->x[23];
-    draw.x[1] = c->x[23] + 8;
+    draw.x[0] = cam;
+    draw.x[1] = cam + 8;
     guest_call(&draw, camera_matrix);
+    return true;
 }
 
-void odyssey_camera_draw(Cpu *c) {
+static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t source, float *pose) {
     // StageScene::drawMain's private copy of the current LookAtCamera.
     // Rebuild the view with sead's evaluator before the world and DLAA consume it.
     static __thread uint64_t scene, camera, tick;
     static __thread float previous[9];
     static __thread bool half_drawn;
-    if (!enabled || !odyssey_motion_enabled() || !camera_matrix) return;
-    uint64_t draw_scene = c->x[19], source = c->x[25];
-    float *pose = (float *)(uintptr_t)(c->x[23] + 0x38);
-    if (odyssey_native_hz() != 120) { camera_draw_90(c, draw_scene, source, pose); return; }  // (any rate but 120)
+    if (odyssey_native_hz() != 120) return camera_draw_90(c, cam, draw_scene, source, pose);  // (any rate but 120)
     if (extra_draw) {
         half_drawn = draw_scene == scene && source == camera && tick == simulation_tick;
-        return;
+        return false;
     }
     bool continuous = draw_scene == scene && source == camera && half_drawn && simulation_tick == tick + 1;
     half_drawn = false;
@@ -143,7 +158,7 @@ void odyssey_camera_draw(Cpu *c) {
     float old[9];
     memcpy(old, previous, sizeof old);
     memcpy(previous, pose, sizeof previous);
-    if (!continuous) return;
+    if (!continuous) return false;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
     for (unsigned i = 0; i < 3; i++) {
         float eye_delta = pose[i] - old[i], target_delta = pose[i + 3] - old[i + 3];
@@ -157,13 +172,47 @@ void odyssey_camera_draw(Cpu *c) {
         next_length += next_direction * next_direction;
     }
     // Skip cuts, abrupt changes in roll, and half steps that would reverse the view.
-    if (!(travel <= 80.0f * 80.0f && turn <= 0.08f * 0.08f && (travel > 0.0f || turn > 0.0f))) return;
-    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return;
+    if (!(travel <= 80.0f * 80.0f && turn <= 0.08f * 0.08f && (travel > 0.0f || turn > 0.0f))) return false;
+    if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += 0.5f * (old[i] - pose[i]);
     Cpu draw = *c;
-    draw.x[0] = c->x[23];
-    draw.x[1] = c->x[23] + 8;
+    draw.x[0] = cam;
+    draw.x[1] = cam + 8;
     guest_call(&draw, camera_matrix);
+    return true;
+}
+
+// The hook in StageScene::drawMain, where its private copy of the LookAtCamera (sead::Camera: view matrix at +8, eye /
+// target / up at +0x38) is made. 1.0.0: the copy at x23, the scene x19, the camera it copies x25. 1.4.1: the copy is on
+// the stack at x29 - 0xf0, the scene x19, the camera x0 - and the hook runs one store early: the eye's x and y are
+// still in x8 (stur x8, [x29, #-0xb8] comes next), so they are placed in the copy first and handed back through x8.
+// (Until 2026-11-20 1.4.1 read 1.0.0's registers - garbage, rejected. With the right ones its camera moved between
+// ticks while Mario, then not sampled on 1.4.1, didn't: a doubled Mario. camera_inbetween: the camera moves only where
+// the pose is sampled - 1.4.1 too since 2026-11-21.)
+// ODYSSEY_LOG_CAMERA=1 (frame pacing tests): each stage draw's camera as drawn - time, extra draw, Mario's lead, tick,
+// eye and target, then the same as the game made them (raw: without the in-between camera) ("[camera] ...")
+void odyssey_camera_draw(Cpu *c) {
+    static int v141 = -1, lg = -1;
+    if (v141 < 0) v141 = loader_main_is_v141();
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_CAMERA") != NULL;
+    if (!enabled || !odyssey_motion_enabled() || !camera_matrix) return;
+    uint64_t cam = v141 ? c->x[29] - 0xf0 : c->x[23];
+    uint64_t draw_scene = c->x[19], source = v141 ? c->x[0] : c->x[25];
+    if (cam < GUEST_LO || cam >= GUEST_HI - 0x60) return;
+    float *pose = (float *)(uintptr_t)(cam + 0x38);
+    if (v141) memcpy(pose, &c->x[8], 8);
+    float raw[6];
+    memcpy(raw, pose, sizeof raw);
+    if (camera_inbetween() && camera_draw_inner(c, cam, draw_scene, source, pose) && v141) memcpy(&c->x[8], pose, 8);
+    if (lg) {  // (and where Mario is drawn: his last tick's position, moved by the lead where his pose is sampled)
+        extern bool odyssey_player_position(float p[3]);
+        float m[3] = {0, 0, 0};
+        if (odyssey_player_position(m) && odyssey_pose_enabled())
+            for (int i = 0; i < 3; i++) m[i] += draw_lead * player_step[i];
+        LOG("[camera] %.3f %d %.3f %llu %.3f %.3f %.3f %.3f %.3f %.3f raw %.3f %.3f %.3f %.3f %.3f %.3f mario %.3f %.3f %.3f\n",
+            plat_now_ns() / 1e6, extra_draw, draw_lead, (unsigned long long)simulation_tick, pose[0], pose[1], pose[2], pose[3],
+            pose[4], pose[5], raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], m[0], m[1], m[2]);
+    }
 }
 
 static void quality_reduce_off(Cpu *c) { (void)c; }  // (dynamic resolution off: the Reduce nerve does nothing)
@@ -510,11 +559,38 @@ static void player_movement(Cpu *c) {
     static uint64_t updates;
     uint64_t actor = c->x[0];
     odyssey_pose_player(actor);
+    {   // ODYSSEY_TEST_PLACE=<frame>:<x>:<y>:<z>[;...] (tests, any build): from that frame Mario's translation is set
+        // there for three ticks, in order - a test's way to a spot far from a stage's start
+        static int n = -1, cur, left;
+        static struct { unsigned long long frame; float p[3]; } pl[16];
+        if (n < 0) {
+            n = 0;
+            for (const char *q = getenv("ODYSSEY_TEST_PLACE"); q && *q && n < 16; ) {
+                if (sscanf(q, "%llu:%f:%f:%f", &pl[n].frame, &pl[n].p[0], &pl[n].p[1], &pl[n].p[2]) == 4) n++;
+                q = strchr(q, ';');
+                if (q) q++;
+            }
+        }
+        extern uint64_t renderer_present_count(void);
+        if (cur < n && !left && renderer_present_count() >= pl[cur].frame) left = 3;
+        if (left && actor >= GUEST_LO && actor < GUEST_HI - 0x58) {
+            uint64_t keeper = *(const uint64_t *)(uintptr_t)(actor + 0x50);
+            if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x14) memcpy((void *)(uintptr_t)(keeper + 8), pl[cur].p, 12);
+            if (!--left) { LOG("[test-place] frame %llu: Mario at %.0f %.0f %.0f\n", pl[cur].frame, pl[cur].p[0], pl[cur].p[1], pl[cur].p[2]); cur++; }
+        }
+    }
     original_movement(c);
     if (actor >= GUEST_LO && actor < GUEST_HI - 0x58) {
         uint64_t keeper = *(const uint64_t *)(uintptr_t)(actor + 0x50);
         if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x14) {
-            for (int i = 0; i < 3; i++) atomic_store(&player_pos[i], *(const uint32_t *)(uintptr_t)(keeper + 8 + 4 * i));
+            for (int i = 0; i < 3; i++) {
+                float last, now;
+                uint32_t bits = atomic_load(&player_pos[i]);
+                memcpy(&last, &bits, 4);
+                memcpy(&now, (const void *)(uintptr_t)(keeper + 8 + 4 * i), 4);
+                player_step[i] = now - last;
+                atomic_store(&player_pos[i], *(const uint32_t *)(uintptr_t)(keeper + 8 + 4 * i));
+            }
             atomic_store(&player_pos_ns, plat_now_ns());
         }
     }
@@ -560,6 +636,165 @@ static void player_movement(Cpu *c) {
         (unsigned long long)updates, pos[0], pos[1], pos[2]);
 }
 
+// ---- sead::SZSDecompressor::streamDecomp, native (the game's Yaz0 / SZS decoder)
+// The kingdoms' archives are SZS files decoded a chunk at a time by this function - in the recompiled code a byte-by-
+// byte state machine several times slower than native. As a kingdom streams in (its first seconds, turning the camera
+// to new things) a decoder thread was busy ~96% of the time while the game's main thread waited for it: frames of
+// 30-50 ms (the owner's profile, 2026-11-20). The same function in C, from sead's (open-ead/sead
+// modules/src/resource/seadSZSDecompressor.cpp: readHeader_, streamDecomp, DecompContext::doCopy), on the same context
+// in game memory. ODYSSEY_SZS_NATIVE=0: the recompiled one; ODYSSEY_SZS_VERIFY=1: both, on copies, compared (tests).
+typedef struct {
+    uint64_t destp;
+    int32_t destCount, forceDestCount;
+    uint8_t flagMask, flags, packHigh, pad_;
+    int32_t step;  // (0 normal, 1 short, 2 long)
+    uint16_t lzOffset;
+    uint8_t headerSize, pad2_[5];
+} SzsCtx;
+_Static_assert(sizeof(SzsCtx) == 0x20 && offsetof(SzsCtx, step) == 0x14 && offsetof(SzsCtx, lzOffset) == 0x18 &&
+               offsetof(SzsCtx, headerSize) == 0x1a, "sead::SZSDecompressor::DecompContext");
+static bool szs_copy(SzsCtx *cx, uint32_t n) {  // (DecompContext::doCopy)
+    if ((uint32_t)cx->destCount < n) {
+        if (cx->forceDestCount == 0) return false;
+        n = (uint32_t)cx->destCount & 0xFFFF;
+    }
+    cx->destCount -= (int32_t)n;
+    uint8_t *d = (uint8_t *)(uintptr_t)cx->destp;
+    do { *d = *(d - cx->lzOffset); d++; } while (--n != 0);
+    cx->destp = (uint64_t)(uintptr_t)d;
+    cx->step = 0;
+    return true;
+}
+static int32_t szs_header(SzsCtx *cx, const uint8_t *src, uint32_t n) {  // (readHeader_)
+    int32_t len = 0;
+    while (cx->headerSize != 0) {
+        cx->headerSize -= 1;
+        if (cx->headerSize == 0xF) { if (*src != 0x59) return -1; }
+        else if (cx->headerSize == 0xE) { if (*src != 0x61) return -1; }
+        else if (cx->headerSize == 0xD) { if (*src != 0x7A) return -1; }
+        else if (cx->headerSize == 0xC) { if (*src != 0x30) return -1; }
+        else if (7 < cx->headerSize) cx->destCount |= (int32_t)((uint32_t)*src << (cx->headerSize - 8) * 8);
+        src++;
+        len += 1;
+        if (--n == 0 && cx->headerSize != 0) return len;
+    }
+    if (cx->forceDestCount < 1) return len;
+    if (cx->destCount <= cx->forceDestCount) return len;
+    cx->destCount = cx->forceDestCount;
+    return len;
+}
+static int32_t szs_stream(SzsCtx *cx, const uint8_t *src, uint32_t n) {  // (streamDecomp)
+    if (cx->headerSize != 0) {
+        int32_t len = szs_header(cx, src, n);
+        if (len < 0) return len;
+        n -= (uint32_t)len;
+        src += len;
+        if (n == 0) return cx->headerSize == 0 ? cx->destCount : -1;
+    }
+    while (cx->destCount > 0) {
+        if (cx->step == 2) {
+            if (!szs_copy(cx, (uint32_t)*src + 0x12)) return -2;
+        } else if (cx->step == 1) {
+            cx->lzOffset = (uint16_t)((((cx->packHigh << 8) & 0xf00) | *src) + 1);
+            uint32_t k = cx->packHigh >> 4;
+            if (k != 0) {
+                if (!szs_copy(cx, k + 2)) return -2;
+            } else cx->step = 2;
+        } else {
+            if (cx->flagMask == 0) {
+                cx->flags = *src++;
+                cx->flagMask = 0x80;
+                if (--n == 0) break;
+            }
+            if ((cx->flags & cx->flagMask) == 0) {
+                cx->packHigh = *src;
+                cx->step = 1;
+            } else {
+                uint8_t *d = (uint8_t *)(uintptr_t)cx->destp;
+                *d = *src;
+                cx->destp++;
+                cx->destCount -= 1;
+            }
+            cx->flagMask >>= 1;
+        }
+        if (--n == 0) break;
+        src++;
+    }
+    if (cx->destCount == 0 && cx->forceDestCount == 0 && 0x20 < n) return -1;
+    return cx->destCount;
+}
+// sead::ParallelSZSDecompressor::DecompThread::calc_(long) natively - the decoder threads' work (virtual: hooked; the
+// streamDecomp it calls directly is not), 1.0.0 0xb628b4 / 1.4.1 0x97e420, the same 30 instructions in both
+// (tools/dis141.py): stop once the context has failed (+0x190 < 0); decode the half of the double buffer this call is
+// for (+0x180 the buffer, +0x18c a half's size, +0x188 the bytes read) into the context at +0x100; a finished (0) or
+// failed (< 0, kept at +0x190) decode signals the event at +0x120; then always the one at +0x150 (the reader's). The
+// decode runs off the core gate (as szs_calc), the signals in the game's own code. ODYSSEY_SZS_NATIVE=0: the
+// recompiled calc_; ODYSSEY_SZS_VERIFY=1: the recompiled one runs, with the native decode checked against it.
+static GuestFn original_szs_calc;
+static GuestFn szs_stream_orig;  // (the recompiled streamDecomp: ODYSSEY_SZS_VERIFY)
+static uint64_t szs_signal;  // (the event's signal: 1.0.0 0xb644b4, 1.4.1 0x979a50)
+static void szs_calc_native(Cpu *c) {
+    static int verify = -1;
+    if (verify < 0) verify = getenv("ODYSSEY_SZS_VERIFY") && atoi(getenv("ODYSSEY_SZS_VERIFY"));
+    static bool logged;
+    if (!logged) { logged = true; LOG("[szs] SZS decoding runs natively%s\n", verify ? " (checked against the game's own)" : ""); }
+    uint64_t self = c->x[0];
+    if (*(const int32_t *)(uintptr_t)(self + 0x190) < 0) return;
+    uint64_t buf = *(const uint64_t *)(uintptr_t)(self + 0x180);
+    uint32_t half = *(const uint32_t *)(uintptr_t)(self + 0x18c), part = (uint32_t)c->x[1] - 1;
+    uint32_t total = *(const uint32_t *)(uintptr_t)(self + 0x188), left = total - half * part;
+    const uint8_t *src = (const uint8_t *)(uintptr_t)((part & 1) == 0 ? buf : buf + half);
+    uint32_t n = half < left ? half : left;
+    SzsCtx *cx = (SzsCtx *)(uintptr_t)(self + 0x100);
+    if (verify) {
+        // (tests) the game's own streamDecomp and the native one, each on a copy of the context and of the output
+        // (with the 4 KB before it, the furthest a copy reaches back), compared - before the real decode, so nothing
+        // has been signalled yet; then the game's own calc_ does the real one
+        static _Atomic uint64_t calls, bad;
+        uint64_t room = (uint64_t)n * 0x5b + 0x400;  // (the most a chunk can expand: 3 bytes for 0x111)
+        uint8_t *ba = malloc(0x1000 + room), *bb = malloc(0x1000 + room);
+        if (ba && bb && szs_stream_orig) {
+            SzsCtx a = *cx, b = *cx;
+            memcpy(ba, (const uint8_t *)(uintptr_t)cx->destp - 0x1000, 0x1000);
+            memcpy(bb, ba, 0x1000);
+            a.destp = (uint64_t)(uintptr_t)(ba + 0x1000), b.destp = (uint64_t)(uintptr_t)(bb + 0x1000);
+            int32_t r = szs_stream(&a, src, n);
+            Cpu t = *c;
+            t.x[0] = (uint64_t)(uintptr_t)&b, t.x[1] = (uint64_t)(uintptr_t)src, t.x[2] = n;
+            t.sp = (c->sp - 0x800) & ~0xFull;
+            szs_stream_orig(&t);
+            int32_t r0 = (int32_t)t.x[0];
+            uint64_t wa = a.destp - (uint64_t)(uintptr_t)(ba + 0x1000), wb = b.destp - (uint64_t)(uintptr_t)(bb + 0x1000);
+            bool same = r == r0 && wa == wb && a.destCount == b.destCount && a.flagMask == b.flagMask && a.flags == b.flags &&
+                        a.packHigh == b.packHigh && a.step == b.step && a.lzOffset == b.lzOffset && a.headerSize == b.headerSize &&
+                        wa <= room && !memcmp(ba + 0x1000, bb + 0x1000, wa);
+            uint64_t k = atomic_fetch_add(&calls, 1) + 1;
+            if (!same) {
+                uint64_t e = atomic_fetch_add(&bad, 1) + 1;
+                if (e <= 20) LOG("[szs] native decode DIFFERS: result %d / %d, wrote %llu / %llu, left %d / %d (n %u)\n", r, r0,
+                                 (unsigned long long)wa, (unsigned long long)wb, a.destCount, b.destCount, n);
+            }
+            if (k % 100 == 0) LOG("[szs] verify: %llu chunks, %llu differ\n", (unsigned long long)k, (unsigned long long)atomic_load(&bad));
+        }
+        free(ba);
+        free(bb);
+        kernel_ungated_begin();
+        original_szs_calc(c);
+        kernel_ungated_end();
+        return;
+    }
+    kernel_ungated_begin();  // (the core's other threads run meanwhile)
+    int32_t r = szs_stream(cx, src, n);
+    kernel_ungated_end();
+    if (r <= 0) {
+        if (r < 0) *(int32_t *)(uintptr_t)(self + 0x190) = r;
+        c->x[0] = self + 0x120;
+        guest_call(c, szs_signal);
+    }
+    c->x[0] = self + 0x150;
+    guest_call(c, szs_signal);
+}
+
 static GuestFn original_szs_device;
 static void szs_device(Cpu *c) {  // (sead::SZSDecompressor::tryDecompFromDevice: read + decode, off the core gate)
     static bool logged;
@@ -587,8 +822,7 @@ static void szs_decoder(Cpu *c) {  // (1.4.1 0x97dae0: the decoder's virtual ent
     kernel_ungated_end();
 }
 
-static GuestFn original_szs_calc;
-static void szs_calc(Cpu *c) {
+static void szs_calc(Cpu *c) {  // (ODYSSEY_SZS_NATIVE=0: the recompiled calc_, off the core gate)
     static bool logged;
     if (!logged) { logged = true; LOG("[szs] decompression runs off the core gate\n"); }
     kernel_ungated_begin();  // (the core's other threads run meanwhile)
@@ -647,10 +881,20 @@ void odyssey_native_120_boot(void) {
         // changes hands only at a function call, and the decode loop has none - a game thread waited ~20 ms for the
         // core whenever a model or effect loaded (hitting things, busy scenes): a late frame. The decode runs without
         // the core now (the signal after it takes the core back). ODYSSEY_SZS_UNGATED=0: as before.
-        const char *e = getenv("ODYSSEY_SZS_UNGATED");
+        const char *e = getenv("ODYSSEY_SZS_UNGATED"), *nat = getenv("ODYSSEY_SZS_NATIVE");
         uint64_t decomp = main->base + 0x97e420;
+        szs_signal = main->base + 0x979a50;
+        szs_stream_orig = dispatch_lookup(main->base + 0x97cfd0);
         if ((!e || atoi(e) != 0) && (original_szs_calc = dispatch_lookup(decomp)))
-            hle_override(decomp, szs_calc, "SZS decompression off the core gate");
+            hle_override(decomp, nat && !atoi(nat) ? szs_calc : szs_calc_native,
+                         nat && !atoi(nat) ? "SZS decompression off the core gate" : "SZS decompression (native)");
+    } else {  // (1.0.0: DecompThread::calc_ by name, the native one only)
+        const char *nat = getenv("ODYSSEY_SZS_NATIVE");
+        uint64_t decomp = main->base + 0xb628b4;
+        szs_signal = main->base + 0xb644b4;
+        szs_stream_orig = dispatch_lookup(main->base + 0xb63808);
+        if ((!nat || atoi(nat) != 0) && (original_szs_calc = dispatch_lookup(decomp)))
+            hle_override(decomp, szs_calc_native, "SZS decompression (native)");
     }
     {   // sead::SZSDecompressor::tryDecompFromDevice (its vtable; 1.0.0 by name): a loading thread (priority 45) reads a
         // compressed file and decodes it in a loop without calls, holding its core - the game's main thread (44, on the

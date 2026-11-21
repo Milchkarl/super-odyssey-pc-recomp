@@ -45,6 +45,7 @@ Settings g_settings = {
     .discord_presence = false,  // (off until the player turns it on - owner 2026-11-17)
     .show_fps = false,
     .overlay_size = 1, .overlay_opacity = 80,
+    .overlay_corner = OVERLAY_BOTTOM_LEFT,  // (owner 2026-11-20: the performance overlay bottom left by default)
     .overlay_gpu = true, .overlay_cpu = true, .overlay_ram = true, .overlay_graph = true, .overlay_hardware = true,
     .overlay_render = true, .overlay_position = true,
 #ifdef __APPLE__
@@ -62,8 +63,8 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
-    .hud_sharpen = true,
-    .antialias = AA_FXAA,
+    .hud_quality = 0,  // (Switch: as the game draws it. The 0.4.4 sharpening, hud_sharpen, made the art look aliased - owner 2026-11-21)
+    .antialias = AA_OFF,  // (owner 2026-11-20: the defaults for everyone - Off)
     .rumble = true,
     .rumble_strength = 100,
     .motion = true,
@@ -72,17 +73,22 @@ Settings g_settings = {
     .mouse_camera = true,
     .mouse_menus = true,
     // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
-    // (always the full resolution) and VSync off.
+    // (always the full resolution) and VSync off (owner 2026-11-20, after a day of Fast: Off again for new players).
     .game_dynres = false,
     .vsync = VSYNC_OFF,
+    .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
+    .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
+    .low_gpu_memory = false,  // (owner 2026-11-20: opt-in, not chosen by the GPU memory's size)
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
     .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
+    // (Faster kingdom arrival off by default since 2026-11-20 - owner; its four parts stay on, used once it is turned on)
+    .fast_arrival = false, .arrival_mip_views = true, .arrival_barriers = true, .arrival_precreate = true, .arrival_submit = true,
     .early_fences = 1,   // (on: nvn/objects.c nvnSyncWait; owner 2026-11-16: the speed-ups on by default, every platform)
-    .record_thread = -1,  // (Auto: on with an NVIDIA GPU, the only kind it has been tested on - nvn/vulkan/exec.c dq_enabled)
+    .record_thread = 0,  // (Off for everyone - owner 2026-11-20; -1 Auto: on with an NVIDIA GPU, nvn/vulkan/exec.c dq_enabled)
     // (the Switch's controllers apply their own; 0 let a worn stick drift the map pointer, #22, #37, #106. 5% as Switch
     // emulators; it was 10%, then the owner asked for 5 with finer control, 2026-11-19)
     .stick_deadzone_l = 5, .stick_deadzone_r = 5,
@@ -104,7 +110,7 @@ volatile bool g_app_unfocused;
 static void settings_steam_deck(void) {
     // (Multithreaded rendering off here: one scripted run in four with it on hung the Deck's GPU - "illegal register
     // access in command stream", a GPU reset - while never with it off; owner 2026-11-16: off on the Deck until found)
-    g_settings.record_thread = -1;  // (Auto: off with its AMD GPU)
+    g_settings.record_thread = 0;  // (Off, as everywhere)
     g_settings.res_mode = RES_DISPLAY;
     g_settings.aspect = ASPECT_FILL;
     g_settings.hud_edges = 1;
@@ -338,6 +344,7 @@ void settings_load(void) {
         else if (!strcmp(key, "frame_generation")) g_settings.frame_gen = atoi(val) ? FG_FSR : FG_OFF;  // (0.2.12 dev)
         else if (!strcmp(key, "frame_gen")) g_settings.frame_gen = !strcmp(val, "fsr") ? FG_FSR : !strcmp(val, "dlss") ? FG_DLSS : FG_OFF;
         else if (!strcmp(key, "hud_position")) g_settings.hud_edges = strcmp(val, "centered") != 0;
+        else if (!strcmp(key, "narrow_view")) g_settings.narrow_full = !strcmp(val, "full");
         else if (!strcmp(key, "low_latency")) { int v = atoi(val); g_settings.low_latency = v >= 0 && v <= 2 ? v : 0; }
         else if (!strcmp(key, "fsr3_mode")) g_settings.fsr3_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
         else if (!strcmp(key, "fsr4_mode")) g_settings.fsr4_mode = named_option(val, fsr3_modes, DLSS_MODE_COUNT);
@@ -372,7 +379,8 @@ void settings_load(void) {
             g_settings.dlss_rcas_sharpness = n < 0 ? 0 : n > 100 ? 100 : n;
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
-        else if (!strcmp(key, "hud_sharpen")) g_settings.hud_sharpen = atoi(val) != 0;
+        else if (!strcmp(key, "hud_quality")) g_settings.hud_quality = !strcmp(val, "high") || atoi(val) > 0;
+        else if (!strcmp(key, "hud_sharpen")) {}  // (0.4.4 - 0.5.4: the sharpening HUD quality replaced; not carried over)
         else if (!strcmp(key, "aspect")) {
             g_settings.aspect = ASPECT_16_9;
             for (int i = 0; i < ASPECT_COUNT; i++) if (!strcmp(val, ASPECT_NAMES[i])) g_settings.aspect = i;
@@ -393,9 +401,15 @@ void settings_load(void) {
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
         else if (!strcmp(key, "record_thread")) g_settings.record_thread = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
+        else if (!strcmp(key, "low_gpu_memory")) g_settings.low_gpu_memory = atoi(val) != 0;
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
+        else if (!strcmp(key, "fast_arrival")) g_settings.fast_arrival = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_mip_views")) g_settings.arrival_mip_views = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_barriers")) g_settings.arrival_barriers = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_precreate")) g_settings.arrival_precreate = atoi(val) != 0;
+        else if (!strcmp(key, "arrival_submit")) g_settings.arrival_submit = atoi(val) != 0;
         else if (!strcmp(key, "frame_rate")) {  // (frames per second; another number: the nearest offered)
             int want = atoi(val), best = FPS_60;
             if (!strcmp(val, "display")) want = -1, best = FPS_AUTO;
@@ -502,6 +516,7 @@ void settings_save(void) {
     fprintf(f, "frame_gen = %s\n", g_settings.frame_gen == FG_FSR ? "fsr" : g_settings.frame_gen == FG_DLSS ? "dlss" : "off");
     fprintf(f, "low_latency = %d\n", g_settings.low_latency);
     fprintf(f, "hud_position = %s\n", g_settings.hud_edges ? "edges" : "centered");
+    fprintf(f, "narrow_view = %s\n", g_settings.narrow_full ? "full" : "cropped");
     fprintf(f, "temporal_backend = %s\n", temporal_backends[g_settings.temporal_backend]);
     fprintf(f, "fsr3_mode = %s\n", fsr3_modes[g_settings.fsr3_mode]);
     fprintf(f, "fsr3_sharpness = %d\n", g_settings.fsr3_sharpness);
@@ -516,7 +531,7 @@ void settings_save(void) {
     fprintf(f, "dlss_rcas_sharpness = %d\n", g_settings.dlss_rcas_sharpness);
     fprintf(f, "fsr1_sharpness = %d\n", g_settings.fsr1_sharpness);
     fprintf(f, "deband = %d\n", g_settings.deband);
-    fprintf(f, "hud_sharpen = %d\n", g_settings.hud_sharpen);
+    fprintf(f, "hud_quality = %s\n", g_settings.hud_quality ? "high" : "switch");
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : 0]);
     fprintf(f, "console_mode = %s\n", g_settings.console_mode == CONSOLE_HANDHELD ? "handheld" : "docked");
     fprintf(f, "game_dynres = %d\n", g_settings.game_dynres);
@@ -533,7 +548,13 @@ void settings_save(void) {
     fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");
     fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
+    fprintf(f, "low_gpu_memory = %d\n", g_settings.low_gpu_memory);
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
+    fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
+    fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);
+    fprintf(f, "arrival_barriers = %d\n", g_settings.arrival_barriers);
+    fprintf(f, "arrival_precreate = %d\n", g_settings.arrival_precreate);
+    fprintf(f, "arrival_submit = %d\n", g_settings.arrival_submit);
     fprintf(f, "skip_intro = %d\n", g_settings.skip_intro);
     fprintf(f, "warmup = %s\n", warmups[g_settings.warmup >= 0 && g_settings.warmup < WARMUP_COUNT ? g_settings.warmup : 0]);
     fprintf(f, "mute_unfocused = %d\n", g_settings.mute_unfocused);

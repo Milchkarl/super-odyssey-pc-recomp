@@ -50,6 +50,8 @@ typedef struct {
     uint32_t vs_out_mask;   // fragment: varyings the vertex shader provides
     uint8_t glsl;           // emit Vulkan GLSL (see the contract above) instead of MSL
     uint8_t split_compute_x;  // one 1536-thread guest group mapped to three 512-thread Vulkan groups
+    uint8_t hud_filter;     // (fragment, GLSL) a layout's draw with HUD quality High: its enlarged 2D textures read
+                            // through hudSample (translate.c). In the padding: keys without it hash as before.
 } ShaderKey;
 
 typedef struct {

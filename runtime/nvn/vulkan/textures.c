@@ -292,6 +292,7 @@ void vk_collect_dead(void) {
     ndead = k;
 }
 
+static __thread bool t_prefetch;  // (vk_tex_prefetch, below) uploading ahead of a first use
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->sx = b->scalable ? tex_factor(b, t, false) : 1;
@@ -375,9 +376,10 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     b->shared = !b->scalable && vk_image_share_small(&ci);  // (small: the compute queue's dispatches may read / write it)
     VkResult r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
     if (getenv("ODYSSEY_LOG_IMAGES"))
-        LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s\n",
+        LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s (frame %llu%s%s)\n",
             (void *)b->image, (void *)t, t->format, t->target, tw, th, depth, t->width, t->height, t->depth, layers, levels, samples,
-            (unsigned)flags, (unsigned)usage, (int)vf, (int)r, t->flags, b->scalable ? " scalable" : "");
+            (unsigned)flags, (unsigned)usage, (int)vf, (int)r, t->flags, b->scalable ? " scalable" : "",
+            (unsigned long long)renderer_present_count(), t_prefetch ? ", ahead" : "", t->no_prefetch ? ", passed over" : "");
     if (r != VK_SUCCESS) {
         LOG("[vk] image creation failed (%d): nvn fmt %#x %ux%ux%u target %u\n", r, t->format, t->width, t->height, t->depth, t->target);
         ci.format = vf = VK_FORMAT_R8G8B8A8_UNORM;
@@ -386,6 +388,18 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         ci.flags &= ~VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         VkResult r2 = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
         // (#99, an 8 GB PC with integrated graphics, whose graphics memory is the PC's own: say what ran out)
+        if (r2 == VK_ERROR_OUT_OF_DEVICE_MEMORY || r2 == VK_ERROR_OUT_OF_HOST_MEMORY) {
+            // (which heap was full, and how much of it is outside VMA - e.g. the guest heap's import: #99)
+            VkPhysicalDeviceMemoryProperties pm;
+            vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+            VmaBudget bud[VK_MAX_MEMORY_HEAPS];
+            vmaGetHeapBudgets(g_vk.vma, bud);
+            for (uint32_t h = 0; h < pm.memoryHeapCount; h++)
+                LOG("[vk] heap %u %s: size %llu MB, budget %llu MB, used %llu MB (by our allocator %llu MB)\n", h,
+                    pm.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "gpu" : "sys",
+                    (unsigned long long)(pm.memoryHeaps[h].size >> 20), (unsigned long long)(bud[h].budget >> 20),
+                    (unsigned long long)(bud[h].usage >> 20), (unsigned long long)(bud[h].statistics.blockBytes >> 20));
+        }
         if (r2 == VK_ERROR_OUT_OF_DEVICE_MEMORY || r2 == VK_ERROR_OUT_OF_HOST_MEMORY)
             FATAL("out of memory for a texture (%ux%u): the PC's memory (with integrated graphics: RAM and page file) is "
                   "full. Close other programs, set Performance > Memory use to Low, lower the internal resolution, or "
@@ -473,8 +487,43 @@ static TexBackend *tex_backend(NvnTexture *t) {
     if (b) {
         // output resolution changed, or smooth gradients switched on / off (create_image "Banding"): reallocate
         if (b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) || (b->debandable && !b->guest_format == vk_deband()))) {
+            // The old picture goes into the new image, scaled. Most of these targets are drawn anew every frame, but
+            // not all: the HUD's "Menu / Map" guide has a 70x40 backdrop (16:9 enough to be scaled with the screen's
+            // targets) that the game draws once and keeps. Re-created empty, it showed whatever the new memory held -
+            // a striped box under the life gauge after changing Aspect ratio in the menu while playing with DLSS /
+            // FSR on (anything that changes the internal resolution; owner, 0.5.4), or no backdrop at all.
+            // Colour images only (a blit can't scale depth; those are redrawn every frame). The old image stays
+            // alive until the submissions that use it are done (destroy_image defers it).
+            // ODYSSEY_RESCALE_KEEP=0: re-created empty, as before.
+            static int keep = -1;
+            if (keep < 0) { const char *e = getenv("ODYSSEY_RESCALE_KEEP"); keep = !e || !*e || atoi(e) != 0; }
+            VkImage old = b->image;
+            VkFormat old_format = b->format;
+            uint32_t ow = b->width, oh = b->height, ol = b->levels, on = b->layers;
+            bool blit = keep && old && b->aspect == VK_IMAGE_ASPECT_COLOR_BIT && b->samples <= 1 && b->depth <= 1 &&
+                        format_supports(old_format, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
             destroy_image(b);
             create_image(t, b);
+            if (blit && b->image && b->aspect == VK_IMAGE_ASPECT_COLOR_BIT && b->samples <= 1 && b->depth <= 1 && b->layers == on &&
+                format_supports(b->format, VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+                VkCommandBuffer cb = vk_upload_cmd();
+                for (uint32_t lv = 0; lv < ol && lv < b->levels; lv++) {
+                    uint32_t sw = ow >> lv ? ow >> lv : 1, sh = oh >> lv ? oh >> lv : 1;
+                    VkImageBlit br = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, on},
+                                      .srcOffsets = {{0, 0, 0}, {(int32_t)sw, (int32_t)sh, 1}},
+                                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, on},
+                                      .dstOffsets = {{0, 0, 0}, {(int32_t)level_w(b, lv), (int32_t)level_h(b, lv), 1}}};
+                    vkCmdBlitImage(cb, old, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &br, VK_FILTER_LINEAR);
+                }
+                VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+                VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+                vkCmdPipelineBarrier2(cb, &di);
+            }
+            // (one the CPU fills, not a render target: its bytes haven't changed, so nothing would upload them again -
+            // uploaded again at its next use, at the new size)
+            if (!b->gpu_owned && b->uploaded) b->uploaded = false, b->checked_frame = 0;
         }
         return b;
     }
@@ -730,7 +779,7 @@ static bool upload_astc_gpu(NvnTexture *t, TexBackend *b, VkCommandBuffer cb, ui
 }
 
 uint64_t prof_tex_checks, prof_tex_samples, prof_tex_full, prof_tex_full_bytes, prof_tex_dyn, prof_tex_watch_skips;
-static __thread bool t_prefetch;  // (vk_tex_prefetch) uploading ahead of a first use
+// (t_prefetch: above)
 static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (!t->addr || t->target == 10) return;
     bool linear = nvn_flags_linear(t->flags);
@@ -1086,7 +1135,21 @@ void vk_tex_prefetch(void) {
     for (int i = 0; i < n; i++) {
         NvnTexture *t = c[i];
         if (tex_scalable(t) || renderer_format_is_depth(t->format) || !t->layout.fmt || !t->layout.fmt->bpb) {
+            // ("Faster kingdom arrival" / arrival_precreate) a render target or depth buffer the stage made: its image
+            // made now, while it loads (nothing to upload) - they were made at the stage's first frame, ~6 ms of that
+            // frame's recording (Mushroom Kingdom, 2026-11-20). ODYSSEY_ARRIVAL_PRECREATE=0: off.
+            static int pre = -2;
+            if (pre == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_PRECREATE"); pre = e ? atoi(e) != 0 : -1; }
+            bool on = pre >= 0 ? pre : g_settings.fast_arrival && g_settings.arrival_precreate;
             t->no_prefetch = true;
+            if (on && loading && (tex_scalable(t) || renderer_format_is_depth(t->format))) {
+                static uint64_t made;
+                t_prefetch = true;
+                tex_backend(t);
+                t_prefetch = false;
+                if (++made % 200 == 0) LOG("[tex] %llu render targets made while loading\n", (unsigned long long)made);
+                if ((SDL_GetTicksNS() - t0) / 1e6 >= budget) break;
+            }
             continue;
         }
         // (in play, small ones only: a large one - a CPU-decoded ASTC texture - can take tens of ms, and it may never

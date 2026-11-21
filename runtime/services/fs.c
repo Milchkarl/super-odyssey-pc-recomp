@@ -206,6 +206,33 @@ static void add_new_files(int fd, const uint64_t *h, const uint8_t *dmeta, uint6
     LOG("[fs] mods: %d new romfs files\n", added);
 }
 
+static int rom_update_files;  // (rom_index: files only an update's romfs has)
+
+// Odyssey 1.0.0's game code with an update's game files (a romfs that isn't 1.0.0's: a dump with the update merged
+// in, or 1.4.1's romfs next to 1.0.0's exefs). The code and its data don't match, and the game breaks where they
+// differ: TitleMenuScene::exeAppear (1.0.0) waits for the menu layout's "Boot" animation, which later versions'
+// Menu.szs doesn't have (BootAppear / BootWait / BootEnd instead), so it asks about the title Mario's animation one
+// tick into the title, before it has one: a null read in al::AnimPlayerSkl::isSklAnimEnd (exception at 0x8; a
+// 0.5.2 crash report, docs/crash-title-100-mixed-files.md). Said once, before the game runs, instead.
+static void rom_check_version(void) {
+    static const uint8_t v100[8] = {0x3c, 0xa1, 0x2d, 0xfa, 0xaf, 0x9c, 0x82, 0xda};
+    const Module *main = loader_module("main");
+    if (!game_is_odyssey() || !main || memcmp(main->build_id, v100, sizeof v100) || !rom_update_files) return;
+    if (getenv("ODYSSEY_ALLOW_MIXED_FILES")) {  // (tests)
+        LOG("[fs] 1.0.0 game code with an update's game files (ODYSSEY_ALLOW_MIXED_FILES: going on)\n");
+        return;
+    }
+    char msg[900];
+    snprintf(msg, sizeof msg,
+             "The game files don't match: the game code (exefs) is Super Mario Odyssey 1.0.0, but its romfs holds files "
+             "of a later update (%d files; 1.0.0's romfs has 4,636). The game crashes at the title screen this way.\n\n"
+             "Extract the game again from one version: the base game 1.0.0 alone, or 1.4.1 (the base game with the 1.4.1 "
+             "update applied, code and romfs).\n\nThen delete the folder \"extracted\" in %s and start Super Odyssey PC "
+             "Recomp again: the setup asks for the game files again.",
+             rom_nfiles, rt_data_root());
+    rt_fail(msg);
+}
+
 static void rom_index(int fd) {
     uint64_t h[10];
     if (pread(fd, h, sizeof h, 0) != (ssize_t)sizeof h) return;
@@ -233,6 +260,8 @@ static void rom_index(int fd) {
         strcpy(path, dir);
         strcat(path, name);
         rom_files[rom_nfiles++] = (RomFile){rom_data_off + data, size, path, (uint32_t)o};
+        // (files an update added: 1.4.1 has 336 files 1.0.0 doesn't, 1.0.0 none 1.4.1 doesn't - rom_check_version)
+        if (!strcmp(path, "EffectData/EffectPtclPatch.szs") || !strcmp(path, "EventData/BalloonGame.szs")) rom_update_files++;
         o += 0x20 + ((namelen + 3) & ~3u);
     }
     // Mods: replacement files are served from their mod's folder. The file-meta table is patched (in a copy) to point
@@ -286,6 +315,7 @@ static void rom_index(int fd) {
                  rom_nfiles, rt_data_root());
         rt_fail(msg);
     }
+    rom_check_version();
 }
 
 // Virtual RomFS image read: original bytes, with the patched file table and appended replacement files.

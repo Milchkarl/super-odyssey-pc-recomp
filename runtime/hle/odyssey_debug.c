@@ -5,6 +5,7 @@
 //   ODYSSEY_HOOK_LOG="7000a17770=s0,x0+150:f6,x0+168:f3;7000a17ab8=x19+f8:f6,x19+110:f16"
 // Without an entry for the address: x0-x3, x30, s0-s1. At most ODYSSEY_HOOK_MAX hits per address (default 50), only in
 // the frames ODYSSEY_HOOK_FRAMES=<from>:<to> if given.
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +76,21 @@ void odyssey_debug_hook(Cpu *c, uint64_t pc) {
     uint64_t pose_at = v141 ? ODYSSEY_V141_MODELKEEPER_CALC : 0x700094c428ull;
     uint64_t view_at = v141 ? ODYSSEY_V141_UPDATE_VIEW_GPU : 0x7000879c98ull;
     if (pc == camera_at) {
+        {   // ODYSSEY_LOG_CAMERA_YAW=<n> (tests): the camera's heading every n draws, from the LookAtCamera copy's eye and
+            // target (as odyssey_camera_draw reads them) - how fast the stick turns it (#111)
+            static long every = -1, n;
+            if (every < 0) every = getenv("ODYSSEY_LOG_CAMERA_YAW") ? atol(getenv("ODYSSEY_LOG_CAMERA_YAW")) : 0;
+            if (every > 0 && n++ % every == 0) {
+                // (the camera copy as the DLSS code below finds it; its view matrix, sead 3x4 row-major, at +8: the
+                // third row is the camera's z axis)
+                uint64_t cam = v141 ? c->x[29] - 0xf0 : c->x[23];
+                const float *m = (const float *)(uintptr_t)(cam + 8);
+                extern uint64_t renderer_present_count(void);
+                if (cam >= GUEST_LO && cam < GUEST_HI - 0x40)
+                    LOG("[camera-yaw] frame %llu %.2f deg\n", (unsigned long long)renderer_present_count(),
+                        atan2f(m[8], m[10]) * 57.29578f);
+            }
+        }
         extern void odyssey_camera_draw(Cpu *);
         odyssey_camera_draw(c);
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)

@@ -234,6 +234,7 @@ static bool g_code_only;                    // the files are there: only the gam
 static bool g_prepared_here;                // a shader preparation finished in this process (restart_after_prep)
 static volatile int g_cancel;
 static std::string g_job_game, g_job_keys, g_job_update;  // the choices the work runs with
+static bool g_cli;                          // RecompLauncher's setup step (setup_prepare_cli): no shader pass
 
 static void set_step(const char *s) {
     pthread_mutex_lock(&g_lock);
@@ -412,16 +413,21 @@ static void *work(void *) {
     set_step("Recompiling the game code...");
     int cores = SDL_GetNumLogicalCPUCores(), ram_gb = SDL_GetSystemRAM() / 1024;
     GameBuildOpts o = {code_progress, cores < ram_gb - 2 ? cores : ram_gb - 2 > 1 ? ram_gb - 2 : 1};
-    char why[256] = "";
+    char why[512] = "";
     if (!gamebuild_run(root.c_str(), &o, why, sizeof why)) {
         LOG("[setup] game code: %s\n", why);
-        fail("The game code didn't build", "Make sure there's about 2 GB free and try again. If it happens again, report it "
-                                           "with SuperOdysseyRecomp.log.");
+        if (strstr(why, "(the zig folder) doesn't run"))  // (#121: a damaged zig.exe - gamebuild.c asks it first)
+            fail("The game code builder can't run", "Its compiler (zig\\zig.exe) is probably damaged. Download the "
+                 "release again, extract it with Windows' Extract All or 7-Zip, and check that your antivirus didn't "
+                 "quarantine or change the zig folder.");
+        else
+            fail("The game code didn't build", "Make sure there's about 2 GB free and try again. If it happens again, "
+                 "report it with SuperOdysseyRecomp.log.");
         return NULL;
     }
     if (!setup_ready(root.c_str())) { fail("Game files incomplete", "Choose your game again."); return NULL; }
 #ifndef __APPLE__
-    if (!g_code_only) {
+    if (!g_code_only && !g_cli) {  // (the launcher's step has no window or GPU: the game prepares them at its first start)
         // (the release's pipeline seed is unpacked by vk_prepare_install: nvn/vulkan/device.c prep_seed)
         set_step("Compiling shaders...");
         g_frac = 0.55f;
@@ -436,6 +442,76 @@ static void *work(void *) {
     g_frac = 1;
     g_state = ST_DONE;
     return NULL;
+}
+
+// ------------------------------------------------------------------ RecompLauncher's setup step
+// main.c --prepare [--game <folder>]: what the installer does - the game files from the player's extracted folder, then
+// the game code - without a window, as RecompLauncher's recomplauncher.json `prepare` runs it. Progress goes to stdout as
+// "progress <0..1> <step>" lines, failures as their message and a non-zero exit. Without --game (the launcher rebuilding
+// from what it kept: an update, or a game set up before the launcher ran this step) the files already here are used
+// and only the game code is built, if it isn't current. The shaders are left to the game's first start (its own page).
+// Done: a file in the launcher's data folder (recomplauncher.json prepare.done), wherever the game's data is.
+static void cli_progress_print(float f, const std::string &step) {
+    if (!g_code_only && f < 1) f /= 0.55f;  // (the installer's bar: files and code up to 0.55, then shaders - not here)
+    printf("progress %.2f %s\n", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
+    fflush(stdout);
+}
+static void *cli_progress_thread(void *) {  // (while the work runs: a line when the step or the bar moves)
+    std::string last_step;
+    float last = -1;
+    while (g_state.load() == ST_BUSY) {
+        pthread_mutex_lock(&g_lock);
+        std::string step = g_step;
+        pthread_mutex_unlock(&g_lock);
+        float f = g_frac.load();
+        if (step != last_step || f - last >= 0.01f) cli_progress_print(f, step), last_step = step, last = f;
+        SDL_Delay(250);
+    }
+    return NULL;
+}
+extern "C" int setup_prepare_cli(const char *game) {
+    g_cli = true;
+    g_root = "extracted";  // (in the data root: rt_paths_init made it the working directory)
+    bool files_here = loader_peek_game("extracted/exefs/main") == GAME_ODYSSEY && data_there("extracted");
+    LOG("[setup] RecompLauncher setup step: game %s, data %s, game files %s\n", game && *game ? game : "(none)",
+        rt_data_root(), files_here ? "here" : "not here");
+    if (!game || !*game) {
+        if (!files_here) {
+            printf("No game files yet: choose your extracted game (the folder with exefs and romfs).\n");
+            fflush(stdout);
+            return 2;
+        }
+        g_code_only = true;
+    } else {
+        g_code_only = false;
+        g_job_game = game;
+    }
+    if (g_code_only && setup_ready("extracted")) {
+        cli_progress_print(1, "Ready to play");
+    } else {
+        g_state = ST_BUSY;
+        pthread_t th;
+        pthread_create(&th, NULL, cli_progress_thread, NULL);
+        work(NULL);
+        if (g_state.load() == ST_BUSY) g_state = ST_FAILED;  // (work returned without saying)
+        pthread_join(th, NULL);
+        if (g_state.load() != ST_DONE) {
+            pthread_mutex_lock(&g_lock);
+            std::string head = g_fail_head, hint = g_fail_hint;
+            pthread_mutex_unlock(&g_lock);
+            printf("%s: %s\n", head.empty() ? "Setup didn't finish" : head.c_str(), hint.c_str());
+            fflush(stdout);
+            return 1;
+        }
+        cli_progress_print(1, "Ready to play");
+    }
+    const char *rl = getenv("RECOMPLAUNCHER_DATA");
+    if (rl && *rl) {
+        std::string done = std::string(rl) + "/setup-done.txt";
+        FILE *f = fopen(done.c_str(), "w");
+        if (f) fprintf(f, "%s\n", rt_data_root()), fclose(f);
+    }
+    return 0;
 }
 
 // A shader preparation finished in this process (the setup's last step or the start page's): the game starts in a new
@@ -869,13 +945,12 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGui::Begin("##config", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                        ImGuiWindowFlags_NoBackground);
     ImGui::PushFont(font);
-    backdrop_draw(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, ImGui::GetTime());
-    float margin = 22 * scale, pad = 28 * scale;
-    float cardw = fminf(io.DisplaySize.x - 2 * margin, fmaxf(1240 * scale, io.DisplaySize.x * 0.84f)), cardh = io.DisplaySize.y - 2 * margin;
-    ImVec2 c0((io.DisplaySize.x - cardw) * 0.5f, margin);
-    ImDrawList *bg = ImGui::GetWindowDrawList();
-    bg->AddRectFilled(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kPanelV), 18 * scale);
-    bg->AddRect(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kLineV), 18 * scale, 0, fmaxf(1, scale));
+    // (branch menu-odyssey-look, owner 2026-11-20: the start page fills the screen in pitch black, as the menu in game;
+    // the animated pixel-art backdrop stays for the installation page only - setup_page)
+    float pad = 28 * scale;
+    float cardw = io.DisplaySize.x, cardh = io.DisplaySize.y;
+    ImVec2 c0(0, 0);
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, theme_u32(kPanelV));
     // the header: the pipe, the name and the version; in Settings, "Settings" after it
     ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + pad * 0.8f));
     ImGui::BeginGroup();
@@ -969,8 +1044,10 @@ bool config_run(void) {
     const char *skip_vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_INPUT", "ODYSSEY_HOST_INPUT", "ODYSSEY_WARP", "ODYSSEY_HIDDEN",
                                "ODYSSEY_EXIT_AFTER_SHOT", "ODYSSEY_SETUP_EXIT_WHEN_DONE", "ODYSSEY_BIND_TEST"};
     for (const char *v : skip_vars)
-        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST"))
+        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST")) {
+            LOG("[config] page skipped: %s is set%s\n", v, v == skip_vars[0] ? " (or --play)" : "");
             return true;
+        }
     // (the settings file read first: its "Show this screen at every start" was checked before ui_window_init read the
     // file, so the default - shown - always won and unticking it did nothing, on every platform: issue #74, owner's
     // Steam Deck 2026-11-16)
@@ -992,7 +1069,10 @@ bool config_run(void) {
             diagnostics_last_crash_seen();
         }
     }
-    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) return true;
+    if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) {
+        LOG("[config] page not shown (%s)\n", force ? "ODYSSEY_CONFIG=0" : "turned off, nothing to ask");
+        return true;
+    }
     ui_window_init();
 #ifndef __APPLE__
     if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)

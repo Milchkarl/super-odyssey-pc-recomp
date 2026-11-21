@@ -474,8 +474,24 @@ void hle__ZNK18ProjectCameraInput14calcInputStickEPN4sead7Vector2IfEE(Cpu *c) {
     mouse_camera_frame(&x, &y);
     float *v = (float *)(uintptr_t)out;
     float stick_x = v[0], stick_y = v[1];
-    v[0] *= g_settings.stick_camera_x / 100.0f * (g_settings.stick_camera_invert_x ? -1 : 1);
-    v[1] *= g_settings.stick_camera_y / 100.0f * (g_settings.stick_camera_invert_y ? -1 : 1);
+    // Stick speed (#111): the game's camera ignores the stick below 0.30 of its reach and turns in proportion to the
+    // part above it, up to its top speed at full tilt (measured: 0.35 -> 11 deg in 2 s, 0.5 -> 43, 0.7 -> 86, 1.0 -> 151;
+    // ODYSSEY_LOG_CAMERA_YAW). Scaling the whole value put 25% under that line (no turning at all) and 150% past full
+    // tilt (no faster). The speed scales the part above 0.30 instead: below 100% the camera turns that much slower at
+    // any tilt; above it, part tilts turn faster (full tilt stays the game's top speed).
+    {
+        const float dz = 0.30f;
+        float m = sqrtf(v[0] * v[0] + v[1] * v[1]);
+        if (m > dz) {
+            float sx = g_settings.stick_camera_x / 100.0f, sy = g_settings.stick_camera_y / 100.0f;
+            float ax = v[0] / m * (dz + sx * (m - dz)), ay = v[1] / m * (dz + sy * (m - dz));
+            float n = sqrtf(ax * ax + ay * ay);
+            if (n > 1.0f) ax /= n, ay /= n;  // (the game's own top speed)
+            v[0] = ax, v[1] = ay;
+        }
+        if (g_settings.stick_camera_invert_x) v[0] = -v[0];
+        if (g_settings.stick_camera_invert_y) v[1] = -v[1];
+    }
     v[0] += x, v[1] += y;
     static int lm = -1, n;
     if (lm < 0) lm = getenv("ODYSSEY_LOG_MOUSE") != NULL;
@@ -643,7 +659,22 @@ static void motion_push(uint64_t now) {
         }
         memcpy(f + 3, mot.gyro, 12);
         memcpy(f + 6, mot.angle, 12);
-        memcpy(f + 9, mot.dir, 36);
+        // The direction as nn::hid has it: its rows the controller's X, Y and Z axes in the world - the transpose of
+        // mot.dir (controller -> world: its columns are those axes, as rotate_dir turns it and the gravity correction
+        // reads it). It was handed over as it is, the opposite rotation: through binoculars the view turned left when
+        // the controller turned right (#53). Savage Wind Recomp (MIT; BOTW's motion aiming through the same nn::hid
+        // states, motion.c fill: dir[i][k] = m[k][i]) hands it over transposed, and its aiming works.
+        // ODYSSEY_MOTION_DIR_ROWS=0: as before (untransposed).
+        static int rows = -1;
+        if (rows < 0) { const char *e = getenv("ODYSSEY_MOTION_DIR_ROWS"); rows = !e || atoi(e) != 0; }
+        if (rows) {
+            for (int i = 0; i < 3; i++)
+                for (int k = 0; k < 3; k++) f[9 + i * 3 + k] = mot.dir[k * 3 + i];
+        } else memcpy(f + 9, mot.dir, 36);
+        // (an identity direction means "no data" to the game - Savage Wind: lying exactly flat and facing ahead, turn it
+        // a hair)
+        if (f[9] == 1 && f[13] == 1 && f[17] == 1 && !f[10] && !f[11] && !f[12] && !f[14] && !f[15] && !f[16])
+            f[10] = 1e-6f, f[12] = -1e-6f;
         // Left and right the other way round, as one consistent mirror (#53): looking around through binoculars turned
         // the view left when the controller turned right - up and down were right (the owner's Steam Deck 2026-11-19,
         // and the reporter's DualSense and Direwolf 3). Invert gyro Y fixed the direction but felt jerky: flipping one

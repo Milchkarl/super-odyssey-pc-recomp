@@ -82,6 +82,8 @@ typedef struct {
     int frame_gen;          // FG_*: frame generation (Windows; needs an Upscale method): a generated frame between each two
     int low_latency;        // 0 off, 1 on, 2 on + boost: NVIDIA Reflex (Streamline: sl_glue.cpp)
     int hud_edges;          // pictures wider than 16:9: 1 the HUD at the picture's edges (default), 0 in a centred 16:9 box
+    int narrow_full;        // pictures narrower than 16:9 (16:10, 4:3): 0 the 16:9 view's height, sides cut (default),
+                            // 1 its full width, taller (runtime/hle/odyssey_wide.c, #112)
     int temporal_backend, fsr3_mode, fsr3_sharpness, fsr3_cas_sharpness;
     bool fsr3_cas;
     int fsr4_mode, fsr4_sharpness, fsr4_cas_sharpness;
@@ -95,8 +97,9 @@ typedef struct {
     int console_mode;    // CONSOLE_*: docked or handheld (the game's own rendering for each; next start)
     bool game_dynres;    // the game's own dynamic resolution (on: as on the Switch; off: always its full resolution)
     bool frame_interp;   // always false: 120 FPS interpolation was removed (2026-11-16); ODYSSEY_INTERP for tests (nvn/interp.c)
-    bool hud_sharpen;    // the HUD and the game's menus sharpened on pictures of 900 lines and more (nvn/vulkan/exec.c
-                         // hud_sharpness)
+    int hud_quality;     // 0 as the Switch (one bilinear tap), 1 high: the game's HUD, text and menus enlarged along
+                         // smooth edges on screens larger than the Switch's (nvn/vulkan/exec.c hud_filter_strength,
+                         // maxwell/translate.c hudSample; ODYSSEY_HUD_QUALITY). It replaced hud_sharpen (0.4.4 - 0.5.4).
     bool deband;         // smooth gradients: the game's final picture in half floats, dithered into the window (Vulkan:
                          // nvn/vulkan/textures.c vk_deband)
     float volume;        // master volume, 1 = 100%
@@ -139,6 +142,8 @@ typedef struct {
                          // tile (nvn/vulkan/textures.c vk_sampler; read at start)
     int frame_rate;      // FPS_*: the game's draws per second (gameplay stays at 60)
     int memory;          // MEMORY_*: how much memory the renderer may use to spare stutters (settings_low_memory)
+    bool low_gpu_memory; // shader global memory: import only the guest heap windows shaders use, not the whole heap
+                         // (nvn/vulkan/exec.c gwin_decide; read at start; #120 - 8 GB PCs with integrated graphics)
     bool shader_preload; // a stage's shaders get their libraries when the stage sets them up, not at their first draw
                          // (nvn/vulkan/exec.c compile_program; more memory)
     bool shader_wait;    // a draw whose shader is still loading waits for it (a hitch) instead of being left out /
@@ -155,6 +160,13 @@ typedef struct {
                          // reach farther (runtime/hle/odyssey_draw.c; ODYSSEY_DRAW_DISTANCE=<factor> for tests)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
                          // more first-draw builds (exec.c renderer_program_hint; ODYSSEY_PREWARM=3). Off by default.
+    bool fast_arrival;   // "Faster kingdom arrival" (menu): the three below together; off: all three off
+    bool arrival_mip_views;  // a draw making a 3D texture's or cube map's level from the one above reads a view of
+                         // those levels, not a copy of level 0 (exec.c resolve_feedback; the lighting set-up as a
+                         // kingdom appears: ~950 copies)
+    bool arrival_barriers;   // (settings.ini only) lighter barriers between those small passes (exec.c)
+    bool arrival_precreate;  // (settings.ini only) a stage's render targets made while it loads, not at its first frame
+    bool arrival_submit;     // (settings.ini only) a frame with many passes handed to the GPU in parts (exec.c begin_pass)
     bool skip_intro;     // no Joy-Con tips screen timer before the title (runtime/hle/odyssey_120.c; read at start)
     int warmup;          // WARMUP_*: how long the start replays known pipelines (nvn/vulkan/exec.c vk_pipeline_prewarm)
     bool mute_unfocused; // no sound while the window isn't in front (services/audio.c)

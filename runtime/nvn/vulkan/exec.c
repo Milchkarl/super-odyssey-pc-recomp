@@ -518,7 +518,26 @@ static void begin_cb(VkCommandBuffer *cb, bool *begun) { begin_cb_in(cb, begun, 
 static void gp_mark(VkCommandBuffer cb, const char *fmt, ...);
 static bool dq_enabled(void);
 static VkCommandBuffer vk_cmd_raw(void);
-VkCommandBuffer vk_cmd(void) { dq_sync(); return vk_cmd_raw(); }
+// "Faster kingdom arrival" / arrival_barriers (settings.ini): a stage's lighting set-up as it appears draws a mip chain
+// of a 3D texture / cube map one slice or face per pass (~1,100 passes of 32x32 or 128x128), and every pass began with a
+// full barrier - the GPU drained after each, ~0.03 ms each, most of that frame's ~40 ms. Passes into the same image's
+// same level, which read only the levels above it (resolve_feedback's level views), need no barrier between them: the
+// chain below. Any other command recorded outside a pass (a copy, dispatch, upload, clear) ends the chain, so the next
+// pass gets its barrier again. ODYSSEY_ARRIVAL_BARRIERS=0: off.
+static bool chain_valid, chain_skip_barrier;
+static NvnTexture *chain_t;
+static uint32_t chain_level;
+static int chain_guard;  // (begin_pass's own vk_cmd: not "another command")
+VkCommandBuffer vk_cmd(void) {
+    if (!in_pass && !chain_guard) chain_valid = false, chain_skip_barrier = false;
+    dq_sync();
+    return vk_cmd_raw();
+}
+static bool arrival_barriers(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_BARRIERS"); env = e ? atoi(e) != 0 : -1; }
+    return env >= 0 ? env : g_settings.fast_arrival && g_settings.arrival_barriers;
+}
 static VkCommandBuffer vk_cmd_raw(void) {  // (draw_: no wait for the recording thread)
     Sub *s = sub();
     if (!s->main_begun) {
@@ -680,6 +699,8 @@ void vk_gpuprof_report(void) {
     gp_n = 0;
 }
 
+static int sub_passes;  // (passes begun since the last submission: arrival_submit, below)
+
 // Submit the pending work (if any). wait/signal: binary semaphores for presentation (may be null).
 static void queue_submit_now(const SubJob *j) {
     VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = j->ncb, .pCommandBufferInfos = j->cbs,
@@ -751,6 +772,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal, VkCommandBuffer extra
     submit_seq++;
     pthread_mutex_unlock(&seq_lock);
     cur_sub = (cur_sub + 1) % SUBS;
+    sub_passes = 0;
     stat_flushes++;
     cum_submits++;
     ring_retire();
@@ -784,6 +806,18 @@ uint64_t renderer_fence_seq(void);
 // Linux (with early fences): the submission is ended right after such a write - after the dispatch, or at the end of the
 // draw's pass - so the GPU runs the write early and a fence's wait for it doesn't wait for the rest of the frame.
 static bool g_split_pending;
+// "Faster kingdom arrival" / arrival_submit (settings.ini): a frame with many passes is handed to the GPU in parts. A
+// kingdom's first frame has ~1,300 passes (its lighting set-up) and ~4,900 draws: the GPU waited ~30-40 ms for all of
+// them to be recorded, then needed ~40 ms itself - one after the other. Ended every SPLIT_PASSES passes (normal frames
+// have ~90), the GPU runs the first parts while the rest is recorded (split_if_pending: at most 8 a frame, none while a
+// submission costs over a millisecond). ODYSSEY_ARRIVAL_SUBMIT=0: off; =<n>: every n passes.
+#define SPLIT_PASSES 150
+static int arrival_submit_every(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_SUBMIT"); env = e ? (atoi(e) > 1 ? atoi(e) : atoi(e) ? SPLIT_PASSES : 0) : -1; }
+    if (env >= 0) return env;
+    return g_settings.fast_arrival && g_settings.arrival_submit ? SPLIT_PASSES : 0;
+}
 static bool split_on_write(void) {
     static int on = -1;
     if (on < 0) {
@@ -934,6 +968,7 @@ static void gw_open(int i) {  // (gw_lock)
     gw_tab[i] = gw_tab[--gw_n];
 }
 uint64_t vk_cq_completed(void);
+uint64_t vk_cq_last(void);
 static void gw_sweep_locked(uint64_t done, uint64_t cdone) {
     for (int i = 0; i < gw_n;)
         if (gw_tab[i].seq <= done && gw_tab[i].cseq <= cdone) gw_open(i);
@@ -1853,6 +1888,7 @@ static void translator_start(void) {
     int n = SDL_GetNumLogicalCPUCores() / 4;
     if (n < 2) n = 2;
     if (n > 4) n = 4;
+    if (SDL_GetNumLogicalCPUCores() <= 8) n = 1;  // (a Steam Deck: see workers_start)
     if (getenv("ODYSSEY_TRANSLATE_THREADS")) n = atoi(getenv("ODYSSEY_TRANSLATE_THREADS")) > 0 ? atoi(getenv("ODYSSEY_TRANSLATE_THREADS")) : 1;
     for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, translator, NULL); }
 }
@@ -1861,6 +1897,12 @@ static void workers_start(void) {
     int n = SDL_GetNumLogicalCPUCores() - 4;
     if (n < 4) n = 4;
     if (n > 16) n = 16;
+    // A CPU of 8 threads or fewer (a Steam Deck): 2 workers and 1 translator. With 4 + 2 at normal priority beside the
+    // game's own threads, the game's main thread lost the CPU to them whenever builds were queued - a 45-160 ms frame
+    // in about half of the Deck's Cap Kingdom walks (when Mario starts running into the town) and 50-63 ms arrivals;
+    // with 2 + 1: none over 50 ms in 4 walks, the same frame rate (2026-11-20). ODYSSEY_SHADER_THREADS /
+    // ODYSSEY_TRANSLATE_THREADS override.
+    if (SDL_GetNumLogicalCPUCores() <= 8) n = 2;
     if (getenv("ODYSSEY_SHADER_THREADS")) n = atoi(getenv("ODYSSEY_SHADER_THREADS")) > 0 ? atoi(getenv("ODYSSEY_SHADER_THREADS")) : 1;
     jobs_low_max = n > 1 ? n / 2 : 1;
     for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, worker, NULL); }
@@ -1958,6 +2000,7 @@ void vk_prof_frame(uint64_t frame, uint64_t present_ns) {
 }
 
 const char *renderer_stats(void) {
+    { extern void vk_gmem_trace_report(void); vk_gmem_trace_report(); }
     static int dumps;
     if (dumps++ < 3) {
         LOG("[vk] command counts:");
@@ -2628,8 +2671,22 @@ static void begin_pass(void) {
     vk_end_pass();
     if (dl_on == 2) renderer_flush();  // (ODYSSEY_VK_DEVLOST_TRACE=2: each pass its own submission)
     st.rt_dirty = false;
+    {   // (arrival_submit) this many passes in the submission: it is handed to the GPU when this pass ends
+        int every = arrival_submit_every();
+        if (every && ++sub_passes >= every) g_split_pending = true;
+    }
+    chain_guard++;
     VkCommandBuffer cb = vk_cmd();
-    vk_full_barrier(cb);  // passes, copies and dispatches see each other's results
+    chain_guard--;
+    {   // (arrival_barriers) a pass into chain_t's chain_level only: no barrier when the chain says none is needed
+        bool in_chain = chain_valid && !st.rt.depth && st.rt.ncolor > 0;
+        for (int i = 0; in_chain && i < st.rt.ncolor; i++)
+            in_chain = st.rt.color[i] == chain_t && st.rt.has_cview[i] && (st.rt.cview[i].setmask & 1) &&
+                       st.rt.cview[i].base_level == chain_level;
+        if (!in_chain) chain_valid = false;
+        if (!(in_chain && chain_skip_barrier && arrival_barriers())) vk_full_barrier(cb);  // passes, copies and dispatches see each other's results
+        chain_skip_barrier = false;
+    }
     pass_hud = hud_want;
     if (pass_hud) { begin_hud_pass(cb); return; }
     for (int i = 0; i < st.rt.ncolor; i++)
@@ -2834,22 +2891,33 @@ static void hud_blend(uint8_t blend[8], uint8_t *on, uint32_t *mask) {
 // whose panes stayed on one side of the middle in its last frame is moved by (k - 1) x 640 to that side: its corner
 // of the 16:9 screen becomes the picture's corner. Its extent is gathered from its panes' ui2d vertex uniforms (the
 // pane's rect through its model-view, layout units). A pane that covers the screen (stretched already) stays.
+// The same in a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck; k < 1): there the HUD keeps its shape
+// across the picture's width and is shorter than it, centred - the counters sat (1 / k - 1) x 360 units below the top
+// (135 lines of 1080 at 4:3, 40 of a Steam Deck's 800). A layout whose panes stayed above or below the middle moves up
+// or down by that much: to the picture's top or bottom edge, whatever the setting (it is for wide pictures).
+// ODYSSEY_HUD_EDGES_Y=0: not in narrow pictures (as before).
 #define HUD_NL 64
-static struct { uint64_t id, frame; float lo, hi, plo, phi, cur; } hud_lay[HUD_NL];
-static float hud_edge_extent(const float *u, uint64_t size, float *lo, float *hi) {
+static struct { uint64_t id, frame; float lo, hi, plo, phi, cur, ylo, yhi, pylo, pyhi, cury; } hud_lay[HUD_NL];
+static float hud_edge_extent(const float *u, uint64_t size, float *lo, float *hi, float *ylo, float *yhi) {
     if (!u || size != 560 || !(u[0] > 0)) return 0;
     float w = u[132], h = u[133], l = u[134], t = u[135];
     if (!(w > 0) || !(h > 0) || !(w < 1e5f) || !(h < 1e5f)) return 0;
-    *lo = 1e9f, *hi = -1e9f;
+    *lo = *ylo = 1e9f, *hi = *yhi = -1e9f;
     for (int i = 0; i < 4; i++) {
-        float x = l + (i & 1 ? w : 0), y = t - (i & 2 ? h : 0), X = u[16] * x + u[17] * y + u[19];
-        *lo = fminf(*lo, X), *hi = fmaxf(*hi, X);
+        float x = l + (i & 1 ? w : 0), y = t - (i & 2 ? h : 0), X = u[16] * x + u[17] * y + u[19], Y = u[20] * x + u[21] * y + u[23];
+        *lo = fminf(*lo, X), *hi = fmaxf(*hi, X), *ylo = fminf(*ylo, Y), *yhi = fmaxf(*yhi, Y);
     }
     return 1;
 }
-// layout units to move this draw by (0: none)
-static float hud_edge_shift(float k) {
-    if (!ui_mark || !ui_anchored || k <= 1.01f || !g_settings.hud_edges) return 0;
+// layout units to move this draw by, to the right (k > 1) or up (k < 1) (0: none)
+static float hud_edge_shift(float k, float *up) {
+    *up = 0;
+    static int narrow = -1;
+    if (narrow < 0) { const char *e = getenv("ODYSSEY_HUD_EDGES_Y"); narrow = !e || !*e || atoi(e) != 0; }
+    bool wide = k > 1.01f, tall = k < 0.99f && narrow;
+    // (the option - "HUD position (wide)" - is for wide pictures: Centered keeps a 16:9 box there. A narrow picture has
+    // no such box to keep: its HUD always goes to the top and bottom edges)
+    if (!ui_mark || !ui_anchored || !(tall || (wide && g_settings.hud_edges))) return 0;
     uint64_t frame = renderer_present_count();
     int i = 0, free_i = -1, old = 0;
     for (; i < HUD_NL && hud_lay[i].id != ui_anchored; i++) {
@@ -2858,35 +2926,48 @@ static float hud_edge_shift(float k) {
     }
     if (i == HUD_NL) {
         i = free_i >= 0 ? free_i : old;
-        hud_lay[i] = (typeof(hud_lay[0])){ui_anchored, frame, 1e9f, -1e9f, 1e9f, -1e9f, 0};
+        hud_lay[i] = (typeof(hud_lay[0])){ui_anchored, frame, 1e9f, -1e9f, 1e9f, -1e9f, 0, 1e9f, -1e9f, 1e9f, -1e9f, 0};
     }
     if (hud_lay[i].frame != frame) {  // a new frame: the last one's extent decides
         // (the last frame it was drawn in, however long ago: a layout skipped for a frame kept flipping between the
         // middle and the edge)
         if (hud_lay[i].lo <= hud_lay[i].hi) hud_lay[i].plo = hud_lay[i].lo, hud_lay[i].phi = hud_lay[i].hi;
-        hud_lay[i].lo = 1e9f, hud_lay[i].hi = -1e9f, hud_lay[i].frame = frame, hud_lay[i].cur = 0;
+        if (hud_lay[i].ylo <= hud_lay[i].yhi) hud_lay[i].pylo = hud_lay[i].ylo, hud_lay[i].pyhi = hud_lay[i].yhi;
+        hud_lay[i].lo = hud_lay[i].ylo = 1e9f, hud_lay[i].hi = hud_lay[i].yhi = -1e9f, hud_lay[i].frame = frame;
+        hud_lay[i].cur = hud_lay[i].cury = 0;
     }
-    float lo, hi;
+    float lo, hi, ylo, yhi;
     const float *u = (const float *)(uintptr_t)st.ubuf[0][0].addr;
-    bool pane = hud_edge_extent(u, st.ubuf[0][0].size, &lo, &hi);
-    if (!pane) lo = 1e9f, hi = -1e9f;
-    else if (hi - lo >= 1280 * k - 40) lo = -1e8f, hi = 1e8f;  // (a pane across the screen: a screen, not the HUD)
+    bool pane = hud_edge_extent(u, st.ubuf[0][0].size, &lo, &hi, &ylo, &yhi);
+    float kx = wide ? k : 1.0f;  // (the layouts' space is 1280 kx wide, 720 high)
+    bool across = pane && hi - lo >= 1280 * kx - 40, over = pane && yhi - ylo >= 720 - 40;
+    if (!pane) lo = ylo = 1e9f, hi = yhi = -1e9f;
+    if (across) lo = -1e8f, hi = 1e8f;  // (a pane across the screen: a screen, not the HUD)
+    if (over) ylo = -1e8f, yhi = 1e8f;
     hud_lay[i].lo = fminf(hud_lay[i].lo, lo), hud_lay[i].hi = fmaxf(hud_lay[i].hi, hi);
+    hud_lay[i].ylo = fminf(hud_lay[i].ylo, ylo), hud_lay[i].yhi = fmaxf(hud_lay[i].yhi, yhi);
     // a pane moves when it and its layout's last frame are on one side; another draw (text: its own uniforms) goes with
     // the pane before it - the first draw of a layout, or one after a pane across the screen, stays (a menu's picture)
     float shift = hud_lay[i].cur;
     if (pane) {  // (the HUD's own layouts only - odyssey_120.c: by its middle; not one across the screen, nor a pane that is)
         float plo = hud_lay[i].plo, phi = hud_lay[i].phi, mid = (plo + phi) * 0.5f;
-        bool known = plo <= phi && phi - plo < 1280 * k - 40 && hi - lo < 1280 * k - 40;
+        bool known = wide && plo <= phi && phi - plo < 1280 * kx - 40 && !across;
         bool left = known && mid < -100, right = known && mid > 100;
         shift = hud_lay[i].cur = left ? -(k - 1) * 640.0f : right ? (k - 1) * 640.0f : 0;
+        // (narrow: a pane across the width - a band along the bottom or top, stretched to the edge by draw_ - stays too)
+        float pylo = hud_lay[i].pylo, pyhi = hud_lay[i].pyhi, ymid = (pylo + pyhi) * 0.5f;
+        bool yknown = tall && pylo <= pyhi && pyhi - pylo < 720 - 40 && !over && hi - lo < 1280 - 40;
+        bool below = yknown && ymid < -100, above = yknown && ymid > 100;
+        hud_lay[i].cury = above ? (1 / k - 1) * 360.0f : below ? -(1 / k - 1) * 360.0f : 0;
     }
+    *up = hud_lay[i].cury;
     static int lg = -1;
     if (lg < 0) lg = getenv("ODYSSEY_LOG_HUD_EDGES") != NULL;
     if (lg && frame % 120 == 0)
-        LOG("[hud-edge] frame %llu layout %llx draw %s %.0f..%.0f (size %llu), last frame %.0f..%.0f: shift %.0f\n",
+        LOG("[hud-edge] frame %llu layout %llx draw %s x %.0f..%.0f y %.0f..%.0f (size %llu), last frame x %.0f..%.0f y %.0f..%.0f: shift %.0f up %.0f\n",
             (unsigned long long)frame, (unsigned long long)ui_anchored, u && st.ubuf[0][0].size == 560 ? "pane" : "other",
-            lo, hi, (unsigned long long)st.ubuf[0][0].size, hud_lay[i].plo, hud_lay[i].phi, shift);
+            lo, hi, ylo, yhi, (unsigned long long)st.ubuf[0][0].size, hud_lay[i].plo, hud_lay[i].phi, hud_lay[i].pylo, hud_lay[i].pyhi,
+            shift, *up);
     return shift;
 }
 
@@ -6086,6 +6167,7 @@ static void huge_link_test(Prog *p) {
 // ================================================================== feedback snapshots (renderer.m resolve_feedback)
 static NvnTexture *feedback_tex[4];
 static VkImageView feedback_view[4];
+static int feedback_type[4];  // (TEXTYPE_* of the view: 2D, or a 3D / cube level range - arrival_mip_views)
 static int nfeedback;
 static uint64_t g_cur_fs_hash;
 #ifdef _WIN32
@@ -6404,6 +6486,12 @@ static bool views_overlap(TexBackend *b, const NvnTextureView *rv, bool has_rv, 
     if (ry >= b->layers) ry = b->layers - 1;
     return rl >= lv0 && rl < lv0 + nlv && ry >= ly0 && ry < ly0 + nly;
 }
+// "Faster kingdom arrival" / arrival_mip_views (settings.ini), ODYSSEY_ARRIVAL_MIP_VIEWS=0: off (see resolve_feedback)
+static bool arrival_mip_views(void) {
+    static int env = -2;
+    if (env == -2) { const char *e = getenv("ODYSSEY_ARRIVAL_MIP_VIEWS"); env = e ? atoi(e) != 0 : -1; }
+    return env >= 0 ? env : g_settings.fast_arrival && g_settings.arrival_mip_views;
+}
 static bool feedback_disjoint(NvnTexture *t, const NvnTexEntry *en) {
     static int same = -1;
     if (same < 0) { const char *e = getenv("ODYSSEY_FEEDBACK_SAME_LEVEL"); same = e && atoi(e) != 0; }
@@ -6461,20 +6549,39 @@ static void resolve_feedback(Prog *pr) {
                 uint32_t rl = ci >= 0 && st.rt.has_cview[ci] && (st.rt.cview[ci].setmask & 1) ? st.rt.cview[ci].base_level : 0;
                 TexBackend *b = ci >= 0 && rl ? vk_tex(t, true) : NULL;
                 const NvnTexEntry *en = b ? shader_texture_entry(sg, &infos[sg]->tex[i]) : NULL;
-                if (!same && b && b->image && t != st.rt.depth && rl < b->levels && b->base_type == VK_IMAGE_VIEW_TYPE_2D &&
-                    infos[sg]->tex[i].type == TEXTYPE_2D && en) {
+                // The same for a 3D texture (one depth slice of level N written: the game's lighting volume, 32x32x32
+                // with 6 levels, ~870 draws as a kingdom appears) and a cube map (one face of level N: ~80) - each got
+                // a copy of level 0, slice / face 0 before, ~4 ms of that frame's GPU time and the wrong level read
+                // (settings "Faster kingdom arrival", arrival_mip_views; ODYSSEY_ARRIVAL_MIP_VIEWS=0: off)
+                int ttype = infos[sg]->tex[i].type;
+                bool shape_ok = (b && b->base_type == VK_IMAGE_VIEW_TYPE_2D && ttype == TEXTYPE_2D) ||
+                                (b && arrival_mip_views() &&
+                                 ((b->base_type == VK_IMAGE_VIEW_TYPE_3D && ttype == TEXTYPE_3D) ||
+                                  (b->base_type == VK_IMAGE_VIEW_TYPE_CUBE && ttype == TEXTYPE_CUBE)));
+                if (!same && b && b->image && t != st.rt.depth && rl < b->levels && shape_ok && en) {
                     NvnTextureView v;
                     if (en->has_view) v = en->view; else memset(&v, 0, sizeof v);
                     uint32_t lv0 = (v.setmask & 1) ? v.base_level : 0;
                     if (lv0 < rl) {
-                        if (!fb_disjoint_barrier) {  // (level N - 1 was written by an earlier pass: visible to this draw)
+                        // (arrival_barriers) the levels read were made visible by the chain's barrier and only passes
+                        // into this level came after: none now, and none at the pass's start
+                        bool plain = !pr->vi->uses_gmem_store && !pr->fi->uses_gmem_store && !pr->fi->nimages && !pr->vi->nimages;
+                        if (arrival_barriers() && plain && chain_valid && chain_t == t && chain_level == rl) {
+                            chain_skip_barrier = true;
+                        } else if (!fb_disjoint_barrier) {  // (level N - 1 was written by an earlier pass: visible to this draw)
                             if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
+                            chain_guard++;
                             vk_full_barrier(vk_cmd());
+                            chain_guard--;
                             fb_disjoint_barrier = true;
+                            // (everything before is visible now: a chain on this image's level starts, and the pass
+                            // that follows needs no second barrier)
+                            if (plain) chain_valid = true, chain_t = t, chain_level = rl, chain_skip_barrier = true;
                         }
                         v.setmask |= 1, v.base_level = (uint16_t)lv0, v.num_levels = (uint16_t)(rl - lv0);
                         feedback_tex[nfeedback] = t;
-                        feedback_view[nfeedback++] = vk_view(naliases ? alias_read(t) : t, &v, true, false, TEXTYPE_2D);
+                        feedback_type[nfeedback] = ttype;
+                        feedback_view[nfeedback++] = vk_view(naliases ? alias_read(t) : t, &v, true, false, ttype);
                         stat_feedback_disjoint++;
                         continue;
                     }
@@ -6498,6 +6605,7 @@ static void resolve_feedback(Prog *pr) {
                 pass_depth_sampled = true;
                 stat_depth_direct++;
                 static const VkComponentMapping idm = {0};
+                feedback_type[nfeedback] = TEXTYPE_2D;
                 feedback_tex[nfeedback] = t;
                 feedback_view[nfeedback++] = vk_image_view(src, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, idm, VK_IMAGE_ASPECT_DEPTH_BIT);
                 continue;
@@ -6513,9 +6621,16 @@ static void resolve_feedback(Prog *pr) {
             VkImageAspectFlags sa = src->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : src->aspect;
             static const VkComponentMapping id = {0};
             if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
+                feedback_type[nfeedback] = TEXTYPE_2D;
                 feedback_tex[nfeedback] = t;
                 feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
                 continue;
+            }
+            // (a snapshot is a 2D image: a draw that samples the texture as 3D or cube never binds it - see the texture
+            // binding - so it was GPU work for nothing, with its pass split and a full barrier; arrival_mip_views)
+            {
+                int tt = infos[sg]->tex[i].type;
+                if (arrival_mip_views() && tt != TEXTYPE_2D && tt != TEXTYPE_2D_ARRAY) continue;
             }
             stat_feedback_copies++;
             {   // ODYSSEY_LOG_FEEDBACK=<n>: the first n copies - the target and the sampled view (levels / layers)
@@ -6554,6 +6669,7 @@ static void resolve_feedback(Prog *pr) {
                 debug_save_depth(dst, path);
                 cb = vk_cmd();
             }
+            feedback_type[nfeedback] = TEXTYPE_2D;
             feedback_tex[nfeedback] = t;
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
@@ -6568,11 +6684,60 @@ static VkDescriptorBufferInfo ubo_span(VkSpan s, uint64_t size) {
     return (VkDescriptorBufferInfo){s.buf, s.off, size > max ? max : size};
 }
 
+// (debug, ODYSSEY_LOG_GMEM_RANGES=1) which heap MBs the gmem shaders' storage buffers and the in-place vertex reads use
+static int gt_on = -1;
+static uint8_t gt_sb[4096], gt_vx[4096];
+static uint64_t gt_draws, gt_nosb, gt_maxspan, gt_outside;
+static void gt_mark(uint8_t *m, uint64_t a, uint64_t sz) {
+    if (a < HEAP_BASE || !sz) return;
+    for (uint64_t p = (a - HEAP_BASE) >> 20; p <= (a - HEAP_BASE + sz - 1) >> 20 && p < 4096; p++) m[p] = 1;
+}
+static void gt_sbufs(int stage) {
+    if (gt_on < 0) { const char *e = getenv("ODYSSEY_LOG_GMEM_RANGES"); gt_on = e && atoi(e); }
+    if (!gt_on) return;
+    uint64_t lo = ~0ull, hi = 0; int n = 0;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[stage][i].addr, sz = st.sbuf[stage][i].size;
+        if (!a || !sz) continue;
+        if (a < HEAP_BASE || a - HEAP_BASE >= HEAP_MAX) { gt_outside++; continue; }
+        gt_mark(gt_sb, a, sz); n++;
+        if (a < lo) lo = a;
+        if (a + sz > hi) hi = a + sz;
+    }
+    gt_draws++;
+    if (!n) gt_nosb++;
+    else if (hi - lo > gt_maxspan) gt_maxspan = hi - lo;
+}
+void vk_gmem_trace_report(void) {
+    if (gt_on <= 0) return;
+    char runs[1536]; int k = 0; unsigned nsb = 0, nvx = 0;
+    runs[0] = 0;
+    for (int p = 0; p < 4096; p++) {
+        nsb += gt_sb[p]; nvx += gt_vx[p];
+        if (gt_sb[p] && (p == 0 || !gt_sb[p - 1]) && k < (int)sizeof runs - 32) {
+            int q = p; while (q + 1 < 4096 && gt_sb[q + 1]) q++;
+            k += snprintf(runs + k, sizeof runs - k, " %d-%d", p, q + 1);
+        }
+    }
+    LOG("[gmem-ranges] gmem binds %llu (no sbuf %llu, outside heap %llu), widest draw %llu KB, sbuf MBs %u:%s | in-place vertex MBs %u\n",
+        (unsigned long long)gt_draws, (unsigned long long)gt_nosb, (unsigned long long)gt_outside,
+        (unsigned long long)(gt_maxspan >> 10), nsb, runs, nvx);
+    gt_draws = gt_nosb = gt_outside = gt_maxspan = 0;
+    memset(gt_sb, 0, sizeof gt_sb); memset(gt_vx, 0, sizeof gt_vx);
+}
+
+uint64_t vk_cq_completed(void);
+uint64_t vk_cq_last(void);
+static int gwin_state;  // (the windowed heap import: below, gmem_info)
+static VkBuffer gwin_buf[6];
+static uint64_t gwin_base[6], gwin_size[6];
+
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
     static const uint8_t zeros[0x10000];
     if (k == 0) {
         uint32_t drv[0x800 / 4] = {0};
+        if (si->uses_gmem) gt_sbufs(stage);
         if (stage == 5) {
             drv[0x200 / 4] = gx; drv[0x204 / 4] = gy; drv[0x208 / 4] = gz;
             for (int i = 0; i < 16; i++) {
@@ -6595,6 +6760,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             // around Mario or rolled (a flat sheet).
             float maxpt = g_vk.props.limits.pointSizeRange[1] > 0 ? g_vk.props.limits.pointSizeRange[1] : 2048.0f;
             memcpy(&drv[0x610 / 4], &maxpt, 4);
+        }
+        if (gwin_state == 1 && si->uses_gmem && gwin_buf[stage]) {  // (windowed import: addresses within the stage's window)
+            uint32_t base = stage == 5 ? 0x310 : 0x110 + 0x100 * (stage == 1 ? 4 : 0);
+            for (int i = 0; i < 16; i++) {
+                uint64_t a = st.sbuf[stage][i].addr;
+                if (a < HEAP_BASE + gwin_base[stage] || a >= HEAP_BASE + gwin_base[stage] + gwin_size[stage]) continue;
+                a -= gwin_base[stage];
+                uint32_t *e = &drv[(base + 16 * i) / 4];
+                e[0] = (uint32_t)a; e[1] = (uint32_t)(a >> 32);
+            }
         }
         uint64_t size = si->cbuf_size[0] > sizeof drv ? sizeof drv : (si->cbuf_size[0] ? si->cbuf_size[0] : 256);
         if (size < 0x500 && stage == 5) size = 0x500;
@@ -6726,18 +6901,26 @@ fail:
     return false;
 }
 
-static bool gmem_import(uint64_t size) {
+// The memory type a host import of the heap gets (-1: none)
+static int gmem_host_type(void) {
     PFN_vkGetMemoryHostPointerPropertiesEXT props =
         (PFN_vkGetMemoryHostPointerPropertiesEXT)vkGetDeviceProcAddr(g_vk.dev, "vkGetMemoryHostPointerPropertiesEXT");
     VkMemoryHostPointerPropertiesEXT mp = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
     if (!props || props(g_vk.dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, (void *)(uintptr_t)HEAP_BASE, &mp) != VK_SUCCESS ||
         !mp.memoryTypeBits)
-        return false;
+        return -1;
+    return __builtin_ctz(mp.memoryTypeBits);
+}
+
+// Heap bytes [off, off + size) imported as a GPU buffer (its offset 0 = that heap offset)
+static bool gmem_import_range(uint64_t off, uint64_t size, VkBuffer *pbuf, VkDeviceMemory *pmem, uint32_t *ptype) {
+    int type = gmem_host_type();
+    if (type < 0) return false;
     VkImportMemoryHostPointerInfoEXT imp = {.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                                            .pHostPointer = (void *)(uintptr_t)HEAP_BASE};
+                                            .pHostPointer = (void *)(uintptr_t)(HEAP_BASE + off)};
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &imp, .allocationSize = size,
-                               .memoryTypeIndex = (uint32_t)__builtin_ctz(mp.memoryTypeBits)};
+                               .memoryTypeIndex = (uint32_t)type};
     VkDeviceMemory mem;
     if (vkAllocateMemory(g_vk.dev, &ai, NULL, &mem) != VK_SUCCESS) return false;
     VkExternalMemoryBufferCreateInfo eb = {.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
@@ -6749,6 +6932,16 @@ static bool gmem_import(uint64_t size) {
     vk_buffer_share(&bi);
     if (vkCreateBuffer(g_vk.dev, &bi, NULL, &buf) != VK_SUCCESS) { vkFreeMemory(g_vk.dev, mem, NULL); return false; }
     vkBindBufferMemory(g_vk.dev, buf, mem, 0);
+    *pbuf = buf; *pmem = mem; *ptype = (uint32_t)type;
+    return true;
+}
+
+static bool gmem_import(uint64_t size) {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    VkMemoryAllocateInfo ai = {0};
+    if (!gmem_import_range(0, size, &buf, &mem, &ai.memoryTypeIndex)) return false;
+    VkMemoryHostPointerPropertiesEXT mp = {.memoryTypeBits = 1u << ai.memoryTypeIndex};
     if (gmem_buf) {  // the heap grew: the old import may still be in use by submitted work
         vk_wait_seq(submit_seq);
         vkDestroyBuffer(g_vk.dev, gmem_buf, NULL);
@@ -6757,15 +6950,146 @@ static bool gmem_import(uint64_t size) {
     gmem_buf = buf;
     gmem_mem = mem;
     gmem_size = size;
-    LOG("[vk] guest heap imported for shader global memory: %llu MB\n", (unsigned long long)(size >> 20));
+    // (#99: an Intel HD 610 with 8 GB ran out of graphics memory right after this import, with VMA at 352 of its 3223 MB
+    // heap - likely the import counted against that same heap. Which heap it went to, so a log can confirm it.)
+    VkPhysicalDeviceMemoryProperties pm;
+    vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+    uint32_t heap = pm.memoryTypes[ai.memoryTypeIndex].heapIndex;
+    LOG("[vk] guest heap imported for shader global memory: %llu MB (memory type %u of types %#x, heap %u %s of %llu MB)\n",
+        (unsigned long long)(size >> 20), ai.memoryTypeIndex, mp.memoryTypeBits, heap,
+        pm.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "gpu" : "sys",
+        (unsigned long long)(pm.memoryHeaps[heap].size >> 20));
     return true;
 }
 
 static uint64_t gmem_tried;  // heap size the import was last attempted for (gmem_info imports / re-imports)
 
+// Windowed import (#120, #99: 8 GB PCs with integrated graphics). The whole-heap import lands in a memory heap of about
+// half the RAM there (Windows' shared GPU memory, ~3.6 GB on an 8 GB laptop): the 3.1-3.2 GB import left nearly nothing,
+// and the next allocation failed with "out of graphics memory" ~12 s in. Yet shader global memory is only ever reached
+// through the storage buffers the game binds (NVN puts their addresses in the driver constants, cbuf 0, which this
+// renderer writes: cbuf_info), and those sit in a few MB of the heap (~3 MB in Cap Kingdom on 1.4.1). With Low GPU memory mode
+// on (g_settings.low_gpu_memory, opt-in; off: the whole heap as before), only 16 MB-aligned windows around the bound storage buffers are imported
+// (each its own buffer; a new window overlapping or touching others absorbs them), each draw / dispatch binds the window
+// holding its buffers, and the addresses in its driver constants are rebased by the window's start: the shader's
+// address - HEAP_BASE is then the offset in the window, with no change to the shaders. The windows are the heap's own
+// pages: GPU stores land in guest memory as before (guarded writes unchanged). Vertex / index data: the vertex cache
+// uploads from the CPU instead of copying from the import; ranges it doesn't cache (GPU-written) are read in place from
+// a window. ODYSSEY_VK_GMEM_WINDOW=1 / 0 forces windows / the whole heap; ODYSSEY_VK_GMEM_BUDGET_MB=<MB> stands in for
+// the import heap's budget (the windows' cap, the log's hint). docs/gmem-windowed-import.md.
+#define GWIN_ALIGN (16ull << 20)
+#define GWIN_MAX 32
+typedef struct { uint64_t lo, hi; VkBuffer buf; VkDeviceMemory mem; } GwinSpan;
+static GwinSpan gwin[GWIN_MAX];
+static int gwin_n;
+typedef struct { VkBuffer buf; VkDeviceMemory mem; uint64_t seq, cseq; } GwinDead;
+static GwinDead gwin_dead[GWIN_MAX * 2];
+static int gwin_ndead;
+static int gwin_state = -1;            // -1 not decided, 0 the whole heap, 1 windows
+static uint64_t gwin_heap, gwin_bytes, gwin_cap;
+static VkBuffer gwin_buf[6];           // the window each stage's current draw / dispatch binds (NULL: none, reads 0)
+static uint64_t gwin_base[6], gwin_size[6];
+static uint64_t prof_gwin_fail;
+
+static void gwin_decide(uint64_t want) {
+    const char *e = getenv("ODYSSEY_VK_GMEM_WINDOW"), *eb = getenv("ODYSSEY_VK_GMEM_BUDGET_MB");
+    int type = gmem_host_type();
+    VkPhysicalDeviceMemoryProperties pm;
+    vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+    uint32_t heap = type >= 0 ? pm.memoryTypes[type].heapIndex : 0;
+    VmaBudget bud[VK_MAX_MEMORY_HEAPS];
+    vmaGetHeapBudgets(g_vk.vma, bud);
+    uint64_t budget = eb ? strtoull(eb, NULL, 10) << 20 : bud[heap].budget;
+    gwin_state = e ? atoi(e) != 0 : g_settings.low_gpu_memory;  // (opt-in: the menu's Low GPU memory mode)
+    gwin_cap = budget / 8;
+    if (gwin_cap < (256ull << 20)) gwin_cap = 256ull << 20;
+    if (gwin_cap > (1024ull << 20)) gwin_cap = 1024ull << 20;
+    LOG("[vk] guest heap %llu MB; import heap %u: size %llu MB, budget %llu MB%s, used %llu MB -> %s%s\n",
+        (unsigned long long)(want >> 20), heap, (unsigned long long)(pm.memoryHeaps[heap].size >> 20),
+        (unsigned long long)(budget >> 20), eb ? " (ODYSSEY_VK_GMEM_BUDGET_MB)" : "", (unsigned long long)(bud[heap].usage >> 20),
+        gwin_state ? "imports of the windows shaders use (Low GPU memory mode)" : "one import of the whole heap",
+        !gwin_state && want > budget / 2 ? " - over half of that heap: Settings > Performance > Low GPU memory mode may help" : "");
+}
+
+static void gwin_free_dead(bool all) {
+    uint64_t done = vk_completed_seq(), cdone = vk_cq_completed();
+    int k = 0;
+    for (int i = 0; i < gwin_ndead; i++) {
+        if (!all && (gwin_dead[i].seq > done || gwin_dead[i].cseq > cdone)) { gwin_dead[k++] = gwin_dead[i]; continue; }
+        vkDestroyBuffer(g_vk.dev, gwin_dead[i].buf, NULL);
+        vkFreeMemory(g_vk.dev, gwin_dead[i].mem, NULL);
+    }
+    gwin_ndead = k;
+}
+
+// The window holding heap offsets [lo, hi), imported if needed (-1: over the cap, or the import failed)
+static int gwin_span(uint64_t lo, uint64_t hi) {
+    for (int i = 0; i < gwin_n; i++)
+        if (gwin[i].lo <= lo && hi <= gwin[i].hi) return i;
+    uint64_t nlo = lo & ~(GWIN_ALIGN - 1), nhi = (hi + GWIN_ALIGN - 1) & ~(GWIN_ALIGN - 1);
+    if (nhi > gwin_heap) nhi = gwin_heap;
+    if (nhi <= nlo || hi > nhi) return -1;
+    bool absorb[GWIN_MAX] = {0}, more = true;
+    while (more) {  // (windows overlapping or touching it: merged into it)
+        more = false;
+        for (int i = 0; i < gwin_n; i++)
+            if (!absorb[i] && gwin[i].lo <= nhi && nlo <= gwin[i].hi) {
+                absorb[i] = more = true;
+                if (gwin[i].lo < nlo) nlo = gwin[i].lo;
+                if (gwin[i].hi > nhi) nhi = gwin[i].hi;
+            }
+    }
+    uint64_t freed = 0;
+    int nabs = 0;
+    for (int i = 0; i < gwin_n; i++) if (absorb[i]) freed += gwin[i].hi - gwin[i].lo, nabs++;
+    gwin_free_dead(false);
+    if (gwin_bytes - freed + (nhi - nlo) > gwin_cap || gwin_ndead + nabs > GWIN_MAX * 2 || gwin_n - nabs >= GWIN_MAX) {
+        if (prof_gwin_fail++ < 8)
+            LOG("[vk] guest heap window %llx-%llx not imported: %llu of %llu MB in windows\n", (unsigned long long)(HEAP_BASE + lo),
+                (unsigned long long)(HEAP_BASE + hi), (unsigned long long)(gwin_bytes >> 20), (unsigned long long)(gwin_cap >> 20));
+        return -1;
+    }
+    GwinSpan s = {nlo, nhi, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    uint32_t type;
+    if (!gmem_import_range(nlo, nhi - nlo, &s.buf, &s.mem, &type)) {
+        if (prof_gwin_fail++ < 8)
+            LOG("[vk] guest heap window %llx+%llu MB: import failed\n", (unsigned long long)(HEAP_BASE + nlo),
+                (unsigned long long)((nhi - nlo) >> 20));
+        return -1;
+    }
+    int k = 0;
+    for (int i = 0; i < gwin_n; i++) {  // (absorbed ones: freed once the work recorded so far is done)
+        if (!absorb[i]) { gwin[k++] = gwin[i]; continue; }
+        gwin_dead[gwin_ndead++] = (GwinDead){gwin[i].buf, gwin[i].mem, vk_pending_seq(), vk_cq_last()};
+    }
+    gwin_n = k;
+    gwin[gwin_n] = s;
+    gwin_bytes += (nhi - nlo) - freed;
+    LOG("[vk] guest heap window %llx-%llx imported (%llu MB; %d window%s, %llu MB)\n", (unsigned long long)(HEAP_BASE + nlo),
+        (unsigned long long)(HEAP_BASE + nhi), (unsigned long long)((nhi - nlo) >> 20), gwin_n + 1, gwin_n ? "s" : "",
+        (unsigned long long)(gwin_bytes >> 20));
+    return gwin_n++;
+}
+
+// This stage's draw / dispatch: the window holding all its storage buffers (gwin_buf / gwin_base / gwin_size)
+static void gwin_select(int stage) {
+    uint64_t lo = ~0ull, hi = 0;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[stage][i].addr, sz = st.sbuf[stage][i].size;
+        if (!a || !sz || a < HEAP_BASE || a - HEAP_BASE >= gwin_heap) continue;
+        uint64_t l = a - HEAP_BASE, h = l + sz > gwin_heap ? gwin_heap : l + sz;
+        if (l < lo) lo = l;
+        if (h > hi) hi = h;
+    }
+    int k = hi ? gwin_span(lo, hi) : (gwin_n ? 0 : -1);  // (no storage buffer: any window, nothing reads it)
+    gwin_buf[stage] = k >= 0 ? gwin[k].buf : VK_NULL_HANDLE;
+    gwin_base[stage] = k >= 0 ? gwin[k].lo : 0;
+    gwin_size[stage] = k >= 0 ? gwin[k].hi - gwin[k].lo : 0;
+}
+
 uint64_t prof_gmem_binds;  // (stats) draws and dispatches that bound the imported heap (shader global memory)
-static VkDescriptorBufferInfo gmem_info(void) {
-    prof_gmem_binds++;
+// The import (or the windows' decision), made on first use and again when the heap grows
+static void gmem_ready(void) {
     static int off = -1;
     if (off < 0) {
         const char *e = getenv("ODYSSEY_VK_NO_GMEM");
@@ -6774,14 +7098,28 @@ static VkDescriptorBufferInfo gmem_info(void) {
     }
     uint64_t want = (kernel_heap_size() + 0xFFFF) & ~0xFFFFull;
     if (want > HEAP_MAX) want = HEAP_MAX;
-    if (!off && want > gmem_size && !gmem_import(want)) {
+    if (!off && !gmem_placed && gwin_state < 0) gwin_decide(want);
+    if (!off && gwin_state == 1) gwin_heap = want;
+    else if (!off && want > gmem_size && !gmem_import(want)) {
         LOG("[vk] guest heap import failed (%llu MB): shader global memory reads return zero\n", (unsigned long long)(want >> 20));
         off = 1;
     }
+}
+
+static VkDescriptorBufferInfo gmem_info(void) {
+    prof_gmem_binds++;
+    gmem_ready();
     if (gmem_buf) return (VkDescriptorBufferInfo){gmem_buf, 0, gmem_size};
     static uint32_t zero[1024];
     VkSpan s = vk_transient_copy(zero, sizeof zero, 256);
     return (VkDescriptorBufferInfo){s.buf, s.off, sizeof zero};
+}
+
+// A stage's global memory binding: its window (gwin_select, made by stage_set) or the whole heap
+static VkDescriptorBufferInfo gmem_info_stage(int stage) {
+    VkDescriptorBufferInfo r = gmem_info();
+    if (gwin_state == 1 && gwin_buf[stage]) return (VkDescriptorBufferInfo){gwin_buf[stage], 0, gwin_size[stage]};
+    return r;  // (the whole heap; with windows and none for this stage, the zeros)
 }
 
 // Linear render targets written back to guest memory: a texture with a pitch (agl's createAglTextureDataLinear) that
@@ -6883,6 +7221,7 @@ uint64_t vk_cq_completed(void) {
     if (g_vk.ctimeline) vkGetSemaphoreCounterValue(g_vk.dev, g_vk.ctimeline, &v);
     return v;
 }
+uint64_t vk_cq_last(void) { return cq_value; }  // (the last compute queue submission)
 static VkCommandBuffer cq_begin(void) {
     int i = cq_slot;
     cq_slot = (cq_slot + 1) % CQB;
@@ -6999,6 +7338,8 @@ static bool gm_init(void) {
     return true;
 }
 
+static VkBuffer gfast_src;  // (gfast_prepare) the buffer the dispatch's storage is read from: the heap or its window
+static uint64_t gfast_src_size, gfast_base;  // (its size; its heap offset)
 static void gfast_prepare(VkCommandBuffer cb) {
     static int on = -1;
     if (on < 0) { const char *e = getenv("ODYSSEY_VK_GMEM_FAST"); on = !e || atoi(e) != 0; }
@@ -7006,12 +7347,18 @@ static void gfast_prepare(VkCommandBuffer cb) {
     gfast_n = 0;
     gmem_info();  // (the heap import, made on first use)
     gfast_info();
-    if (!on || !gmem_buf) return;
+    // (offsets below are in the buffer the shader reads: the whole heap, or with a windowed import the dispatch's window)
+    VkBuffer src = gmem_buf;
+    uint64_t base = 0, lim = gmem_size;
+    if (gwin_state == 1) { gwin_select(5); src = gwin_buf[5]; base = gwin_base[5]; lim = gwin_size[5]; }
+    gfast_src = src; gfast_src_size = lim; gfast_base = base;
+    if (!on || !src) return;
     struct { uint64_t lo, hi; } r[16], ex[16];
     int n = 0, nex = 0;
     for (int i = 0; i < 16; i++) {  // heap offsets of the bound storage buffers, 256-aligned
         uint64_t a = st.sbuf[5][i].addr, sz = st.sbuf[5][i].size;
-        if (!a || !sz || a < HEAP_BASE || a - HEAP_BASE + sz > gmem_size) continue;
+        if (!a || !sz || a < HEAP_BASE + base || a - HEAP_BASE - base + sz > lim) continue;
+        a -= base;
         {   // (exact, sorted, overlapping ones merged: the copy back)
             uint64_t elo = a - HEAP_BASE, ehi = elo + sz;
             int k = nex++;
@@ -7019,7 +7366,7 @@ static void gfast_prepare(VkCommandBuffer cb) {
             ex[k].lo = elo; ex[k].hi = ehi;
         }
         uint64_t lo = (a - HEAP_BASE) & ~255ull, hi = (a - HEAP_BASE + sz + 255) & ~255ull;
-        if (hi > gmem_size) hi = gmem_size;
+        if (hi > lim) hi = lim;
         int k = n++;
         while (k > 0 && r[k - 1].lo > lo) { r[k] = r[k - 1]; k--; }  // (insertion sort by start)
         r[k].lo = lo; r[k].hi = hi;
@@ -7049,8 +7396,8 @@ static void gfast_prepare(VkCommandBuffer cb) {
             LOG("\n");
         }
     }
-    vkCmdCopyBuffer(cb, gmem_buf, gfast_info().buffer, (uint32_t)m, cp);
-    if (gm_init()) vkCmdCopyBuffer(cb, gmem_buf, gfast_prev, (uint32_t)m, cp);  // (as before the dispatch: word-exact copy back)
+    vkCmdCopyBuffer(cb, src, gfast_info().buffer, (uint32_t)m, cp);
+    if (gm_init()) vkCmdCopyBuffer(cb, src, gfast_prev, (uint32_t)m, cp);  // (as before the dispatch: word-exact copy back)
     vk_full_barrier(cb);
     gmap_tab[GMAP_MAX * 4] = (uint32_t)m;
     memcpy(gfast_cp, cp, (size_t)m * sizeof cp[0]);
@@ -7076,7 +7423,7 @@ static bool gfast_finish(VkCommandBuffer cb, bool wait) {
     vk_full_barrier(cb);
     if (gfast_nback && gm_state == 1) {  // (word-exact: only the words the dispatch changed)
         VkDescriptorSet set = vk_alloc_set(gm_set);
-        VkDescriptorBufferInfo bf = {gfast_buf, 0, GFAST_SIZE}, bp = {gfast_prev, 0, GFAST_SIZE}, bh = gmem_info();
+        VkDescriptorBufferInfo bf = {gfast_buf, 0, GFAST_SIZE}, bp = {gfast_prev, 0, GFAST_SIZE}, bh = {gfast_src, 0, gfast_src_size};
         VkWriteDescriptorSet w[3];
         VkDescriptorBufferInfo *bi3[3] = {&bf, &bp, &bh};
         for (int i = 0; i < 3; i++)
@@ -7093,12 +7440,12 @@ static bool gfast_finish(VkCommandBuffer cb, bool wait) {
             vkCmdPushConstants(cb, gm_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pcv, pcv);
             vkCmdDispatch(cb, (pcv[2] + 63) / 64, 1, 1);
         }
-    } else if (gfast_nback) vkCmdCopyBuffer(cb, gfast_info().buffer, gmem_buf, (uint32_t)gfast_nback, gfast_back);
+    } else if (gfast_nback) vkCmdCopyBuffer(cb, gfast_info().buffer, gfast_src, (uint32_t)gfast_nback, gfast_back);
     vk_full_barrier(cb);
     bool guard = wait && gw_guard_on();
     if (guard)
         for (int i = 0; i < gfast_nback; i++)
-            gw_record(HEAP_BASE + gfast_back[i].dstOffset, HEAP_BASE + gfast_back[i].dstOffset + gfast_back[i].size,
+            gw_record(HEAP_BASE + gfast_base + gfast_back[i].dstOffset, HEAP_BASE + gfast_base + gfast_back[i].dstOffset + gfast_back[i].size,
                       g_on_cq ? cq_value + 1 : 0);  // (on the compute queue: the submission it is about to make)
     else if (wait) vk_note_guest_write_k(1);
     gfast_n = 0;
@@ -7214,9 +7561,9 @@ static bool vcache_lookup(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceS
             vc_on = 0;
         }
     }
-    if (!vc_on || !gmem_buf || size > VC_MAX_RANGE) return false;
+    if (!vc_on || (!gmem_buf && gwin_state != 1) || size > VC_MAX_RANGE) return false;
     uint64_t lo = (addr - HEAP_BASE) & ~(VC_PAGE - 1), hi = (addr - HEAP_BASE + size + VC_PAGE - 1) & ~(VC_PAGE - 1);
-    if (hi > gmem_size) return false;
+    if (hi > (gmem_buf ? gmem_size : gwin_heap)) return false;
     uint64_t pend = vk_pending_seq();
     uint64_t h = (lo * 0x9E3779B97F4A7C15ull) ^ (hi * 0xC2B2AE3D27D4EB4Full);
     uint32_t slot = (uint32_t)(h ^ (h >> 32)) & (VC_TAB - 1), free_slot = ~0u, old_slot = ~0u;
@@ -7304,10 +7651,13 @@ void vc_flush(void) {
             if (nc == 64) { nc = 1; cp[0] = (VkBufferCopy){e->lo, 0, e->hi - e->lo}; break; }  // (scattered: the whole range)
             cp[nc++] = (VkBufferCopy){o, o - e->lo, VC_PAGE};
         }
-        if (nc) {
-            vkCmdCopyBuffer(cb, gmem_buf, e->buf, (uint32_t)nc, cp);
-            for (int k = 0; k < nc; k++) prof_vc_copied += cp[k].size;
+        if (nc && gmem_buf) vkCmdCopyBuffer(cb, gmem_buf, e->buf, (uint32_t)nc, cp);
+        else for (int k = 0; k < nc; k++) {  // (windowed import: no heap buffer to copy from - uploaded from the CPU)
+            VkSpan sp = vk_transient_copy((const void *)(uintptr_t)(HEAP_BASE + cp[k].srcOffset), cp[k].size, 16);
+            VkBufferCopy c = {sp.off, cp[k].dstOffset, cp[k].size};
+            vkCmdCopyBuffer(cb, sp.buf, e->buf, 1, &c);
         }
+        for (int k = 0; k < nc; k++) prof_vc_copied += cp[k].size;
         e->gen = g;
     }
     vc_npend = 0;
@@ -7334,9 +7684,20 @@ static bool guest_direct(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSi
     bool copy = forced >= 0 ? forced : false;
 #endif
     if (copy || addr < HEAP_BASE) return false;
+    if (gwin_state == 1) {  // (windowed import: the vertex cache, else in place from a window - GPU-written data among it)
+        if (addr - HEAP_BASE + size > gwin_heap) return false;
+        if (vcache_lookup(addr, size, buf, off)) return true;
+        if (gt_on > 0) gt_mark(gt_vx, addr, size);
+        int k = gwin_span(addr - HEAP_BASE, addr - HEAP_BASE + size);
+        if (k < 0) return false;
+        *buf = gwin[k].buf;
+        *off = addr - HEAP_BASE - gwin[k].lo;
+        return true;
+    }
     if (addr + size > HEAP_BASE + gmem_size && kernel_heap_size() != gmem_tried) { gmem_tried = kernel_heap_size(); gmem_info(); }
     if (!gmem_buf || addr + size > HEAP_BASE + gmem_size) return false;
     if (vcache_lookup(addr, size, buf, off)) return true;
+    if (gt_on > 0) gt_mark(gt_vx, addr, size);
     *buf = gmem_buf;
     *off = addr - HEAP_BASE;
     return true;
@@ -7366,6 +7727,11 @@ void vk_exec_reset(void) {
     }
     gmem_size = gmem_tried = 0;
     gmem_placed = false;
+    for (int i = 0; i < gwin_n; i++) gwin_dead[gwin_ndead++] = (GwinDead){gwin[i].buf, gwin[i].mem, 0, 0};
+    gwin_free_dead(true);  // (the GPU is idle here)
+    gwin_n = 0;
+    gwin_bytes = 0;
+    memset(gwin_buf, 0, sizeof gwin_buf);
     for (int i = 0; i < VC_TAB; i++)  // (the vertex cache: copies of the old pages)
         if (vc_tab[i].buf) vmaDestroyBuffer(g_vk.vma, vc_tab[i].buf, vc_tab[i].mem);
     memset(vc_tab, 0, sizeof vc_tab);
@@ -7419,7 +7785,8 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
             renderer_texture_scale(e->tex, &sc[0], &sc[1]);
             wh[0] = e->tex->width; wh[1] = e->tex->height;
             for (int k = 0; k < nfeedback; k++)
-                if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY)) {
+                if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY ||
+                                                  (feedback_type[k] != TEXTYPE_2D && st_->type == feedback_type[k]))) {
                     view = feedback_view[k];
                     if (st_->type == TEXTYPE_2D_ARRAY) view = vk_dummy_view(TEXTYPE_2D_ARRAY);  // (2D snapshot as array: rare)
                 }
@@ -7492,6 +7859,26 @@ static float farview_mode(float bq) {
     return env >= 0 ? (float)env : bq > 0 ? 1.0f : 0.0f;
 }
 
+// HUD quality High (settings hud_quality; ODYSSEY_HUD_QUALITY=0/1 overrides, for tests): the layouts' draws use the
+// fragment shader variant that enlarges their textures along smooth edges (ShaderKey hud_filter, maxwell/translate.c
+// hudSample), with this strength in rscale[slot].z (ODYSSEY_HUD_FILTER=<strength>, tests; 0.75 by default: an edge at
+// 3x the Switch's size becomes 2.5 times narrower). Off: the game's own programs and sampling, as on the Switch.
+// ODYSSEY_HUD_FLIP_AT=<frame> (tests): the other quality from that frame on.
+static float hud_filter_strength(void) {
+    static int env = -2;
+    static float k;
+    static long flip_at;
+    if (env == -2) {
+        env = getenv("ODYSSEY_HUD_QUALITY") ? atoi(getenv("ODYSSEY_HUD_QUALITY")) : -1;
+        k = getenv("ODYSSEY_HUD_FILTER") ? (float)atof(getenv("ODYSSEY_HUD_FILTER")) : 0.75f;
+        flip_at = getenv("ODYSSEY_HUD_FLIP_AT") ? atol(getenv("ODYSSEY_HUD_FLIP_AT")) : 0;
+    }
+    bool on = env >= 0 ? env > 0 : g_settings.hud_quality != 0;
+    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) on = !on;
+    return on ? k : 0.0f;
+}
+static float g_hud_draw_filter;  // (draw_) this draw's: > 0 for a layout's draw at High
+
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[8], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
                                  const VkImageView *storage_views) {
@@ -7502,6 +7889,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     int n = 0;
     int sg = stage == 1 ? 1 : 0;
     float rs[66][4] = {{1, 1, 0, 0}};  // ([65]: mirror mode, renderer.m)
+    if (si->uses_gmem) { gmem_ready(); if (gwin_state == 1) gwin_select(stage); }  // (before cbuf 0: its addresses)
     if (rscale_row0) memcpy(rs[0], rscale_row0, 16);
     rs[65][0] = g_mirror_w;
     for (int i = 0; i < p->nbinds; i++) {
@@ -7529,7 +7917,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             bi[n] = cbuf_info(stage, si, (int)b->binding, gx, gy, gz);
             w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-            bi[n] = b->binding == GFAST_BUFFER_INDEX ? gfast_info() : gmem_info();
+            bi[n] = b->binding == GFAST_BUFFER_INDEX ? gfast_info() : gmem_info_stage(stage);
             w[n].pBufferInfo = &bi[n];
         } else {
             continue;  // rscale / tint: written below, once the textures (and their scales) are known
@@ -7547,7 +7935,9 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
         } else if (b->binding == 18) {
             // .z: bloom quality High (only the recognised composite reads it: maxwell/translate.c bloomUp)
             // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
+            // (a layout's draw at HUD quality High: .z the enlargement's strength instead - its variant's hudSample)
             float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
+            if (sg && p->fkey.hud_filter) bq = g_hud_draw_filter;
             for (int t = 0; t < si->ntex && t < 64; t++) {
                 rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
             }
@@ -7862,6 +8252,37 @@ static bool topology(uint32_t mode, VkPrimitiveTopology *t, uint8_t *cls) {
     }
 }
 
+// (HUD layer) The game reads its picture while its layouts are in the layer - other than its copy into the window's
+// texture: it keeps the frame (a capture drawn again in the next frames, while a stage loads after Mario's death:
+// the scene came back for ~0.7 s between the closed wipe and the coin count, as the capture had no wipe in it -
+// issue #114, docs/death-screen-114.md). The layer goes into the picture first, as the game had drawn it there
+// (hud_flush). A few times a session (title, stage changes, deaths): the HUD stays on the layer otherwise.
+// ODYSSEY_HUD_READ_FLUSH=0: not (as 0.5.4).
+static void hud_read_flush(NvnTexture *dst) {
+    static int env = -1;
+    if (env < 0) { const char *e = getenv("ODYSSEY_HUD_READ_FLUSH"); env = !e || atoi(e) != 0; }
+    if (!env || (dst && dst->window)) return;
+    if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    hud_flush(cb, hud.target);
+    static int n;
+    if (n++ < 3)
+        LOG("[hud] frame %llu: the game read its picture under the layer (into %ux%u f%#x)\n",
+            (unsigned long long)renderer_present_count(), dst ? dst->width : 0, dst ? dst->height : 0, dst ? dst->format : 0);
+}
+// (what the layer holds belongs to the picture as it is: drawn in this frame, or in an earlier one with the picture
+// not drawn into since - a frame the game doesn't draw, where it only keeps its last picture)
+static inline bool hud_layer_pending(void) { return hud.on && hud.target && hud.written && hud.written >= hud.drawn; }
+static void hud_read_check(Prog *pr) {
+    NvnTexture *dst = st.rt.ncolor ? st.rt.color[0] : NULL;
+    if (dst == hud.target) return;  // (into the picture itself: begin_pass)
+    ShaderInfo *infos[2] = {pr->vi, pr->fi};
+    for (int sg = 0; sg < 2; sg++)
+        for (int i = 0; i < infos[sg]->ntex; i++)
+            if (shader_texture_object(sg, &infos[sg]->tex[i]) == hud.target) { hud_read_flush(dst); return; }
+}
+
 static void draw_(CmdRec *r, bool indexed);
 static void draw(CmdRec *r, bool indexed) {
     PROF_T0();
@@ -8045,6 +8466,10 @@ static void draw_(CmdRec *r, bool indexed) {
     ShaderKey vkey, fkey;
     base_keys(&vkey, &fkey);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
+    // (HUD quality High: the layouts' draws get the variant that enlarges their textures smoothly - in the vertex key
+    // too: the program table keys on it)
+    g_hud_draw_filter = ui_mark ? hud_filter_strength() : 0.0f;
+    if (g_hud_draw_filter > 0) vkey.hud_filter = fkey.hud_filter = 1;
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
         // rt_kind 3; the picture before it has half floats: textures.c "Banding")
         bool deband = vk_deband();
@@ -8165,6 +8590,7 @@ static void draw_(CmdRec *r, bool indexed) {
     }
     if (ct_on()) ct_draw(pr, "draw");
     alias_draw_check();
+    if (hud_layer_pending() && !hud_want) hud_read_check(pr);
     resolve_feedback(pr);
     {   // (direct depth reads) a depth / stencil write after this pass sampled its depth: in a new pass
         bool writes_ds = st.rt.depth && ((st.ds[0] && st.ds[1]) || (st.ds[3] && ((st.stencil_mask[0] | st.stencil_mask[1]) & 0xFF)));
@@ -8374,6 +8800,35 @@ static void draw_(CmdRec *r, bool indexed) {
     PROF_ADD(prof_sets);
     VkDescriptorImageInfo fii[64];
     uint64_t prof_tx_ = prof ? SDL_GetTicksNS() : 0;
+    {   // ODYSSEY_LOG_RT_DRAWS=<target's address, hex>[:<every N frames, default 60>] (debug): the draws into the colour
+        // target at that address - shaders, vertices, and each texture the fragment shader samples (a height map the
+        // game reads on the CPU: what is it made from)
+        static uint64_t want = ~0ull, every = 60;
+        if (want == ~0ull) {
+            const char *e = getenv("ODYSSEY_LOG_RT_DRAWS");
+            unsigned long long a = 0, n = 0;
+            if (e && sscanf(e, "%llx:%llu", &a, &n) >= 1 && n) every = n;
+            want = a;
+        }
+        NvnTexture *t0 = want && st.rt.ncolor ? st.rt.color[0] : NULL;
+        if (t0 && t0->addr == want && renderer_present_count() % every == 0) {
+            LOG("[rt-draw] frame %llu into %llx %ux%u fmt %#x: vs %llx fs %llx, %d vertices%s, blend %d, %d textures\n",
+                (unsigned long long)renderer_present_count(), (unsigned long long)t0->addr, t0->width, t0->height, t0->format,
+                (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr,
+                (int)r->x[2], indexed ? " (indexed)" : "", (int)(st.color_state[0] & 1), pr->fi->ntex);
+            for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
+                int slot = ((int)pr->fi->tex[i].handle_offset - 0x20) / 8;
+                uint64_t h = (slot >= 0 && slot < 32) ? st.tex[1][slot] : 0;
+                uint32_t tic = h & 0xFFFFF;
+                NvnTexture *x = h && st.tpool && tic < (uint32_t)st.tpool->count ? ((NvnTexEntry *)st.tpool->entries)[tic].tex : NULL;
+                TexBackend *xb = x ? x->backend : NULL;
+                LOG("[rt-draw]   texture %d (slot %d, handle %llx): %s %llx %ux%u fmt %#x%s%s%s\n", i, slot, (unsigned long long)h,
+                    !h ? "NOT BOUND (handle 0)" : !x ? "NO TEXTURE at that pool id" : "texture", (unsigned long long)(x ? x->addr : 0),
+                    x ? x->width : 0, x ? x->height : 0, x ? x->format : 0, x && !xb ? ", no GPU image yet" : "",
+                    xb && xb->gpu_owned ? ", GPU-drawn" : "", xb && !xb->gpu_owned && xb->uploaded ? ", uploaded from memory" : "");
+            }
+        }
+    }
     for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
         float sc[2]; uint32_t wh[2];
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
@@ -8432,13 +8887,41 @@ static void draw_(CmdRec *r, bool indexed) {
             else if (ui2d_ylo <= -359.0f && ui2d_yhi < 200.0f) band = 1;   // (a band along the HUD's bottom edge)
             else if (ui2d_yhi >= 359.0f && ui2d_ylo > -200.0f) band = 2;   // (... its top edge)
         }
-        if (ui_mark && pass_sx > pass_sy * 1.01f) {  // (HUD position: Edges; a stretched pane stays)
-            float shift = hud_edge_shift(pass_sx / pass_sy);
-            if (shift != 0 && k <= 1.0f) {
-                int pw, ph;
-                pass_size(&pw, &ph);
-                vp_ox += shift * pw / (1280.0f * (pass_sx / pass_sy));
+        {   // ODYSSEY_LOG_HUD_DRAWS=1 (tests): each fragment shader the layouts draw with, once, with its textures' sizes
+            static int lg = -1;
+            if (lg < 0) lg = getenv("ODYSSEY_LOG_HUD_DRAWS") != NULL;
+            if (lg && ui_mark && g_debug_frame) {  // (a debug frame: every layout draw's textures, sizes and scales)
+                char line[400];
+                int n = snprintf(line, sizeof line, "[hud-draw] layout %llx fs hash %016llx:", (unsigned long long)ui_anchored,
+                                 (unsigned long long)g_cur_fs_hash);
+                for (int t = 0; t < pr->fi->ntex && t < 8; t++)
+                    n += snprintf(line + n, sizeof line - n, " %ux%u x%.3f,%.3f", tex_wh[1][t][0], tex_wh[1][t][1], tex_sc[1][t][0], tex_sc[1][t][1]);
+                LOG("%s\n", line);
             }
+            if (lg && ui_mark) {
+                static uint64_t seen[512];
+                static int ns;
+                int i = 0;
+                while (i < ns && seen[i] != g_cur_fs_hash) i++;
+                if (i == ns && ns < 512) {
+                    seen[ns++] = g_cur_fs_hash;
+                    char line[400];
+                    int n = snprintf(line, sizeof line, "[hud-draw] fs %llx hash %016llx frame %llu, %d textures:",
+                                     (unsigned long long)st.program->stages[1].code_addr, (unsigned long long)g_cur_fs_hash,
+                                     (unsigned long long)renderer_present_count(), pr->fi->ntex);
+                    for (int t = 0; t < pr->fi->ntex && t < 8; t++)
+                        n += snprintf(line + n, sizeof line - n, " %ux%u(type %d)", tex_wh[1][t][0], tex_wh[1][t][1], pr->fi->tex[t].type);
+                    LOG("%s\n", line);
+                }
+            }
+        }
+        if (ui_mark && (pass_sx > pass_sy * 1.01f || pass_sy > pass_sx * 1.01f)) {  // (HUD position: Edges; a stretched pane stays)
+            float q = pass_sx / pass_sy, up = 0, shift = hud_edge_shift(q, &up);
+            int pw, ph;
+            pass_size(&pw, &ph);
+            if (shift != 0 && k <= 1.0f) vp_ox += shift * pw / (1280.0f * q);
+            // (narrower than 16:9: the HUD is q of the target's height - up is towards y 0)
+            if (up != 0 && ky <= 1.0f && !band) vp_oy -= up * ph * q / 720.0f;
         }
         float vx = vp[0] * vp_sx + vp_ox, vw = vp[2] * vp_sx;
         if (k > 1.0f) { vx -= vw * (k - 1) / 2; vw *= k; }
@@ -9168,8 +9651,25 @@ bool renderer_fog_texel_cached(uint64_t addr, uint32_t x, uint32_t y, uint32_t c
     }
     static uint64_t hits, misses;
     if (ok) hits++; else misses++;
-    if (getenv("ODYSSEY_LOG_LINREAD") && (hits + misses) % 2000 == 1)
-        LOG("[fog-read] %llu from the copy, %llu through the render thread\n", (unsigned long long)hits, (unsigned long long)misses);
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+    if (lg) {  // (per map, every 300 frames: reads answered from its copy, reads that found none - the guest's own memory was read)
+        static struct { uint64_t addr, hit, miss; } pm[16];
+        static uint64_t last;
+        int k = 0;
+        while (k < 16 && pm[k].addr && pm[k].addr != addr) k++;
+        if (k < 16) { pm[k].addr = addr; if (ok) pm[k].hit++; else pm[k].miss++; }
+        uint64_t f = renderer_present_count();
+        if (f - last >= 300) {
+            last = f;
+            for (k = 0; k < 16 && pm[k].addr; k++) {
+                if (pm[k].hit + pm[k].miss)
+                    LOG("[fog-read] frame %llu map %llx: %llu reads from its copy, %llu without one\n", (unsigned long long)f,
+                        (unsigned long long)pm[k].addr, (unsigned long long)pm[k].hit, (unsigned long long)pm[k].miss);
+                pm[k].hit = pm[k].miss = 0;
+            }
+        }
+    }
     pthread_mutex_unlock(&fog_pub_lock);
     return ok;
 }
@@ -9186,7 +9686,17 @@ void renderer_cpu_texel(RqCpuTexel *q) {
     if (!b || !b->image || !fi || !format_ok || !q->components || q->components > 4 || fi->bpb != q->components * bytes || q->component >= q->components ||
         b->guest_format ||
         b->width != t->width || b->height != t->height || b->layers != 1 || b->depth != 1 || b->samples != 1 ||
-        q->x >= b->width || q->y >= b->height || b->width > 1024 || b->height > 1024) return;
+        q->x >= b->width || q->y >= b->height || b->width > 1024 || b->height > 1024) {
+        static int lg = -1, n;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+        if (lg && n++ < 60)
+            LOG("[fog-read] frame %llu no readback for %llx (%u components of %u bytes, texel %u %u): %s%s texture %llu %ux%u fmt %#x, image %ux%u layers %u samples %u guest format %d\n",
+                (unsigned long long)renderer_present_count(), (unsigned long long)q->addr, q->components, bytes, q->x, q->y,
+                !t ? "no texture at that address" : !b ? "no GPU image" : "not readable:", t && !format_ok ? " format" : "",
+                (unsigned long long)(t ? t->debug_id : 0), t ? t->width : 0, t ? t->height : 0, t ? t->format : 0, b ? b->width : 0,
+                b ? b->height : 0, b ? b->layers : 0, b ? b->samples : 0, b ? (int)b->guest_format : 0);
+        return;
+    }
     uint64_t row_bytes = (uint64_t)b->width * fi->bpb;
     if (q->snapshot && (bytes != 4 || !nvn_flags_linear(t->flags) || q->guest_pitch != t->stride ||
         !nvn_linear_rows_fit(q->guest_capacity, q->guest_pitch, row_bytes, b->height) ||
@@ -9212,49 +9722,76 @@ void renderer_cpu_texel(RqCpuTexel *q) {
     static int fog_sync = -1;
     if (fog_sync < 0) fog_sync = getenv("ODYSSEY_FOG_READBACK_SYNC") && atoi(getenv("ODYSSEY_FOG_READBACK_SYNC"));
     if (bytes == 2 && !q->snapshot && !q->refresh_snapshot && !fog_sync) {
-        if (e->issued_frame != frame) {
-            Slot *s = NULL;
-            uint64_t done = vk_completed_seq();
-            for (int i = 0; i < 3 && !s; i++) if (e->slot[i].seq <= done) s = &e->slot[i];  // (a free one)
-            if (s) {
-                if (s->cap < size) {
-                    if (s->buf) vmaDestroyBuffer(g_vk.vma, s->buf, s->mem);
-                    s->buf = VK_NULL_HANDLE;
-                    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
-                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
-                    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-                                                  .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
-                    VmaAllocationInfo info;
-                    if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &s->buf, &s->mem, &info) == VK_SUCCESS) s->ptr = info.pMappedData, s->cap = size;
-                    else s->buf = VK_NULL_HANDLE, s->cap = 0;
-                }
-                if (s->buf) {
-                    vk_end_pass();
-                    st.rt_dirty = true;
-                    VkCommandBuffer cb = vk_cmd();
-                    vk_full_barrier(cb);
-                    VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {b->width, b->height, 1}};
-                    vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, s->buf, 1, &cp);
-                    s->seq = vk_pending_seq();
-                    s->size = size;
-                    e->issued_frame = frame;
+        // The finished copy is taken BEFORE this frame's copy is recorded. The other way round - as it was - the frame's
+        // copy went into the first slot the GPU had finished, which is the very copy about to be taken: whenever the GPU
+        // kept exactly a frame behind (finished the last copy by the next ask), each frame's copy overwrote the one
+        // before it unread, no copy was ever taken, and the game read its own memory instead of the map for as long as
+        // that timing held - zeros, or texels left from earlier reads. Which it was changed from one stage entry to the
+        // next (Seaside's sea in the Koopa race scene: 0 of 5,686 reads of its wave map answered; the stage before it:
+        // 12,997 of 13,013). #116 (Luncheon's stew under a captured Lava Bubble: LavaWave::calcPos) and #117.
+        // ODYSSEY_FOG_READBACK_ORDER=old: the copy recorded first, as before.
+        static int harvest_late = -1;
+        if (harvest_late < 0) { const char *o = getenv("ODYSSEY_FOG_READBACK_ORDER"); harvest_late = o && !strcmp(o, "old"); }
+        uint64_t done = vk_completed_seq();
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == !harvest_late && e->issued_frame != frame) {
+                Slot *s = NULL;
+                uint64_t done = vk_completed_seq();
+                for (int i = 0; i < 3 && !s; i++) if (e->slot[i].seq <= done) s = &e->slot[i];  // (a free one)
+                if (s) {
+                    if (s->cap < size) {
+                        if (s->buf) vmaDestroyBuffer(g_vk.vma, s->buf, s->mem);
+                        s->buf = VK_NULL_HANDLE;
+                        VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
+                                                 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+                        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+                                                      .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
+                        VmaAllocationInfo info;
+                        if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &s->buf, &s->mem, &info) == VK_SUCCESS) s->ptr = info.pMappedData, s->cap = size;
+                        else s->buf = VK_NULL_HANDLE, s->cap = 0;
+                    }
+                    if (s->buf) {
+                        vk_end_pass();
+                        st.rt_dirty = true;
+                        VkCommandBuffer cb = vk_cmd();
+                        vk_full_barrier(cb);
+                        VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {b->width, b->height, 1}};
+                        vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, s->buf, 1, &cp);
+                        s->seq = vk_pending_seq();
+                        s->size = size;
+                        e->issued_frame = frame;
+                    }
                 }
             }
-        }
-        uint64_t done = vk_completed_seq();
-        Slot *best = NULL;  // (the newest finished copy)
-        for (int i = 0; i < 3; i++) {
-            Slot *s = &e->slot[i];
-            if (s->seq && s->seq <= done && s->size == size && (!best || s->seq > best->seq)) best = s;
-        }
-        if (best && best->seq > e->have_seq) {
-            if (e->size != size) { free(e->bytes); e->bytes = malloc(size); e->size = size; }
-            if (!e->bytes) { e->size = 0; return; }
-            vmaInvalidateAllocation(g_vk.vma, best->mem, 0, VK_WHOLE_SIZE);
-            memcpy(e->bytes, best->ptr, size);
-            e->have_seq = best->seq;
-            e->frame = frame;
-            fog_publish(q->addr, b->width, b->height, fi->bpb, e->bytes, size);
+
+            if (pass != harvest_late) continue;
+            done = vk_completed_seq();
+            {   // (ODYSSEY_LOG_LINREAD: the first asks about each map)
+                static int lg = -1;
+                static struct { uint64_t addr; int n; } seen[16];
+                if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+                int k = 0;
+                while (lg && k < 16 && seen[k].addr && seen[k].addr != q->addr) k++;
+                if (lg && k < 16 && (seen[k].addr = q->addr, seen[k].n++ < 6))
+                    LOG("[fog-read] frame %llu ask %llx: texture %llu %ux%u fmt %#x live %d, copy issued frame %llu, slots %llu %llu %llu, finished up to %llu, have %llu\n",
+                        (unsigned long long)frame, (unsigned long long)q->addr, (unsigned long long)t->debug_id, t->width, t->height, t->format, t->live,
+                        (unsigned long long)e->issued_frame, (unsigned long long)e->slot[0].seq, (unsigned long long)e->slot[1].seq,
+                        (unsigned long long)e->slot[2].seq, (unsigned long long)done, (unsigned long long)e->have_seq);
+            }
+            Slot *best = NULL;  // (the newest finished copy)
+            for (int i = 0; i < 3; i++) {
+                Slot *s = &e->slot[i];
+                if (s->seq && s->seq <= done && s->size == size && (!best || s->seq > best->seq)) best = s;
+            }
+            if (best && best->seq > e->have_seq) {
+                if (e->size != size) { free(e->bytes); e->bytes = malloc(size); e->size = size; }
+                if (!e->bytes) { e->size = 0; return; }
+                vmaInvalidateAllocation(g_vk.vma, best->mem, 0, VK_WHOLE_SIZE);
+                memcpy(e->bytes, best->ptr, size);
+                e->have_seq = best->seq;
+                e->frame = frame;
+                fog_publish(q->addr, b->width, b->height, fi->bpb, e->bytes, size);
+            }
         }
         if (e->have_seq && e->size == size) {
             memcpy(&q->value, e->bytes + ((uint64_t)q->y * b->width + q->x) * fi->bpb + q->component * bytes, bytes);
@@ -9584,6 +10121,7 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
                            (unsigned long long)renderer_present_count());
     }
     vk_end_pass();
+    if (st_ == hud.target && dt != st_ && hud_layer_pending()) hud_read_flush(dt);
     if (dl_on == 2) renderer_flush();  // (ODYSSEY_VK_DEVLOST_TRACE=2: each copy its own submission, waited on)
     gp_mark(vk_cmd(), "copy texture %ux%u -> %ux%u", st_->width, st_->height, dt->width, dt->height);
     dl_note("copy texture %ux%u f%#x -> %ux%u f%#x (%p -> %p)", st_->width, st_->height, st_->format, dt->width, dt->height,
@@ -10020,18 +10558,8 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
 }
 
 // Inside the window image's rendering (device.c vk_frame_begin): the game image into (vx, vy, vw, vh).
-// HUD sharpening: the game's HUD art is made for 720 lines; on a larger picture its enlarged text and icons are soft.
-// The layer is sharpened when it is composited (shaders.c hud_over.frag): nothing below 900 lines, rising to the full
-// strength at 1440 and above. ODYSSEY_HUD_SHARPEN=<0..1>: the full strength (0: off; 0.6 by default).
-static float hud_sharpness(uint32_t oh) {
-    // (Graphics > Sharper HUD and menus: settings hud_sharpen; the variable, when set, decides instead)
-    static float full = -1;
-    static bool env;
-    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); env = e && *e; full = env ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
-    if (oh < 900 || full <= 0 || (!env && !g_settings.hud_sharpen)) return 0;
-    float t = ((float)oh - 900.0f) / 540.0f;
-    return full * (t > 1 ? 1 : t < 0.15f ? 0.15f : t);
-}
+// (The layer was also sharpened here, 0.4.4 - 0.5.4, "Sharper HUD and menus": an unsharp mask over the enlarged art,
+// which made its bilinear steps stand out. HUD quality High enlarges the art itself instead: hud_filter_strength.)
 // The HUD layer over the (upscaled) picture, at the layer's size (begin_hud_pass); then whether the next frames use it.
 // The picture is the window texture's bytes (sRGB: the game copies its picture in through an sRGB view), the layer
 // linear (as the game's picture): mixed in linear light.
@@ -10043,7 +10571,7 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
         vk_frame_suspend();
         TexBackend *out = post_image(8, ow, oh);
         VkImageView in[3] = {src, post_view(layer)};
-        float pc[8] = {1.0f / ow, 1.0f / oh, hud_sharpness(oh), (float)oh / 720.0f * 0.75f};  // (.w: the radius, pixels)
+        float pc[8] = {1.0f / ow, 1.0f / oh};
         post_pass(cb, "hud_over.frag", in, 2, out, pc, false);
         vk_full_barrier(cb);
         vk_frame_resume();
@@ -10056,15 +10584,11 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
 #else
     bool temporal = false;
 #endif
-    // (also for its sharpening, where the picture is large enough for it: hud_sharpness)
-    // Not for the sharpening alone while the window shows a corner of the game's texture (handheld mode: 1280x720 of
-    // 1600x900): the layer is not placed for that crop - the pause menu lost its blurred scene and its footer (black
-    // instead), on a Steam Deck in its default console mode (0.4.4 / 0.4.5; owner 2026-11-18).
-    extern void renderer_present_crop(float crop[4]);
-    float crop[4];
-    renderer_present_crop(crop);
-    bool whole = crop[2] > 0.999f && crop[3] > 0.999f;
-    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || (whole && hud_sharpness(oh) > 0));
+    // (Only then: a picture already at the window's size has its HUD drawn into it at that size. The 0.4.4 sharpening
+    // turned the layer on for itself, also in handheld mode - the window showing the 1280x720 corner of a 1600x900
+    // texture - where the layer is not placed for that crop: the pause menu lost its blurred scene and its footer on
+    // a Steam Deck, 0.4.4 / 0.4.5.)
+    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1);
     if (on != hud.on || (on && (ow != hud.w || oh != hud.h)))
         LOG("[hud] layer %s (%ux%u, the picture %ux%u%s)\n", on ? "on" : "off", ow, oh, b->width, b->height, temporal ? ", temporal" : "");
     hud.on = on;
@@ -10073,10 +10597,27 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
     return src;
 }
 
+static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy, float vw, float vh, const float pv[8]);
+// (the menu's live picture: the picture this frame was presented from, after its post-processing and HUD layer)
+static VkImageView g_present_last;
+static float g_present_last_pv[8];
+
 void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh, const float pv[8]) {
     if (!b || !b->image || (b->aspect & ~VK_IMAGE_ASPECT_COLOR_BIT)) return;
     VkImageView src = post_process(cb, b, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
     src = hud_composite(cb, b, src, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
+    g_present_last = src;
+    memcpy(g_present_last_pv, pv, sizeof g_present_last_pv);
+    present_view(cb, src, vx, vy, vw, vh, pv);
+}
+
+// The picture vk_present_draw just drew, again at another place and size - plainly scaled, without running the
+// post-processing (anti-aliasing, upscalers, their history) a second time: the settings menu's live picture.
+void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh) {
+    if (g_present_last) present_view(cb, g_present_last, vx, vy, vw, vh, g_present_last_pv);
+}
+
+static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy, float vw, float vh, const float pv[8]) {
     VkPipeline p = present_pipeline(g_vk.sc_format);
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
     VkDescriptorImageInfo ii = {vk_default_sampler(true), src, VK_IMAGE_LAYOUT_GENERAL};

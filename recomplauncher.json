@@ -1,0 +1,180 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "repo": "Simon3Sarkis/super-odyssey-pc-recomp",
+  "game": {
+    "kind": "folder",
+    "label": "Your extracted Super Mario Odyssey: the folder that holds exefs and romfs. Version 1.0.0, or 1.4.1 with the update already applied (its full romfs).",
+    "check": { "file": "exefs/main" }
+  },
+  "start": {
+    "program": ["SuperOdysseyRecomp.exe", "Super.Odyssey.PC.Recomp-linux-x86_64.AppImage"],
+    "args": ["--play"],
+    "env": { "ODYSSEY_NO_UPDATE_CHECK": "1" }
+  },
+  "prepare": {
+    "program": ["SuperOdysseyRecomp.exe", "Super.Odyssey.PC.Recomp-linux-x86_64.AppImage"],
+    "args": ["--prepare", "--game={game}"],
+    "label": "Copying your game files and building the game code for this PC",
+    "timeout": 3600,
+    "done": ["{data}/setup-done.txt"],
+    "keeps_copy": true,
+    "version": "0.6.0"
+  },
+  "saves": [
+    "{data}/save",
+    "{install}/save",
+    "{local}/super-odyssey-pc-recomp/save"
+  ],
+  "folders": {
+    "game": [
+      { "path": "{install}/extracted", "if": "{install}/extracted/exefs/main" },
+      { "path": "{local}/super-odyssey-pc-recomp/extracted", "if": "{local}/super-odyssey-pc-recomp/extracted/exefs/main" },
+      { "path": "{data}/extracted" }
+    ],
+    "saves": [
+      { "path": "{install}/save", "if": "{install}/extracted/exefs/main" },
+      { "path": "{local}/super-odyssey-pc-recomp/save", "if": "{local}/super-odyssey-pc-recomp/extracted/exefs/main" },
+      { "path": "{data}/save" }
+    ],
+    "logs": [
+      { "path": "{install}", "if": "{install}/extracted/exefs/main" },
+      { "path": "{local}/super-odyssey-pc-recomp", "if": "{local}/super-odyssey-pc-recomp/extracted/exefs/main" },
+      { "path": "{data}" }
+    ]
+  },
+  "config": [
+    {
+      "format": "ini",
+      "file": [
+        { "path": "{install}/settings.ini", "if": "{install}/extracted/exefs/main" },
+        { "path": "{local}/super-odyssey-pc-recomp/settings.ini", "if": "{local}/super-odyssey-pc-recomp/extracted/exefs/main" },
+        { "path": "{data}/settings.ini" }
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "id": "window", "label": "Display mode", "group": "Display",
+      "help": "A window, borderless full screen, or exclusive full screen.",
+      "choices": [
+        { "label": "Borderless", "set": { "window_mode": "borderless" } },
+        { "label": "Exclusive full screen", "set": { "window_mode": "exclusive" } },
+        { "label": "Windowed", "set": { "window_mode": "windowed" } }
+      ],
+      "defaults": { "window_mode": "borderless" }
+    },
+    {
+      "id": "vsync", "label": "VSync", "group": "Display",
+      "help": "Off for the lowest input delay. Fast if you see tearing. On with a G-Sync / FreeSync screen.",
+      "choices": [
+        { "label": "Off", "set": { "vsync_mode": "off" } },
+        { "label": "Fast (Mailbox)", "set": { "vsync_mode": "fast" } },
+        { "label": "On", "set": { "vsync_mode": "on" } },
+        { "label": "Adaptive", "set": { "vsync_mode": "adaptive" } }
+      ],
+      "defaults": { "vsync_mode": "off" }
+    },
+    {
+      "id": "aspect", "label": "Aspect ratio", "group": "Display",
+      "help": "16:9 is the Switch's picture. Fill window takes your screen's shape, ultrawide included.",
+      "choices": [
+        { "label": "16:9", "set": { "aspect": "16:9" } },
+        { "label": "Fill window", "set": { "aspect": "fill" } },
+        { "label": "16:10", "set": { "aspect": "16:10" } },
+        { "label": "21:9", "set": { "aspect": "21:9" } },
+        { "label": "32:9", "set": { "aspect": "32:9" } },
+        { "label": "4:3", "set": { "aspect": "4:3" } }
+      ],
+      "defaults": { "aspect": "16:9" }
+    },
+    {
+      "id": "console", "label": "Console mode", "group": "Display",
+      "help": "Docked for the best picture. Handheld for longer battery life on a handheld PC.",
+      "choices": [
+        { "label": "Docked (TV)", "set": { "console_mode": "docked" } },
+        { "label": "Handheld", "set": { "console_mode": "handheld" } }
+      ],
+      "defaults": { "console_mode": "docked" }
+    },
+    {
+      "id": "resolution", "label": "Internal resolution", "group": "Graphics",
+      "help": "How many pixels the game draws. 100% is your screen's resolution; lower it on a slow graphics card.",
+      "choices": [
+        { "label": "100%", "set": { "resolution": "100%" } },
+        { "label": "75%", "set": { "resolution": "75%" } },
+        { "label": "50%", "set": { "resolution": "50%" } },
+        { "label": "Dynamic", "set": { "resolution": "dynamic" } },
+        { "label": "2x (sharper)", "set": { "resolution": "2x" } }
+      ],
+      "defaults": { "resolution": "100%" }
+    },
+    {
+      "id": "aa", "label": "Anti-aliasing", "group": "Graphics",
+      "help": "Smooths jagged edges. SMAA looks cleaner, FXAA is the lightest.",
+      "choices": [
+        { "label": "Off", "set": { "antialias": "off" } },
+        { "label": "FXAA", "set": { "antialias": "fxaa" } },
+        { "label": "SMAA", "set": { "antialias": "smaa" } }
+      ],
+      "defaults": { "antialias": "off" }
+    },
+    {
+      "id": "shadows", "label": "Shadow quality", "group": "Graphics",
+      "help": "Sharper, steadier shadow edges. Switch looks as on the console.",
+      "choices": [
+        { "label": "Switch", "set": { "shadow_quality": "0" } },
+        { "label": "High", "set": { "shadow_quality": "1" } },
+        { "label": "Ultra", "set": { "shadow_quality": "2" } }
+      ],
+      "defaults": { "shadow_quality": "0" }
+    },
+    {
+      "id": "textures", "label": "Texture detail", "group": "Graphics",
+      "help": "Sharper surface textures in the distance.",
+      "choices": [
+        { "label": "Switch", "set": { "texture_detail": "0" } },
+        { "label": "High", "set": { "texture_detail": "1" } },
+        { "label": "Ultra", "set": { "texture_detail": "2" } }
+      ],
+      "defaults": { "texture_detail": "0" }
+    },
+    {
+      "id": "drawdist", "label": "Draw distance", "group": "Graphics",
+      "help": "Objects appear from farther away. Very high can halve the frame rate in busy kingdoms; High costs almost nothing.",
+      "choices": [
+        { "label": "Switch", "set": { "draw_distance": "0" } },
+        { "label": "High", "set": { "draw_distance": "1" } },
+        { "label": "Very high", "set": { "draw_distance": "2" } }
+      ],
+      "defaults": { "draw_distance": "0" }
+    },
+    {
+      "id": "fps", "label": "Frame rate", "group": "Performance",
+      "help": "60 is the Switch's. Higher rates need a fast PC; Match display uses your screen's refresh rate.",
+      "choices": [
+        { "label": "60 FPS", "set": { "frame_rate": "60" } },
+        { "label": "90 FPS", "set": { "frame_rate": "90" } },
+        { "label": "120 FPS", "set": { "frame_rate": "120" } },
+        { "label": "144 FPS", "set": { "frame_rate": "144" } },
+        { "label": "Match display", "set": { "frame_rate": "display" } }
+      ],
+      "defaults": { "frame_rate": "60" }
+    },
+    {
+      "id": "memory", "label": "Memory use", "group": "Performance",
+      "help": "Normal prepares more shaders ahead for fewer stutters. Low uses less RAM, for PCs with under 12 GB.",
+      "choices": [
+        { "label": "Normal", "set": { "memory": "normal" } },
+        { "label": "Low", "set": { "memory": "low" } },
+        { "label": "Auto", "set": { "memory": "auto" } }
+      ],
+      "defaults": { "memory": "normal" }
+    }
+  ],
+  "system": {
+    "windows": { "version": "10", "graphics": { "vulkan": "1.3" } },
+    "linux": { "glibc": "2.35", "graphics": { "vulkan": "1.3" } }
+  },
+  "exit_codes": { "0": "ok" }
+}

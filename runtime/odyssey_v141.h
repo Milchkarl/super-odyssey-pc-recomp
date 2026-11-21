@@ -4,7 +4,6 @@
 // tools/dis141.py, tools/refs141.py). Absent here, by what was found:
 //   - agl::utl::DynamicTextureAllocator::calc: never called by the game, dropped from 1.4.1's build (no function sets
 //     its 0x4000 flag); odyssey_120.c needs another way for its extra draws
-//   - nn::g3d::SkeletonObj::CalculateWorldMtx: inlined into its callers in 1.4.1 (no candidate near its 4 callers)
 //   - sead::system::HaltWithDetail / PrintStringImpl: no candidate (probably dropped with the release build's asserts)
 //   - the completed-save builder's and heap diagnostics' names: not ported yet
 #pragma once
@@ -31,6 +30,10 @@ static const OdysseyV141Sym ODYSSEY_V141_SYMS[] = {
     // skeletal poses at the half tick (runtime/hle/odyssey_pose.c)
     {"_ZN2al13AnimPlayerSkl11calcSklAnimEv", 0x7000571770ull},                         // call graph
     {"_ZN2nn3g3d11SkeletonObj17CalculateSkeletonEi", 0x70008f41acull},                 // code shape
+    // (not inlined after all: a 19-instruction dispatcher that sets the skeleton's flags and branches to the body for its
+    // scale mode, so it has no code shape in common with 1.0.0's; ModelCtrl::calc, 0x70006ad920, calls it with the
+    // skeleton and the scaled base matrix, as 1.0.0's does)
+    {"_ZN2nn3g3d11SkeletonObj17CalculateWorldMtxERKNS_4util4neon22MatrixRowMajor4x3fTypeE", 0x70008f4160ull},
     // sead
     {"_ZN4sead6system4HaltEv", 0x700097bfa0ull},                                       // code shape
     // the stage (runtime/hle/odyssey_warp.c)

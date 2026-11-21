@@ -48,6 +48,10 @@ void vi_display_vblank(uint64_t t) {
     disp_last = t;
     pthread_mutex_unlock(&disp_mx);
 }
+// VSync Off (the present mode immediate: device.c present_mode): an image reaches the screen when it is presented, so
+// the "display's refresh" measured was the game's own pace fed back - the timer followed itself and crept: 16.51 ms a
+// tick instead of 16.67 on the owner's PC (60.6 FPS, the game 1% fast; 2026-11-21). No lock then: the timer's own 60.
+volatile bool g_present_immediate;
 // (the vsync thread) the display's period and the latest time it showed an image, or false: not locked
 static bool disp_lock(uint64_t now, double *period, uint64_t *last) {
     static int on = -1;
@@ -55,7 +59,7 @@ static bool disp_lock(uint64_t now, double *period, uint64_t *last) {
         const char *e = getenv("ODYSSEY_VSYNC_LOCK");
         on = !e || atoi(e);  // (Windows too, since 2026-11-16: the game's timer kept in step with the display)
     }
-    if (!on) return false;
+    if (!on || g_present_immediate) return false;
     pthread_mutex_lock(&disp_mx);
     bool ok = disp_n >= 120 && disp_dev < 1000000 && disp_last && now - disp_last < 500000000ull;
     *period = disp_period, *last = disp_last;
