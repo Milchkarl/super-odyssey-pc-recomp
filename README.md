@@ -9,6 +9,8 @@
   <a href="https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues">Issues</a>
 </p>
 
+<p align="center"><a href="https://recomplauncher.com/game/super-odyssey-pc-recomp"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a></p>
+
 **Super Odyssey PC Recomp** is a native PC port of *Super Mario Odyssey* (Nintendo Switch, versions 1.0.0 and 1.4.1)
 for Windows, Linux and the Steam Deck, made by static recompilation and built on your PC from your own copy of the
 game.

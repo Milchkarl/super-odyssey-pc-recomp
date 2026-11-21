@@ -55,10 +55,12 @@ probe() {  # url -> runs the catalog probe on it, fails unless both of its check
 }
 
 say "1/7  version $VERSION"
-git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' || { echo "commit or stash your changes first"; exit 1; }
+git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' ':!recomplauncher.json' || { echo "commit or stash your changes first"; exit 1; }
 sed -i "s/#define APP_VERSION \".*\"/#define APP_VERSION \"$VERSION\"/" runtime/version.h
 sed -i "s/VALUE \"FileVersion\", \".*\"/VALUE \"FileVersion\", \"$VERSION\"/;
         s/VALUE \"ProductVersion\", \".*\"/VALUE \"ProductVersion\", \"$VERSION\"/" runtime/platform/windows.rc
+# (RecompLauncher runs its setup step again - prepare.version: only the game code, and only if it changed)
+sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" recomplauncher.json
 git diff --quiet || git commit -qam "Super Odyssey PC Recomp $VERSION"  # (a rerun: already bumped)
 SHA=$(git rev-parse HEAD)
 
