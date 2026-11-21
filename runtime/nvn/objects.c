@@ -572,6 +572,14 @@ NVN(nvnMemoryPoolMap) {
 #endif
         if (valid) memcpy(&value, (void *)(uintptr_t)(p->storage + byte), 2);
         ++count;
+        if (trace) {  // (what the game was given: half floats that are no number - a map's memory never written by its GPU copy)
+            static uint64_t bad, bad_logged;
+            if (valid && (value & 0x7c00) == 0x7c00 && ++bad - bad_logged >= 500) {
+                bad_logged = bad;
+                LOG("[linread-map] %llu reads so far gave a NaN / infinity pattern (latest: map %llx texel %u %u half %04x), of %llu reads\n",
+                    (unsigned long long)bad, (unsigned long long)(p->storage + off), x, y, value, (unsigned long long)count);
+            }
+        }
         if (trace && (count <= 64 || !(count % 2000)))
         LOG("[linread-map] #%llu storage %llx size %llx offset %llx xy %u %u nc %u comp %u row-elements %u byte %lld half %04x valid %d\n",
             (unsigned long long)count, (unsigned long long)p->storage, (unsigned long long)p->size,

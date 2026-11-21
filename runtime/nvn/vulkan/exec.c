@@ -8750,6 +8750,35 @@ static void draw_(CmdRec *r, bool indexed) {
     PROF_ADD(prof_sets);
     VkDescriptorImageInfo fii[64];
     uint64_t prof_tx_ = prof ? SDL_GetTicksNS() : 0;
+    {   // ODYSSEY_LOG_RT_DRAWS=<target's address, hex>[:<every N frames, default 60>] (debug): the draws into the colour
+        // target at that address - shaders, vertices, and each texture the fragment shader samples (a height map the
+        // game reads on the CPU: what is it made from)
+        static uint64_t want = ~0ull, every = 60;
+        if (want == ~0ull) {
+            const char *e = getenv("ODYSSEY_LOG_RT_DRAWS");
+            unsigned long long a = 0, n = 0;
+            if (e && sscanf(e, "%llx:%llu", &a, &n) >= 1 && n) every = n;
+            want = a;
+        }
+        NvnTexture *t0 = want && st.rt.ncolor ? st.rt.color[0] : NULL;
+        if (t0 && t0->addr == want && renderer_present_count() % every == 0) {
+            LOG("[rt-draw] frame %llu into %llx %ux%u fmt %#x: vs %llx fs %llx, %d vertices%s, blend %d, %d textures\n",
+                (unsigned long long)renderer_present_count(), (unsigned long long)t0->addr, t0->width, t0->height, t0->format,
+                (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr,
+                (int)r->x[2], indexed ? " (indexed)" : "", (int)(st.color_state[0] & 1), pr->fi->ntex);
+            for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
+                int slot = ((int)pr->fi->tex[i].handle_offset - 0x20) / 8;
+                uint64_t h = (slot >= 0 && slot < 32) ? st.tex[1][slot] : 0;
+                uint32_t tic = h & 0xFFFFF;
+                NvnTexture *x = h && st.tpool && tic < (uint32_t)st.tpool->count ? ((NvnTexEntry *)st.tpool->entries)[tic].tex : NULL;
+                TexBackend *xb = x ? x->backend : NULL;
+                LOG("[rt-draw]   texture %d (slot %d, handle %llx): %s %llx %ux%u fmt %#x%s%s%s\n", i, slot, (unsigned long long)h,
+                    !h ? "NOT BOUND (handle 0)" : !x ? "NO TEXTURE at that pool id" : "texture", (unsigned long long)(x ? x->addr : 0),
+                    x ? x->width : 0, x ? x->height : 0, x ? x->format : 0, x && !xb ? ", no GPU image yet" : "",
+                    xb && xb->gpu_owned ? ", GPU-drawn" : "", xb && !xb->gpu_owned && xb->uploaded ? ", uploaded from memory" : "");
+            }
+        }
+    }
     for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
         float sc[2]; uint32_t wh[2];
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
@@ -9544,8 +9573,25 @@ bool renderer_fog_texel_cached(uint64_t addr, uint32_t x, uint32_t y, uint32_t c
     }
     static uint64_t hits, misses;
     if (ok) hits++; else misses++;
-    if (getenv("ODYSSEY_LOG_LINREAD") && (hits + misses) % 2000 == 1)
-        LOG("[fog-read] %llu from the copy, %llu through the render thread\n", (unsigned long long)hits, (unsigned long long)misses);
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+    if (lg) {  // (per map, every 300 frames: reads answered from its copy, reads that found none - the guest's own memory was read)
+        static struct { uint64_t addr, hit, miss; } pm[16];
+        static uint64_t last;
+        int k = 0;
+        while (k < 16 && pm[k].addr && pm[k].addr != addr) k++;
+        if (k < 16) { pm[k].addr = addr; if (ok) pm[k].hit++; else pm[k].miss++; }
+        uint64_t f = renderer_present_count();
+        if (f - last >= 300) {
+            last = f;
+            for (k = 0; k < 16 && pm[k].addr; k++) {
+                if (pm[k].hit + pm[k].miss)
+                    LOG("[fog-read] frame %llu map %llx: %llu reads from its copy, %llu without one\n", (unsigned long long)f,
+                        (unsigned long long)pm[k].addr, (unsigned long long)pm[k].hit, (unsigned long long)pm[k].miss);
+                pm[k].hit = pm[k].miss = 0;
+            }
+        }
+    }
     pthread_mutex_unlock(&fog_pub_lock);
     return ok;
 }
@@ -9562,7 +9608,17 @@ void renderer_cpu_texel(RqCpuTexel *q) {
     if (!b || !b->image || !fi || !format_ok || !q->components || q->components > 4 || fi->bpb != q->components * bytes || q->component >= q->components ||
         b->guest_format ||
         b->width != t->width || b->height != t->height || b->layers != 1 || b->depth != 1 || b->samples != 1 ||
-        q->x >= b->width || q->y >= b->height || b->width > 1024 || b->height > 1024) return;
+        q->x >= b->width || q->y >= b->height || b->width > 1024 || b->height > 1024) {
+        static int lg = -1, n;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+        if (lg && n++ < 60)
+            LOG("[fog-read] frame %llu no readback for %llx (%u components of %u bytes, texel %u %u): %s%s texture %llu %ux%u fmt %#x, image %ux%u layers %u samples %u guest format %d\n",
+                (unsigned long long)renderer_present_count(), (unsigned long long)q->addr, q->components, bytes, q->x, q->y,
+                !t ? "no texture at that address" : !b ? "no GPU image" : "not readable:", t && !format_ok ? " format" : "",
+                (unsigned long long)(t ? t->debug_id : 0), t ? t->width : 0, t ? t->height : 0, t ? t->format : 0, b ? b->width : 0,
+                b ? b->height : 0, b ? b->layers : 0, b ? b->samples : 0, b ? (int)b->guest_format : 0);
+        return;
+    }
     uint64_t row_bytes = (uint64_t)b->width * fi->bpb;
     if (q->snapshot && (bytes != 4 || !nvn_flags_linear(t->flags) || q->guest_pitch != t->stride ||
         !nvn_linear_rows_fit(q->guest_capacity, q->guest_pitch, row_bytes, b->height) ||
@@ -9588,49 +9644,76 @@ void renderer_cpu_texel(RqCpuTexel *q) {
     static int fog_sync = -1;
     if (fog_sync < 0) fog_sync = getenv("ODYSSEY_FOG_READBACK_SYNC") && atoi(getenv("ODYSSEY_FOG_READBACK_SYNC"));
     if (bytes == 2 && !q->snapshot && !q->refresh_snapshot && !fog_sync) {
-        if (e->issued_frame != frame) {
-            Slot *s = NULL;
-            uint64_t done = vk_completed_seq();
-            for (int i = 0; i < 3 && !s; i++) if (e->slot[i].seq <= done) s = &e->slot[i];  // (a free one)
-            if (s) {
-                if (s->cap < size) {
-                    if (s->buf) vmaDestroyBuffer(g_vk.vma, s->buf, s->mem);
-                    s->buf = VK_NULL_HANDLE;
-                    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
-                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
-                    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-                                                  .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
-                    VmaAllocationInfo info;
-                    if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &s->buf, &s->mem, &info) == VK_SUCCESS) s->ptr = info.pMappedData, s->cap = size;
-                    else s->buf = VK_NULL_HANDLE, s->cap = 0;
-                }
-                if (s->buf) {
-                    vk_end_pass();
-                    st.rt_dirty = true;
-                    VkCommandBuffer cb = vk_cmd();
-                    vk_full_barrier(cb);
-                    VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {b->width, b->height, 1}};
-                    vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, s->buf, 1, &cp);
-                    s->seq = vk_pending_seq();
-                    s->size = size;
-                    e->issued_frame = frame;
+        // The finished copy is taken BEFORE this frame's copy is recorded. The other way round - as it was - the frame's
+        // copy went into the first slot the GPU had finished, which is the very copy about to be taken: whenever the GPU
+        // kept exactly a frame behind (finished the last copy by the next ask), each frame's copy overwrote the one
+        // before it unread, no copy was ever taken, and the game read its own memory instead of the map for as long as
+        // that timing held - zeros, or texels left from earlier reads. Which it was changed from one stage entry to the
+        // next (Seaside's sea in the Koopa race scene: 0 of 5,686 reads of its wave map answered; the stage before it:
+        // 12,997 of 13,013). #116 (Luncheon's stew under a captured Lava Bubble: LavaWave::calcPos) and #117.
+        // ODYSSEY_FOG_READBACK_ORDER=old: the copy recorded first, as before.
+        static int harvest_late = -1;
+        if (harvest_late < 0) { const char *o = getenv("ODYSSEY_FOG_READBACK_ORDER"); harvest_late = o && !strcmp(o, "old"); }
+        uint64_t done = vk_completed_seq();
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == !harvest_late && e->issued_frame != frame) {
+                Slot *s = NULL;
+                uint64_t done = vk_completed_seq();
+                for (int i = 0; i < 3 && !s; i++) if (e->slot[i].seq <= done) s = &e->slot[i];  // (a free one)
+                if (s) {
+                    if (s->cap < size) {
+                        if (s->buf) vmaDestroyBuffer(g_vk.vma, s->buf, s->mem);
+                        s->buf = VK_NULL_HANDLE;
+                        VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
+                                                 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+                        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+                                                      .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
+                        VmaAllocationInfo info;
+                        if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &s->buf, &s->mem, &info) == VK_SUCCESS) s->ptr = info.pMappedData, s->cap = size;
+                        else s->buf = VK_NULL_HANDLE, s->cap = 0;
+                    }
+                    if (s->buf) {
+                        vk_end_pass();
+                        st.rt_dirty = true;
+                        VkCommandBuffer cb = vk_cmd();
+                        vk_full_barrier(cb);
+                        VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {b->width, b->height, 1}};
+                        vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, s->buf, 1, &cp);
+                        s->seq = vk_pending_seq();
+                        s->size = size;
+                        e->issued_frame = frame;
+                    }
                 }
             }
-        }
-        uint64_t done = vk_completed_seq();
-        Slot *best = NULL;  // (the newest finished copy)
-        for (int i = 0; i < 3; i++) {
-            Slot *s = &e->slot[i];
-            if (s->seq && s->seq <= done && s->size == size && (!best || s->seq > best->seq)) best = s;
-        }
-        if (best && best->seq > e->have_seq) {
-            if (e->size != size) { free(e->bytes); e->bytes = malloc(size); e->size = size; }
-            if (!e->bytes) { e->size = 0; return; }
-            vmaInvalidateAllocation(g_vk.vma, best->mem, 0, VK_WHOLE_SIZE);
-            memcpy(e->bytes, best->ptr, size);
-            e->have_seq = best->seq;
-            e->frame = frame;
-            fog_publish(q->addr, b->width, b->height, fi->bpb, e->bytes, size);
+
+            if (pass != harvest_late) continue;
+            done = vk_completed_seq();
+            {   // (ODYSSEY_LOG_LINREAD: the first asks about each map)
+                static int lg = -1;
+                static struct { uint64_t addr; int n; } seen[16];
+                if (lg < 0) lg = getenv("ODYSSEY_LOG_LINREAD") != NULL;
+                int k = 0;
+                while (lg && k < 16 && seen[k].addr && seen[k].addr != q->addr) k++;
+                if (lg && k < 16 && (seen[k].addr = q->addr, seen[k].n++ < 6))
+                    LOG("[fog-read] frame %llu ask %llx: texture %llu %ux%u fmt %#x live %d, copy issued frame %llu, slots %llu %llu %llu, finished up to %llu, have %llu\n",
+                        (unsigned long long)frame, (unsigned long long)q->addr, (unsigned long long)t->debug_id, t->width, t->height, t->format, t->live,
+                        (unsigned long long)e->issued_frame, (unsigned long long)e->slot[0].seq, (unsigned long long)e->slot[1].seq,
+                        (unsigned long long)e->slot[2].seq, (unsigned long long)done, (unsigned long long)e->have_seq);
+            }
+            Slot *best = NULL;  // (the newest finished copy)
+            for (int i = 0; i < 3; i++) {
+                Slot *s = &e->slot[i];
+                if (s->seq && s->seq <= done && s->size == size && (!best || s->seq > best->seq)) best = s;
+            }
+            if (best && best->seq > e->have_seq) {
+                if (e->size != size) { free(e->bytes); e->bytes = malloc(size); e->size = size; }
+                if (!e->bytes) { e->size = 0; return; }
+                vmaInvalidateAllocation(g_vk.vma, best->mem, 0, VK_WHOLE_SIZE);
+                memcpy(e->bytes, best->ptr, size);
+                e->have_seq = best->seq;
+                e->frame = frame;
+                fog_publish(q->addr, b->width, b->height, fi->bpb, e->bytes, size);
+            }
         }
         if (e->have_seq && e->size == size) {
             memcpy(&q->value, e->bytes + ((uint64_t)q->y * b->width + q->x) * fi->bpb + q->component * bytes, bytes);
