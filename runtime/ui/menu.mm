@@ -338,6 +338,17 @@ bool menu_handle_event(const SDL_Event *e) {
         bool down = e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         bool chord = back_pad && back_pad == start_pad;
         SDL_JoystickID pad = e->gbutton.which;
+        {   // (diagnosis 2026-11-21, the Steam Deck: L / R stepped twice now and then, the menu opened on its last option)
+            // the first few hundred button events while a menu is open or opening, with the controller they came from
+            static int nlog;
+            if (nlog < 400 && (capturing() || e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK || e->gbutton.button == SDL_GAMEPAD_BUTTON_START ||
+                               e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+                nlog++;
+                LOG("[menukey] %s button %d pad %u \"%s\" %04x:%04x t=%llu ms\n", down ? "down" : "up", e->gbutton.button, (unsigned)pad,
+                    SDL_GetGamepadNameForID(pad) ? SDL_GetGamepadNameForID(pad) : "?", SDL_GetGamepadVendorForID(pad),
+                    SDL_GetGamepadProductForID(pad), (unsigned long long)(e->gbutton.timestamp / 1000000));
+            }
+        }
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK && (down || back_pad == pad)) back_pad = down ? pad : 0;
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START && (down || start_pad == pad)) start_pad = down ? pad : 0;
         if (down && !typing && !g_setup.load() &&
@@ -2019,6 +2030,8 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
                  : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1 : 0;
         if (step) {
+            static int nlog;
+            if (nlog++ < 200) LOG("[menutab] step %d from tab %d (ImGui frame %d)\n", step, tabs[cur].id, ImGui::GetFrameCount());
             int i = cur;
             do i = (i + step + ntabs) % ntabs; while (!tabs[i].on);
             g_tab_request = tabs[i].id;

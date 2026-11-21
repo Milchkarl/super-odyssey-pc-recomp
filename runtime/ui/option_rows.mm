@@ -128,6 +128,12 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
                            ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
             ImGui::SetKeyOwner(k, ImGui::GetItemID());
     if (foc) g_desc_focus = desc ? desc : "", g_title_focus = label;
+    if (foc) {  // (diagnosis 2026-11-21: the menu opened on its last option on a Steam Deck - which row the cursor lands on)
+        static std::string last;
+        static int nlog;
+        if (last != label && nlog++ < 300) LOG("[menufocus] %s (ImGui frame %d)\n", label, ImGui::GetFrameCount());
+        last = label;
+    }
     if (hov) g_desc_hover = desc ? desc : "", g_title_hover = label;
     if (g_desc_first.empty() && desc) g_desc_first = desc, g_title_first = label;
 
