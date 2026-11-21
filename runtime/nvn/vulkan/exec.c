@@ -18,6 +18,7 @@
 #include "shaders.h"
 #include "vk.h"
 #include "dlss_probe.h"
+#include "gtao.h"
 #include "../output_scale.h"
 // (the preparation's threads: every core but one, up to this - ODYSSEY_PREP_THREADS=<n> for measurements)
 #define NT_MAX 64
@@ -6200,25 +6201,29 @@ static void dlss_probe_scene(ShaderInfo *fs) {
         const char *probe = getenv("ODYSSEY_DLSS_PROBE");
         enabled = probe && !strcmp(probe, "1");
     }
-    bool upscale = false;
+    bool upscale = false, occlusion = false;
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
     upscale = vk_temporal_enabled();
+    occlusion = vk_gtao_enabled();
 #endif
-    if (!enabled && !upscale) return;
+    if (!enabled && !upscale && !occlusion) return;
     uint64_t frame = renderer_present_count();
-    if (!upscale && frame < next_frame) return;
+    if (!upscale && !occlusion && frame < next_frame) return;
     NvnTexture *target = st.rt.color[0];
     const TexBackend *color = NULL, *depth = NULL;
+    NvnTexture *color_t = NULL, *depth_t = NULL;
     for (int i = 0; i < fs->ntex; i++) {
         NvnTexture *t = shader_texture_object(1, &fs->tex[i]);
         const TexBackend *b = t ? t->backend : NULL;
         if (!b || !b->image) continue;
         if (t->width < target->width * 3u || t->height < target->height * 3u) continue;
-        if (b->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32) color = b;
-        if (b->format == VK_FORMAT_D32_SFLOAT) depth = b;
+        if (b->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32) color = b, color_t = t;
+        if (b->format == VK_FORMAT_D32_SFLOAT) depth = b, depth_t = t;
     }
     if (!color || !depth || color->width != depth->width || color->height != depth->height) return;
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
+    // (ambient occlusion first: the upscalers' depth copy below is unaffected, their colour input comes later)
+    if (occlusion) vk_gtao_apply(color_t, depth_t, frame * 2 + g_interp_replaying);  // (an in-between frame too)
     if (upscale) vk_dlss_capture_depth(depth, frame);
 #endif
     if (!enabled || frame < next_frame) return;

@@ -16,6 +16,7 @@
 #include "../odyssey_pose.h"
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
 #include "../nvn/vulkan/dlss_probe.h"
+#include "../nvn/vulkan/gtao.h"
 #endif
 
 uint64_t renderer_present_count(void);
@@ -97,7 +98,7 @@ void odyssey_debug_hook(Cpu *c, uint64_t pc) {
         // This camera-copy hook is part of every generated game library. The
         // older updateViewGpu probe was only inserted by an optional debug build,
         // so ordinary installs never supplied a camera and DLSS silently skipped.
-        if (vk_temporal_enabled()) {
+        if (vk_temporal_enabled() || vk_gtao_enabled()) {  // (and ambient occlusion: gtao.c)
             static uint64_t get_projection, get_matrix;
             if (!get_projection) {
                 get_projection = loader_find_symbol("_ZN2al13getProjectionEPKNS_10IUseCameraEi");
@@ -135,7 +136,7 @@ void odyssey_debug_hook(Cpu *c, uint64_t pc) {
 #ifndef __APPLE__  // (the temporal upscalers: every Vulkan build)
     // GraphicsSystemInfo::updateViewGpu, view zero. Copy before this guest data can be reused by the next frame.
     // (1.4.1: the same arguments as far as tools/dis141.py shows; to be checked in game with DLSS on)
-    if (pc == view_at && (uint32_t)c->x[1] == 0 && c->x[2] && c->x[3] && vk_temporal_enabled()) {
+    if (pc == view_at && (uint32_t)c->x[1] == 0 && c->x[2] && c->x[3] && (vk_temporal_enabled() || vk_gtao_enabled())) {
         DlssCamera camera;
         memcpy(camera.view, (const void *)(uintptr_t)(c->x[2] + 8), sizeof camera.view);
         memcpy(camera.projection, (const void *)(uintptr_t)(c->x[3] + 0x4c), sizeof camera.projection);

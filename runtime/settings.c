@@ -396,6 +396,7 @@ void settings_load(void) {
         else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
         else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "bloom_quality")) g_settings.bloom_quality = !strcmp(val, "high") || atoi(val) > 0;
+        else if (!strcmp(key, "ambient_occlusion")) g_settings.ambient_occlusion = !strcmp(val, "on") || atoi(val) > 0;
         else if (!strcmp(key, "draw_distance")) g_settings.draw_distance = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         // (on / off; "auto" and the older 0 / 1 were the earlier defaults - now on, as the default is)
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
@@ -543,6 +544,7 @@ void settings_save(void) {
     fprintf(f, "shader_known_only = %d\n", g_settings.shader_known_only);
     fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
     fprintf(f, "bloom_quality = %s\n", g_settings.bloom_quality ? "high" : "switch");
+    fprintf(f, "ambient_occlusion = %s\n", g_settings.ambient_occlusion ? "on" : "off");
     fprintf(f, "draw_distance = %d\n", g_settings.draw_distance);
     fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
     fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");

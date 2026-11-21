@@ -1192,6 +1192,13 @@ static void tab_graphics(void) {
                    "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
                    "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as "
                    "on the Switch. Changes at once.", false);
+        static const char *ao[] = {"Off", "On"};
+        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 2, 0,
+                   "Darkens the places light reaches less: the corners between steps and walls, the ground under "
+                   "Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch "
+                   "version: an addition (GTAO, worked out from the scene's depth each frame). Costs GPU time: about "
+                   "1 ms a frame at 1440p and 2.5 ms at 4K on a fast graphics card, less with an Upscale method. "
+                   "Off: as on the Switch. Changes at once.", false);
         static const char *dd[] = {"Switch", "High", "Very high"};
         opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
                    "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
@@ -1364,7 +1371,7 @@ static void tab_performance(void) {
         g_settings.memory = MEMORY_LOW, g_settings.frame_rate = FPS_60, g_settings.antialias = AA_OFF;
         g_settings.temporal_off = true, g_settings.upscaler = UPSCALE_BILINEAR, g_settings.frame_gen = FG_OFF;
         g_settings.shadow_quality = 0, g_settings.texture_detail = 0, g_settings.draw_distance = 0;
-        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0;
+        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0, g_settings.ambient_occlusion = 0;
         settings_save();
         LOG("[menu] low-end PC preset applied\n");
     }
