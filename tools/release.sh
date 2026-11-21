@@ -60,7 +60,7 @@ sed -i "s/#define APP_VERSION \".*\"/#define APP_VERSION \"$VERSION\"/" runtime/
 sed -i "s/VALUE \"FileVersion\", \".*\"/VALUE \"FileVersion\", \"$VERSION\"/;
         s/VALUE \"ProductVersion\", \".*\"/VALUE \"ProductVersion\", \"$VERSION\"/" runtime/platform/windows.rc
 # (RecompLauncher runs its setup step again - prepare.version: only the game code, and only if it changed)
-sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" recomplauncher.json
+sed -i "s/^    \"version\": \"[^\"]*\"/    \"version\": \"$VERSION\"/" recomplauncher.json  # (prepare's own line; not system.windows.version)
 git diff --quiet || git commit -qam "Super Odyssey PC Recomp $VERSION"  # (a rerun: already bumped)
 SHA=$(git rev-parse HEAD)
 
