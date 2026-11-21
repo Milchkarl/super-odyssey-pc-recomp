@@ -556,6 +556,26 @@ static void player_movement(Cpu *c) {
     static uint64_t updates;
     uint64_t actor = c->x[0];
     odyssey_pose_player(actor);
+    {   // ODYSSEY_TEST_PLACE=<frame>:<x>:<y>:<z>[;...] (tests, any build): from that frame Mario's translation is set
+        // there for three ticks, in order - a test's way to a spot far from a stage's start
+        static int n = -1, cur, left;
+        static struct { unsigned long long frame; float p[3]; } pl[16];
+        if (n < 0) {
+            n = 0;
+            for (const char *q = getenv("ODYSSEY_TEST_PLACE"); q && *q && n < 16; ) {
+                if (sscanf(q, "%llu:%f:%f:%f", &pl[n].frame, &pl[n].p[0], &pl[n].p[1], &pl[n].p[2]) == 4) n++;
+                q = strchr(q, ';');
+                if (q) q++;
+            }
+        }
+        extern uint64_t renderer_present_count(void);
+        if (cur < n && !left && renderer_present_count() >= pl[cur].frame) left = 3;
+        if (left && actor >= GUEST_LO && actor < GUEST_HI - 0x58) {
+            uint64_t keeper = *(const uint64_t *)(uintptr_t)(actor + 0x50);
+            if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x14) memcpy((void *)(uintptr_t)(keeper + 8), pl[cur].p, 12);
+            if (!--left) { LOG("[test-place] frame %llu: Mario at %.0f %.0f %.0f\n", pl[cur].frame, pl[cur].p[0], pl[cur].p[1], pl[cur].p[2]); cur++; }
+        }
+    }
     original_movement(c);
     if (actor >= GUEST_LO && actor < GUEST_HI - 0x58) {
         uint64_t keeper = *(const uint64_t *)(uintptr_t)(actor + 0x50);

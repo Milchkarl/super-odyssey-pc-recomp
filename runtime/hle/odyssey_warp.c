@@ -8,6 +8,10 @@
 // and hands it to GameDataFunction::tryChangeNextStage; the scene then changes stage as after a door. Entrance "" =
 // the stage's default start, scenario -1 = the game picks it. ODYSSEY_LOG_STAGES=1 (or any warp): the frame each
 // stage scene starts running.
+// A Koopa Freerunning race, as its starting Koopa does (RaceManStart::exeEnd): ODYSSEY_WARP=race<level>:<stage>:<start>:
+// <scenario>[@<frame>], level 0 = the regular race, 1 = the advanced one - the stage, start and scenario are the Koopa's
+// StageNameLv1/2, StartPosLv1/2, ScenarioNoLv1/2 in the stage's placement (Seaside:
+// race0:SeaWorldHomeStage:SeaWorldRacemanStart:5). 1.4.1 only.
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +32,7 @@ uint64_t renderer_present_count(void);
 
 typedef struct {
     bool world;  // (world: "world:<stage>", another kingdom)
+    int race;    // ("race<level>:": level + 1, 0 = not a race)
     bool hole;   // ("hole:<label>": this kingdom's painting, as entering it does - tests of the painting warp, #72 / #85)
     char stage[128], entrance[128];
     int scenario;
@@ -74,10 +79,14 @@ static void warp_now(Cpu *c, uint64_t scene) {
         *(uint8_t *)(uintptr_t)(holder + 0x49) = 1;
     } else {
         c->x[0] = info, c->x[1] = holder, c->x[2] = entrance, c->x[3] = stage;
-        c->x[4] = 0, c->x[5] = (uint32_t)g_warp.scenario, c->x[6] = 0;  // (not a return, scenario, no sub scenario)
+        // (a race: a return, the sub scenario "reset mini game 2", the rival level in the save (GameDataFile +0xa94 in
+        // 1.4.1), and tryChangeNextStageWithStartRaceFlag - 0x70004d2c90 in 1.4.1 - instead of tryChangeNextStage)
+        bool race = g_warp.race && loader_main_is_v141();
+        c->x[4] = race, c->x[5] = (uint32_t)g_warp.scenario, c->x[6] = race ? 4 : 0;  // (a return?, scenario, sub scenario)
         guest_call(c, ctor);
+        if (race) *(int32_t *)(uintptr_t)(*(uint64_t *)(uintptr_t)(holder + 0x20) + 0xa94) = g_warp.race - 1;
         c->x[0] = holder, c->x[1] = info;
-        guest_call(c, change);
+        guest_call(c, race ? 0x70004d2c90ull : change);
     }
     LOG("[warp] frame %llu: %s (entrance \"%s\", scenario %d) -> %s\n", (unsigned long long)renderer_present_count(),
         g_warp.stage, g_warp.entrance, g_warp.scenario, (c->x[0] & 1) ? "requested" : "refused");
@@ -188,9 +197,12 @@ int odyssey_first_scene_warmup(void) {
     return renderer_present_count() + 1 - start < WARMUP_FRAMES ? 1 : 2;
 }
 
+static int g_now, g_nlw;  // (the surface log's waves, below: a new scene's are new)
+static void surface_probe(Cpu *c);
 static void stage_scene_init(Cpu *c) {
     input_motion_settle();
     g_scene_new = true;
+    g_now = g_nlw = 0;
     g_init(c);
 }
 
@@ -260,7 +272,164 @@ static void stage_scene_control(Cpu *c) {
     // (tests: a warp waits until the stage has run 2 s - one asked on the first frame of a stage still starting (a
     // kingdom's arrival scene restarting it) overflowed the game's 512 KB scene heap ("sead halt") in some tours)
     if (g_next < g_nwarps && renderer_present_count() >= g_warps[g_next].at && now - g_scene_start > 120) warp_now(c, c->x[0]);
+    surface_probe(c);
     g_control(c);
+}
+
+// ---- ODYSSEY_LOG_SURFACE=<ticks> (debug; 1.4.1 and 1.0.0): every <ticks> gameplay ticks, the fluid surface each
+// al::OceanWave (the sea, lava, the Luncheon stew, Cap Kingdom's fog) computes at Mario's position - what
+// al::isInWaterPos / isInFirePos / calcFindWaterSurface go by (OceanWave::calcIsInArea: pos.y <= the wave height):
+//   height = mHeight (+0x2b8) + ripple (FluidSimulateWave, +0x40) + depth rate^2 (OrthoDepthTexture +0x48) * wave
+//   (OceanWaveTexture's displacement) - (height depth (OrthoDepthTexture +0x58) - 0.5) * mHeightCheckDist (+0x160)
+// The three maps are GPU-drawn textures the game reads on the CPU (objects.c nvnMemoryPoolMap "fog" readback).
+// ODYSSEY_LOG_SURFACE_MAP=<tick>[:<half size>[:<y>]]: at that tick, once, a 49x25 map of each surface around Mario
+// ('~' in the fluid at y - default Mario's feet - '.' above it, ' ' outside its mesh), with the height range.
+static GuestFn g_ow_area_thunk;
+static uint64_t g_ow[8];
+static int g_surface_every = -1;
+static void ow_area_thunk(Cpu *c) {
+    uint64_t ow = c->x[0] - 40;  // (the IUseFluidSurface base sits at +40)
+    int i = 0;
+    while (i < g_now && g_ow[i] != ow) i++;
+    if (i == g_now && g_now < 8) g_ow[g_now++] = ow;
+    g_ow_area_thunk(c);
+}
+// (Luncheon's stew and lava waves are LavaWave actors: their IUseFluidSurface base sits at +264; LavaWave::calcPos
+// gives the surface under a point from the wave's height map - its radius at +0x140, the map's size at +0x138)
+static GuestFn g_lw_area_thunk;
+static uint64_t g_lw[8];
+static void lw_area_thunk(Cpu *c) {
+    uint64_t lw = c->x[0] - 264;
+    int i = 0;
+    while (i < g_nlw && g_lw[i] != lw) i++;
+    if (i == g_nlw && g_nlw < 8) g_lw[g_nlw++] = lw;
+    g_lw_area_thunk(c);
+}
+static bool ow_call3(Cpu *c, uint64_t fn, uint64_t self, uint64_t out, uint64_t pos) {
+    c->x[0] = self, c->x[1] = out, c->x[2] = pos;
+    guest_call(c, fn);
+    return c->x[0] & 1;
+}
+static void surface_probe(Cpu *c) {
+    static uint64_t fn_wave, fn_depth, fn_ripple, fn_lw_pos;
+    static uint64_t map_at, ticks;
+    static float map_half = 6000, map_y;
+    static bool map_y_set;
+    if (g_surface_every < 0) {
+        const char *e = getenv("ODYSSEY_LOG_SURFACE"), *m = getenv("ODYSSEY_LOG_SURFACE_MAP");
+        g_surface_every = e ? (atoi(e) > 0 ? atoi(e) : 30) : 0;
+        if (m) {
+            float h = 0, y = 0;
+            unsigned long long t = 0;
+            int n = sscanf(m, "%llu:%f:%f", &t, &h, &y);
+            map_at = t;
+            if (n >= 2 && h > 0) map_half = h;
+            if (n >= 3) map_y = y, map_y_set = true;
+            if (!g_surface_every) g_surface_every = 1 << 30;
+        }
+        if (g_surface_every) {
+            bool v141 = loader_main_is_v141();
+            uint64_t thunk = v141 ? 0x70006f7ff0ull : loader_find_symbol("_ZThn40_NK2al9OceanWave12calcIsInAreaERKN4sead7Vector3IfEE");
+            fn_wave = v141 ? 0x70006f7d90ull : loader_find_symbol("_ZNK2al9OceanWave17tryCalcWaveHeightEPfRKN4sead7Vector3IfEE");
+            fn_depth = v141 ? 0x70006ffa80ull : loader_find_symbol("_ZNK2al17OrthoDepthTexture12tryCalcDepthEPfRKN4sead7Vector3IfEE");
+            fn_ripple = v141 ? 0x7000619010ull : loader_find_symbol("_ZNK2al17FluidSimulateWave13tryCalcHeightEPfRKN4sead7Vector3IfEE");
+            if (thunk && fn_wave && fn_depth && fn_ripple && (g_ow_area_thunk = dispatch_lookup(thunk)))
+                hle_override(thunk, ow_area_thunk, "OceanWave::calcIsInArea (surface log)");
+            else g_surface_every = 0;
+            // (1.4.1, by the code: the calcIsInArea thunk 0x700027d810, calcPos 0x700027d8d0 - the vtable match is a slot off there)
+            uint64_t lw_thunk = v141 ? 0x700027d810ull : loader_find_symbol("_ZThn264_NK8LavaWave12calcIsInAreaERKN4sead7Vector3IfEE");
+            fn_lw_pos = v141 ? 0x700027d8d0ull : loader_find_symbol("_ZNK8LavaWave7calcPosEPN4sead7Vector3IfEERKS2_");
+            if (g_surface_every && lw_thunk && fn_lw_pos && (g_lw_area_thunk = dispatch_lookup(lw_thunk)))
+                hle_override(lw_thunk, lw_area_thunk, "LavaWave::calcIsInArea (surface log)");
+            LOG("[surface] probe %s\n", g_surface_every ? "on" : "unavailable for this game build");
+        }
+    }
+    if (!g_surface_every) return;
+    ticks++;
+    bool map = map_at && ticks == map_at;
+    if (!map && ticks % (uint64_t)g_surface_every) return;
+    extern bool odyssey_player_position(float p[3]);
+    float m[3];
+    if ((!g_now && !g_nlw) || !odyssey_player_position(m)) return;
+    Cpu saved = *c;
+    uint64_t base = (c->sp - 0x800) & ~0xFull, out = base + 0x400, pos = base + 0x410;
+    c->sp = base;
+    for (int i = 0; i < g_nlw; i++) {
+        uint64_t lw = g_lw[i], keeper = *(const uint64_t *)(uintptr_t)(lw + 0x50);
+        float tr[3] = {0, 0, 0}, radius, h[3], lo = 1e30f, hi = -1e30f;
+        if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x14) memcpy(tr, (const void *)(uintptr_t)(keeper + 8), 12);
+        memcpy(&radius, (const void *)(uintptr_t)(lw + 0x140), 4);
+        memcpy((void *)(uintptr_t)pos, m, 12);
+        memset((void *)(uintptr_t)out, 0, 12);
+        ow_call3(c, fn_lw_pos, lw, out, pos);
+        memcpy(h, (const void *)(uintptr_t)out, 12);
+        float dx = m[0] - tr[0], dz = m[2] - tr[2];
+        bool inside = dx * dx + dz * dz <= radius * radius;
+        // (the surface over the wave: 17x17 points across its radius)
+        int nn = 0, nz = 0;
+        for (int r = 0; r < 17; r++) for (int k = 0; k < 17; k++) {
+            float p[3] = {tr[0] + (k - 8) * radius / 8.5f, tr[1], tr[2] + (r - 8) * radius / 8.5f}, o3[3];
+            if ((p[0] - tr[0]) * (p[0] - tr[0]) + (p[2] - tr[2]) * (p[2] - tr[2]) > radius * radius) continue;
+            memcpy((void *)(uintptr_t)pos, p, 12);
+            ow_call3(c, fn_lw_pos, lw, out, pos);
+            memcpy(o3, (const void *)(uintptr_t)out, 12);
+            float d = o3[1] - tr[1];
+            if (d < lo) lo = d;
+            if (d > hi) hi = d;
+            nn++;
+            if (d == 0) nz++;
+        }
+        LOG("[surface] tick %llu lava wave %d/%d %llx at %.0f %.0f %.0f radius %.0f map %d: under Mario (%.0f %.0f %.0f, %s) surface y %.1f (%+.1f) | over the wave: %+.1f .. %+.1f, %d of %d points exactly 0\n",
+            (unsigned long long)ticks, i + 1, g_nlw, (unsigned long long)lw, tr[0], tr[1], tr[2], radius, *(const int32_t *)(uintptr_t)(lw + 0x138),
+            m[0], m[1], m[2], inside ? "inside its circle" : "outside its circle", h[1], h[1] - tr[1], lo, hi, nz, nn);
+    }
+    for (int i = 0; i < g_now; i++) {
+        uint64_t ow = g_ow[i];
+        const uint8_t *o = (const uint8_t *)(uintptr_t)ow;
+        float base_h, check, rscale, h = 0, d1 = -1, d2 = -1, rp = 0;
+        memcpy(&base_h, o + 0x2b8, 4), memcpy(&check, o + 0x160, 4), memcpy(&rscale, o + 0x120, 4);
+        uint64_t ripple_tex = *(const uint64_t *)(o + 0x40), depth = *(const uint64_t *)(o + 0x48), hdepth = *(const uint64_t *)(o + 0x58);
+        uint64_t type_p = *(const uint64_t *)(o + 0x2c0);
+        const char *type = type_p >= GUEST_LO && type_p < GUEST_HI ? (const char *)(uintptr_t)type_p : "?";
+        memcpy((void *)(uintptr_t)pos, m, 12);
+        memset((void *)(uintptr_t)out, 0, 4);
+        bool ok = ow_call3(c, fn_wave, ow, out, pos);
+        memcpy(&h, (void *)(uintptr_t)out, 4);
+        bool ok1 = false, ok2 = false, okr = false;
+        if (depth) { memset((void *)(uintptr_t)out, 0, 4); ok1 = ow_call3(c, fn_depth, depth, out, pos); memcpy(&d1, (void *)(uintptr_t)out, 4); }
+        if (hdepth) { memset((void *)(uintptr_t)out, 0, 4); ok2 = ow_call3(c, fn_depth, hdepth, out, pos); memcpy(&d2, (void *)(uintptr_t)out, 4); }
+        if (ripple_tex) { memset((void *)(uintptr_t)out, 0, 4); okr = ow_call3(c, fn_ripple, ripple_tex, out, pos); memcpy(&rp, (void *)(uintptr_t)out, 4); }
+        LOG("[surface] tick %llu wave %d/%d %llx \"%s\" at %.0f %.0f %.0f: height %.1f%s (base %.1f, %s) | ripple %s%.2f x %.2f (on %d %d) | depth rate %s%.3f (on %d) | height depth %s%.3f x %.1f (on %d)\n",
+            (unsigned long long)ticks, i + 1, g_now, (unsigned long long)ow, type, m[0], m[1], m[2],
+            ok ? h : base_h, ok ? "" : " (flat: outside the mesh)", base_h, m[1] <= (ok ? h : base_h) ? "Mario IN it" : "Mario above it",
+            okr ? "" : "none ", rp, rscale, o[0x29a], o[0x29b], ok1 ? "" : "none ", d1, o[0x29c], ok2 ? "" : "none ", d2, check, o[0x15c]);
+        if (map) {
+            float y = map_y_set ? map_y : m[1], lo = 1e30f, hi = -1e30f;
+            int in = 0, above = 0, outside = 0;
+            LOG("[surface-map] wave %d \"%s\": %.0f units each way around %.0f %.0f, fluid at y %.0f ('~' in it, '.' above it, ' ' no mesh, M Mario)\n",
+                i + 1, type, map_half, m[0], m[2], y);
+            for (int r = 0; r < 25; r++) {
+                char line[64];
+                for (int k = 0; k < 49; k++) {
+                    float p[3] = {m[0] + (k - 24) * map_half / 24, y, m[2] + (r - 12) * map_half / 12};
+                    memcpy((void *)(uintptr_t)pos, p, 12);
+                    memset((void *)(uintptr_t)out, 0, 4);
+                    bool okk = ow_call3(c, fn_wave, ow, out, pos);
+                    float hh;
+                    memcpy(&hh, (void *)(uintptr_t)out, 4);
+                    if (!okk) { line[k] = ' '; outside++; continue; }
+                    if (hh < lo) lo = hh;
+                    if (hh > hi) hi = hh;
+                    if (y <= hh) line[k] = '~', in++; else line[k] = '.', above++;
+                }
+                if (r == 12) line[24] = 'M';
+                line[49] = 0;
+                LOG("[surface-map] |%s|\n", line);
+            }
+            LOG("[surface-map] wave %d: %d points in the fluid, %d above it, %d outside the mesh; heights %.1f .. %.1f\n", i + 1, in, above, outside, lo, hi);
+        }
+    }
+    *c = saved;
 }
 
 // ---- ODYSSEY_LOG_LINREAD=1 (debug): al::getF32FromLinearTextureF16 / getColorFromLinearTexture - the CPU reading a
@@ -363,6 +532,10 @@ void odyssey_boot(void) {
         memset(w, 0, sizeof *w);
         w->world = !strncmp(spec, "world:", 6);
         if (w->world) memmove(spec, spec + 6, strlen(spec + 6) + 1);
+        if (!strncmp(spec, "race", 4) && spec[4] >= '0' && spec[4] <= '1' && spec[5] == ':') {
+            w->race = spec[4] - '0' + 1;
+            memmove(spec, spec + 6, strlen(spec + 6) + 1);
+        }
         w->hole = !strncmp(spec, "hole:", 5);  // ("hole:Go": into this kingdom's painting, the label as the game's own)
         if (w->hole) memmove(spec, spec + 5, strlen(spec + 5) + 1);
         char *at = strchr(spec, '@');
