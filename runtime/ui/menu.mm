@@ -2213,6 +2213,7 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     if (g_tab_request_ext >= 0) { g_tab_request = g_tab_request_ext; g_tab_request_ext = -1; }
     bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
     static int focused_tab = -99;  // the tab the controller's cursor is on (from the frame before; -99: none)
+    bool lr_in_page = false;  // L / R with the cursor on a row of the page: it goes to the new page's first row
     if (!any_popup && !typing) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
                  : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1 : 0;
@@ -2224,9 +2225,14 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             g_tab_request = tabs[i].id;
             // the cursor on the tab bar goes along (left behind, A on it switched straight back; user 2026-10-11)
             if (focused_tab != -99) g_focus_tab = tabs[i].id, g_focus_frames = 0;
+            // ... and from a row of the page, to the new page's first row. Left alone, the row it was on disappears
+            // with its page, ImGui puts the cursor on the first item it finds - the Display tab - and the cursor
+            // arriving on a tab shows that tab: L / R showed the next tab and then Display a frame later (owner's
+            // menu recording, 2026-11-21: from Audio, Overlay then Display)
+            else if (ImGui::GetCurrentContext()->NavCursorVisible) lr_in_page = true;
         }
     }
-    bool down_from_tab = false;  // (the sidebar: Down moves between categories; Right / A goes into the page)
+    bool down_from_tab = lr_in_page;  // (the sidebar: Down moves between categories; Right / A goes into the page)
     // ---- The sidebar (0.4.1, owner 2026-11-17: "modern, more controller and mouse and keyboard friendly"): the
     // categories in a column on the left, the page on the right. The controller's cursor on a category shows its page
     // at once; A / Enter / a click (or Right) goes into the page; B / Esc in a page comes back here (the menu window:
