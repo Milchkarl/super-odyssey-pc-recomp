@@ -236,6 +236,12 @@ A generated frame between each two the game renders: 120 FPS shown from the game
 Frame generation status ||| 프레임 생성 상태
 Off: set Frame rate 60 FPS, 120 FPS interpolation off ||| 꺼짐: 프레임 레이트 60 FPS, 120 FPS 보간 끄기로 설정하세요
 Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a stick (the usual follow camera; the other camera kinds take the mouse as a stick). ||| 마우스 축마다 따로 정하는 속도입니다. 카메라가 마우스를 움직인 만큼 즉시 돌아갑니다 - 스틱처럼 서서히 가감속하지 않습니다 (일반 추적 카메라; 다른 종류의 카메라는 마우스를 스틱처럼 받습니다).
+Narrow picture view ||| 좁은 화면 시야
+Cropped sides ||| 양옆 잘림
+Full width ||| 전체 너비
+In a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck). Cropped sides: the 16:9 view's height, a little cut off at the left and right. Full width: everything the 16:9 view shows, and more above and below. ||| 16:9보다 좁은 화면(16:10, 4:3, Steam Deck의 채우기)에서. 양옆 잘림: 16:9 시야의 높이를 유지하고 왼쪽과 오른쪽이 조금 잘립니다. 전체 너비: 16:9 시야에 보이는 모든 것과 위아래가 더 보입니다.
+What a picture narrower than 16:9 (16:10, 4:3) shows: cut sides, or the full width and more above and below. ||| 16:9보다 좁은 화면(16:10, 4:3)에 보이는 범위입니다: 양옆이 잘리거나, 전체 너비와 위아래가 더 보입니다.
+Full width shows the whole picture; Cropped sides (the default) keeps the 16:9 view's height. ||| 전체 너비는 화면 전체를 보여 줍니다. 양옆 잘림(기본값)은 16:9 시야의 높이를 유지합니다.
 HUD position (wide) ||| HUD 위치 (와이드)
 Centered (16:9) ||| 가운데 (16:9)
 Edges ||| 가장자리

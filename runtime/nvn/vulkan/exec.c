@@ -6847,7 +6847,15 @@ static bool gmem_import(uint64_t size) {
     gmem_buf = buf;
     gmem_mem = mem;
     gmem_size = size;
-    LOG("[vk] guest heap imported for shader global memory: %llu MB\n", (unsigned long long)(size >> 20));
+    // (#99: an Intel HD 610 with 8 GB ran out of graphics memory right after this import, with VMA at 352 of its 3223 MB
+    // heap - likely the import counted against that same heap. Which heap it went to, so a log can confirm it.)
+    VkPhysicalDeviceMemoryProperties pm;
+    vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+    uint32_t heap = pm.memoryTypes[ai.memoryTypeIndex].heapIndex;
+    LOG("[vk] guest heap imported for shader global memory: %llu MB (memory type %u of types %#x, heap %u %s of %llu MB)\n",
+        (unsigned long long)(size >> 20), ai.memoryTypeIndex, mp.memoryTypeBits, heap,
+        pm.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "gpu" : "sys",
+        (unsigned long long)(pm.memoryHeaps[heap].size >> 20));
     return true;
 }
 
