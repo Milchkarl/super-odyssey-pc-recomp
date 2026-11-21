@@ -1,4 +1,4 @@
-// Odyssey 1.0.0: evaluate skeletal clips between gameplay ticks for the native draws (120 FPS: the draw-only frame at
+// Odyssey 1.0.0 and 1.4.1: evaluate skeletal clips between gameplay ticks for the native draws (120 FPS: the draw-only frame at
 // the half tick; 90 FPS: every draw at its own fraction of a tick, runtime/hle/odyssey_120.c)
 #include <math.h>
 #include <stdlib.h>
@@ -67,8 +67,9 @@ bool odyssey_pose_enabled(void) {
             animation_calc = loader_find_symbol("_ZN2al13AnimPlayerSkl11calcSklAnimEv");
             skeleton_world = loader_find_symbol("_ZN2nn3g3d11SkeletonObj17CalculateWorldMtxERKNS_4util4neon22MatrixRowMajor4x3fTypeE");
             skeleton_calc = loader_find_symbol("_ZN2nn3g3d11SkeletonObj17CalculateSkeletonEi");
-            // nn::gfx buffer Map in CalculateSkeleton (1.4.1: runtime/odyssey_v141.h; there CalculateWorldMtx is inlined
-            // into its callers, so skeleton_world is 0 and the sampling stays off until it has another hook)
+            // nn::gfx buffer Map in CalculateSkeleton (1.4.1: runtime/odyssey_v141.h, as are the functions above -
+            // CalculateWorldMtx there is a small dispatcher to its scale modes' bodies, found 2026-11-21; before that
+            // the sampling was off on 1.4.1 and its frames above 60 showed every tick twice or more)
             palette_map = loader_main_is_v141() ? ODYSSEY_V141_BUFFER_MAP : 0x7000ae6e40ull;
             enabled = animation_calc && skeleton_world && skeleton_calc && dispatch_lookup(animation_calc) &&
                       dispatch_lookup(skeleton_world) && dispatch_lookup(skeleton_calc) && dispatch_lookup(palette_map);

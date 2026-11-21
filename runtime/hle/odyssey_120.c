@@ -34,6 +34,7 @@ static uint64_t texture_allocator, texture_calc, prepare_graphics;
 static uint64_t last_logic_slot, logic_ticks, controller_ticks, draws, trace_ns;
 static uint64_t simulation_tick, camera_matrix;
 static float draw_lead;  // (90) this draw shows Mario this many ticks past the last tick: -1/6, 1/6 or 1/2
+static float player_step[3];  // (the last tick's movement, for ODYSSEY_LOG_CAMERA: where Mario is drawn between ticks)
 static uint64_t stage_draw_ns;
 static GameplayClock recovery_clock;
 static bool recover_60;
@@ -85,11 +86,11 @@ bool odyssey_motion_enabled(void) {
     return motion != 0;
 }
 
-// The camera between ticks only where Mario is drawn between ticks too (his pose sampled: odyssey_pose.c - 1.0.0).
-// 1.4.1 has no pose sampling (CalculateWorldMtx is inlined there): moving its camera alone put Mario at a different
-// place against the camera every other frame - a doubled Mario (owner, 2026-11-20, 120 FPS: "he looks like he's
-// doubling"; an orbit-only camera still moved him ~0.15 deg back and forth on screen). There the camera stays on the
-// tick, as at 60. ODYSSEY_CAMERA_INBETWEEN=0/1 overrides (tests).
+// The camera between ticks only where Mario is drawn between ticks too (his pose sampled: odyssey_pose.c - 1.0.0, and
+// 1.4.1 since 2026-11-21). Moving the camera alone (1.4.1 before its CalculateWorldMtx was found) put Mario at a
+// different place against the camera every other frame - a doubled Mario (owner, 2026-11-20, 120 FPS: "he looks like
+// he's doubling"; an orbit-only camera still moved him ~0.15 deg back and forth on screen). Without sampling
+// (ODYSSEY_POSE_120=0) the camera stays on the tick, as at 60. ODYSSEY_CAMERA_INBETWEEN=0/1 overrides (tests).
 static bool camera_inbetween(void) {
     static int on = -1;
     if (on < 0) {
@@ -186,7 +187,8 @@ static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_
 // the stack at x29 - 0xf0, the scene x19, the camera x0 - and the hook runs one store early: the eye's x and y are
 // still in x8 (stur x8, [x29, #-0xb8] comes next), so they are placed in the copy first and handed back through x8.
 // (Until 2026-11-20 1.4.1 read 1.0.0's registers - garbage, rejected. With the right ones its camera moved between
-// ticks while Mario, not sampled on 1.4.1, didn't: a doubled Mario. 1.4.1 keeps it on the tick: camera_inbetween.)
+// ticks while Mario, then not sampled on 1.4.1, didn't: a doubled Mario. camera_inbetween: the camera moves only where
+// the pose is sampled - 1.4.1 too since 2026-11-21.)
 // ODYSSEY_LOG_CAMERA=1 (frame pacing tests): each stage draw's camera as drawn - time, extra draw, Mario's lead, tick,
 // eye and target, then the same as the game made them (raw: without the in-between camera) ("[camera] ...")
 void odyssey_camera_draw(Cpu *c) {
@@ -202,10 +204,11 @@ void odyssey_camera_draw(Cpu *c) {
     float raw[6];
     memcpy(raw, pose, sizeof raw);
     if (camera_inbetween() && camera_draw_inner(c, cam, draw_scene, source, pose) && v141) memcpy(&c->x[8], pose, 8);
-    if (lg) {  // (and Mario's position at the last tick: where he is drawn when his pose isn't sampled - 1.4.1)
+    if (lg) {  // (and where Mario is drawn: his last tick's position, moved by the lead where his pose is sampled)
         extern bool odyssey_player_position(float p[3]);
         float m[3] = {0, 0, 0};
-        odyssey_player_position(m);
+        if (odyssey_player_position(m) && odyssey_pose_enabled())
+            for (int i = 0; i < 3; i++) m[i] += draw_lead * player_step[i];
         LOG("[camera] %.3f %d %.3f %llu %.3f %.3f %.3f %.3f %.3f %.3f raw %.3f %.3f %.3f %.3f %.3f %.3f mario %.3f %.3f %.3f\n",
             plat_now_ns() / 1e6, extra_draw, draw_lead, (unsigned long long)simulation_tick, pose[0], pose[1], pose[2], pose[3],
             pose[4], pose[5], raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], m[0], m[1], m[2]);
@@ -560,7 +563,14 @@ static void player_movement(Cpu *c) {
     if (actor >= GUEST_LO && actor < GUEST_HI - 0x58) {
         uint64_t keeper = *(const uint64_t *)(uintptr_t)(actor + 0x50);
         if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x14) {
-            for (int i = 0; i < 3; i++) atomic_store(&player_pos[i], *(const uint32_t *)(uintptr_t)(keeper + 8 + 4 * i));
+            for (int i = 0; i < 3; i++) {
+                float last, now;
+                uint32_t bits = atomic_load(&player_pos[i]);
+                memcpy(&last, &bits, 4);
+                memcpy(&now, (const void *)(uintptr_t)(keeper + 8 + 4 * i), 4);
+                player_step[i] = now - last;
+                atomic_store(&player_pos[i], *(const uint32_t *)(uintptr_t)(keeper + 8 + 4 * i));
+            }
             atomic_store(&player_pos_ns, plat_now_ns());
         }
     }
