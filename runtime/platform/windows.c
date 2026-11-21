@@ -170,7 +170,12 @@ static void log_to_file_without_console(void) {
         // A console, or a file a parent gave us (the shader preparation's log): as it is. A pipe: file + forwarding,
         // unless this is a process started again by one that forwards already (ODYSSEY_LOG_APPEND: it appends to the
         // file the first one passes on).
-        if (GetFileType(err) != FILE_TYPE_PIPE || getenv("ODYSSEY_LOG_PIPE_ONLY")) return;
+        // RecompLauncher's Play gives the game a file of its own (its game-output log), not a pipe: the same then, or
+        // the game's own log - what its crash report attaches - stayed as the last run without the launcher left it
+        // (seen 2026-11-21, launcher 0.90: SuperOdysseyRecomp.log untouched by a whole played session).
+        DWORD type = GetFileType(err);
+        bool launcher_file = type == FILE_TYPE_DISK && getenv("RECOMPLAUNCHER") && !getenv("ODYSSEY_LOG_APPEND");
+        if ((type != FILE_TYPE_PIPE && !launcher_file) || getenv("ODYSSEY_LOG_PIPE_ONLY")) return;
         if (!getenv("ODYSSEY_LOG_APPEND") &&
             !DuplicateHandle(GetCurrentProcess(), err, GetCurrentProcess(), &g_forward_to, 0, FALSE, DUPLICATE_SAME_ACCESS))
             return;
