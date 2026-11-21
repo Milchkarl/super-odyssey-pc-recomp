@@ -368,18 +368,13 @@ void opt_end(void) {
         ImVec2 ds = ImGui::GetIO().DisplaySize;
         float asp = renderer_picture_aspect();
         if (asp < 0.5f || asp > 6) asp = ds.x > 0 && ds.y > 0 ? ds.x / ds.y : 16.0f / 9;
-        float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.55f;
+        float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.6f;
         if (ph > maxh) ph = maxh, pw = ph * asp;
         float ox0 = x0, ox1 = x1;
         x0 = ox0 + (ox1 - ox0 - pw) * 0.5f, x1 = x0 + pw;
         if (menu_live_picture(x0, y, x1, y + ph)) {
             dl->AddRect(ImVec2(x0 - 1, y - 1), ImVec2(x1 + 1, y + ph + 1), theme_u32(kSidebarV), r, 0, fmaxf(2, 3 * g_scale));
-            const char *lab = tr("Live picture");
-            ImVec2 ts = ImGui::CalcTextSize(lab);
-            float lp = 8 * g_scale;
-            dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + ts.x + 2 * lp, y + ts.y + lp), theme_u32(kSidebarV), r,
-                              ImDrawFlags_RoundCornersTopLeft | ImDrawFlags_RoundCornersBottomRight);
-            dl->AddText(ImVec2(x0 + lp, y + lp * 0.5f), kText, lab);
+            float lp = 8 * g_scale;  // (no "Live picture" label on it: the picture speaks for itself - owner 2026-11-21)
             char fps[32];
             snprintf(fps, sizeof fps, "%.0f fps", ImGui::GetIO().Framerate);
             ImVec2 fsz = ImGui::CalcTextSize(fps);
