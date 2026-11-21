@@ -97,16 +97,52 @@ static _Atomic uint64_t g_list_gen;  // changes with every list begun or ended (
 static _Atomic uint64_t g_rec_bytes;  // (the status line: host memory of all records)
 uint64_t nvn_record_bytes(void) { return atomic_load(&g_rec_bytes); }
 
+// Freed blocks kept for the next ones of the same size: the game hands a command buffer new memory many times a frame
+// (nvnCommandBufferAddCommandMemory), each a block of 8x its size - allocated and freed every time, large ones were
+// fresh pages from the system each time (~8% of the game thread's busy time in the allocator, 2026-11-21). At most
+// BLOCK_CACHE blocks and BLOCK_CACHE_BYTES kept. ODYSSEY_NO_BLOCK_CACHE=1: as before.
+#define BLOCK_CACHE 64
+#define BLOCK_CACHE_BYTES (256ull << 20)
+static ArenaBlock *g_block_cache[BLOCK_CACHE];
+static int g_nblock_cache;
+static size_t g_block_cache_bytes;
+static pthread_mutex_t g_block_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool block_cache_on(void) { return !ENV_ON("ODYSSEY_NO_BLOCK_CACHE"); }
+
 static ArenaBlock *block_new(size_t cap) {
-    ArenaBlock *b = malloc(sizeof *b + cap);
+    ArenaBlock *b = NULL;
+    if (block_cache_on()) {
+        pthread_mutex_lock(&g_block_lock);
+        for (int i = g_nblock_cache - 1; i >= 0; i--)
+            if (g_block_cache[i]->cap == cap) {
+                b = g_block_cache[i];
+                g_block_cache[i] = g_block_cache[--g_nblock_cache];
+                g_block_cache_bytes -= cap;
+                break;
+            }
+        pthread_mutex_unlock(&g_block_lock);
+    }
+    if (!b) b = malloc(sizeof *b + cap);
     if (!b) FATAL("nvn: out of host memory for commands\n");
     b->next = NULL, b->cap = cap, b->used = 0;
     atomic_fetch_add(&g_rec_bytes, cap);
     return b;
 }
 
+static void block_free(ArenaBlock *b) {
+    atomic_fetch_sub(&g_rec_bytes, b->cap);
+    if (block_cache_on()) {
+        pthread_mutex_lock(&g_block_lock);
+        bool kept = g_nblock_cache < BLOCK_CACHE && g_block_cache_bytes + b->cap <= BLOCK_CACHE_BYTES;
+        if (kept) g_block_cache[g_nblock_cache++] = b, g_block_cache_bytes += b->cap;
+        pthread_mutex_unlock(&g_block_lock);
+        if (kept) return;
+    }
+    free(b);
+}
+
 static void arena_free(Arena *a) {
-    for (ArenaBlock *b = a->blocks, *n; b; b = n) n = b->next, atomic_fetch_sub(&g_rec_bytes, b->cap), free(b);
+    for (ArenaBlock *b = a->blocks, *n; b; b = n) n = b->next, block_free(b);
     free(a);
 }
 // With the render thread (rqueue.c) a list the game records over may still be queued or running there, or in a frame

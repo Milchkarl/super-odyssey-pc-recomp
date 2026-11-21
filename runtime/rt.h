@@ -9,6 +9,10 @@
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
 #define FATAL(...) (fprintf(stderr, "FATAL: " __VA_ARGS__), rt_fatal_trace())
+// A debug switch (an ODYSSEY_* variable) that is set or not, read once: for code the game calls thousands of times a
+// second - getenv on Windows searches the whole environment under the C library's lock (nvnTextureInitialize /
+// Finalize spent ~11% of the game thread's busy time in it, 2026-11-21).
+#define ENV_ON(name) ({ static int env_on_ = -1; if (env_on_ < 0) env_on_ = getenv(name) != NULL; env_on_; })
 
 // ---- address space layout (guest addresses == host addresses)
 // macOS reserves 0x2_0000_0000-0x70_0000_0000, and guest addresses must fit in 39 bits, so the

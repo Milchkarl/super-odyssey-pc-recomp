@@ -211,7 +211,7 @@ NVN(nvnSyncWait) {  // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
     static int flush = -1;
     static uint64_t n;
     if (flush < 0) flush = getenv("ODYSSEY_SYNC_FLUSH") ? 1 : 0;
-    if (getenv("ODYSSEY_LOG_SYNC") && n++ % 60 == 0) LOG("[nvn] SyncWait #%llu (lr %llx)\n", (unsigned long long)n, c->x[30]);
+    if (ENV_ON("ODYSSEY_LOG_SYNC") && n++ % 60 == 0) LOG("[nvn] SyncWait #%llu (lr %llx)\n", (unsigned long long)n, c->x[30]);
     static int whole = -1;  // ODYSSEY_SYNC_ALL=1: old behaviour, wait for all submitted work
     if (whole < 0) whole = getenv("ODYSSEY_SYNC_ALL") ? 1 : 0;
     // The render thread first: the fence's lists may still be queued. Only up to the fence itself (its ticket): the
@@ -423,7 +423,7 @@ static void paint_sync_rows(uint64_t td, bool refresh, unsigned reader) {
         held[hi].addr = q.addr, held[hi].gen = q.gen;
     }
     if (hi >= 0) held[hi].ticket = stored ? ticket : 0;  // (the rows are the map as of this ask - or not known)
-    if (getenv("ODYSSEY_LOG_PAINT_SYNC") && tk_asked - tk_log >= 2000) {
+    if (ENV_ON("ODYSSEY_LOG_PAINT_SYNC") && tk_asked - tk_log >= 2000) {
         tk_log = tk_asked;
         LOG("[paint-sync] asks: %llu sent to the render thread, %llu left out (nothing queued since the last)\n",
             (unsigned long long)tk_asked, (unsigned long long)tk_skipped);
@@ -589,7 +589,7 @@ NVN(nvnMemoryPoolFlushMappedRange) {
         RqPaintWrite w = {p->storage + A(1), A(2), 0};
         // (not waited for: it runs in its place in the queue, and the next ask about the map is not run before it
         // and its upload - rq_ask. Waiting made the game thread wait for the whole queue again.)
-        RqPaintWrite *hw = rq_enabled() && !rq_on_thread() && paint_prio_on() && getenv("ODYSSEY_PAINT_SYNC_VERIFY") == NULL ? malloc(sizeof *hw) : NULL;
+        RqPaintWrite *hw = rq_enabled() && !rq_on_thread() && paint_prio_on() && !ENV_ON("ODYSSEY_PAINT_SYNC_VERIFY") ? malloc(sizeof *hw) : NULL;
         if (hw) { *hw = w; hw->heap = 1; rq_push(RQ_PAINT_WRITE, hw, 0); }
         else if (rq_enabled() && !rq_on_thread()) rq_wait(rq_push(RQ_PAINT_WRITE, &w, 0));
         else { extern void renderer_paint_cpu_written(uint64_t, uint64_t); renderer_paint_cpu_written(w.addr, w.size); }
@@ -738,7 +738,7 @@ static void builder_layout(uint64_t b, TexLayout *t) {
     // from the driver default: NVNpackagedTextureLayout's low word is log2(GOBs per block).
     uint64_t pl = G(uint64_t, b, 0x50);
     if (pl && (uint32_t)pl <= 5) t->block_height_log2 = (uint32_t)pl;
-    if (pl && getenv("ODYSSEY_LOG_PACKAGED")) {
+    if (pl && ENV_ON("ODYSSEY_LOG_PACKAGED")) {
         static int n;
         if (n++ < 4000) LOG("[nvn] packaged layout %016llx fmt %#x %ux%u lv %u -> default bh %u\n", pl, G(uint32_t, b, 0x20), t->width, t->height, t->levels, t->block_height_log2);
     }
@@ -994,7 +994,7 @@ void nvn_log_overlapping_textures(const NvnTexture *self, uint64_t addr, uint64_
 }
 
 NVN(nvnTextureInitialize) {
-    if (getenv("ODYSSEY_LOG_TEXLIFE")) {  // (debug) an object initialized again while it still holds a live texture
+    if (ENV_ON("ODYSSEY_LOG_TEXLIFE")) {  // (debug) an object initialized again while it still holds a live texture
         NvnTexture *old = HOST(NvnTexture, A(0));
         static uint64_t reinit, total;
         total++;
@@ -1008,7 +1008,7 @@ NVN(nvnTextureInitialize) {
     if (t->flags & 2)
         LOG("[nvn] video texture %p: %ux%u fmt %#x flags %#x target %u addr %llx stride %llu\n", t, t->width, t->height,
             t->format, t->flags, t->target, t->addr, t->stride);
-    if (t->target == 2 && getenv("ODYSSEY_LOG_TEXELS")) {  // (3D textures: color grading maps)
+    if (t->target == 2 && ENV_ON("ODYSSEY_LOG_TEXELS")) {  // (3D textures: color grading maps)
         static int n;
         LOG("[nvn] 3D texture %p: %ux%ux%u fmt %#x flags %#x addr %llx (guest %llx, lr %llx)\n", (void *)t, t->width, t->height, t->depth,
             t->format, t->flags, (unsigned long long)t->addr, (unsigned long long)A(0), (unsigned long long)c->x[30]);
@@ -1019,7 +1019,7 @@ NVN(nvnTextureInitialize) {
 }
 NVN(nvnTextureFinalize) {
     NvnTexture *t = HOST(NvnTexture, A(0));
-    if (getenv("ODYSSEY_LOG_TEXLIFE")) {
+    if (ENV_ON("ODYSSEY_LOG_TEXLIFE")) {
         static uint64_t fin, copies;
         fin++;
         if (t && tex_set_has(t) && t->guest_obj != A(0) && copies++ < 20)
@@ -1093,7 +1093,7 @@ NVN(nvnTextureWriteTexels) {
     NvnTexture *t = HOST(NvnTexture, A(0));
     const int32_t *r = AP(2);  // xoffset, yoffset, zoffset, width, height, depth
     LevelLayout l = tegra_level(&t->layout, 0);
-    if (getenv("ODYSSEY_LOG_TEXELS")) {
+    if (ENV_ON("ODYSSEY_LOG_TEXELS")) {
         const uint32_t *d = AP(3);
         LOG("[nvn] WriteTexels %p %ux%ux%u fmt %#x target %u addr %llx view %llx region %d,%d,%d %dx%dx%d data %08x %08x %08x %08x\n",
             (void *)t, t->width, t->height, t->depth, t->format, t->target, (unsigned long long)t->addr, (unsigned long long)A(1),
@@ -1184,7 +1184,7 @@ RT_ON_RESET(desc_pools_reset) { memset(g_texture_pools, 0, sizeof g_texture_pool
 
 static NvnDescPool *desc_pool_init(uint64_t guest, uint64_t pool, uint64_t off, int count, size_t entry, NvnDescPool **reg,
                                    uint64_t lr) {
-    if (getenv("ODYSSEY_LOG_POOLS")) {
+    if (ENV_ON("ODYSSEY_LOG_POOLS")) {
         extern uint64_t renderer_present_count(void);
         LOG("[nvn] %s pool %llx initialized: memory %llx+%#llx, %d entries (frame %llu, lr %llx)\n",
             reg == g_sampler_pools ? "sampler" : "texture", (unsigned long long)guest, (unsigned long long)HOST(NvnPool, pool)->storage,
