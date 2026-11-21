@@ -6944,15 +6944,15 @@ static uint64_t gmem_tried;  // heap size the import was last attempted for (gme
 // half the RAM there (Windows' shared GPU memory, ~3.6 GB on an 8 GB laptop): the 3.1-3.2 GB import left nearly nothing,
 // and the next allocation failed with "out of graphics memory" ~12 s in. Yet shader global memory is only ever reached
 // through the storage buffers the game binds (NVN puts their addresses in the driver constants, cbuf 0, which this
-// renderer writes: cbuf_info), and those sit in a few MB of the heap (~3 MB in Cap Kingdom on 1.4.1). So when the import
-// would take more than half the heap's budget, only 16 MB-aligned windows around the bound storage buffers are imported
+// renderer writes: cbuf_info), and those sit in a few MB of the heap (~3 MB in Cap Kingdom on 1.4.1). With Low GPU memory mode
+// on (g_settings.low_gpu_memory, opt-in; off: the whole heap as before), only 16 MB-aligned windows around the bound storage buffers are imported
 // (each its own buffer; a new window overlapping or touching others absorbs them), each draw / dispatch binds the window
 // holding its buffers, and the addresses in its driver constants are rebased by the window's start: the shader's
 // address - HEAP_BASE is then the offset in the window, with no change to the shaders. The windows are the heap's own
 // pages: GPU stores land in guest memory as before (guarded writes unchanged). Vertex / index data: the vertex cache
 // uploads from the CPU instead of copying from the import; ranges it doesn't cache (GPU-written) are read in place from
 // a window. ODYSSEY_VK_GMEM_WINDOW=1 / 0 forces windows / the whole heap; ODYSSEY_VK_GMEM_BUDGET_MB=<MB> stands in for
-// the import heap's budget (to test a small heap on a big PC). docs/gmem-windowed-import.md.
+// the import heap's budget (the windows' cap, the log's hint). docs/gmem-windowed-import.md.
 #define GWIN_ALIGN (16ull << 20)
 #define GWIN_MAX 32
 typedef struct { uint64_t lo, hi; VkBuffer buf; VkDeviceMemory mem; } GwinSpan;
@@ -6976,14 +6976,15 @@ static void gwin_decide(uint64_t want) {
     VmaBudget bud[VK_MAX_MEMORY_HEAPS];
     vmaGetHeapBudgets(g_vk.vma, bud);
     uint64_t budget = eb ? strtoull(eb, NULL, 10) << 20 : bud[heap].budget;
-    gwin_state = e ? atoi(e) != 0 : want > budget / 2;
+    gwin_state = e ? atoi(e) != 0 : g_settings.low_gpu_memory;  // (opt-in: the menu's Low GPU memory mode)
     gwin_cap = budget / 8;
     if (gwin_cap < (256ull << 20)) gwin_cap = 256ull << 20;
     if (gwin_cap > (1024ull << 20)) gwin_cap = 1024ull << 20;
-    LOG("[vk] guest heap %llu MB; import heap %u: size %llu MB, budget %llu MB%s, used %llu MB -> %s\n",
+    LOG("[vk] guest heap %llu MB; import heap %u: size %llu MB, budget %llu MB%s, used %llu MB -> %s%s\n",
         (unsigned long long)(want >> 20), heap, (unsigned long long)(pm.memoryHeaps[heap].size >> 20),
         (unsigned long long)(budget >> 20), eb ? " (ODYSSEY_VK_GMEM_BUDGET_MB)" : "", (unsigned long long)(bud[heap].usage >> 20),
-        gwin_state ? "imports of the windows shaders use" : "one import of the whole heap");
+        gwin_state ? "imports of the windows shaders use (Low GPU memory mode)" : "one import of the whole heap",
+        !gwin_state && want > budget / 2 ? " - over half of that heap: Settings > Performance > Low GPU memory mode may help" : "");
 }
 
 static void gwin_free_dead(bool all) {

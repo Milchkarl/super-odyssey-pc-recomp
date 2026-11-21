@@ -141,6 +141,8 @@ typedef struct {
                          // tile (nvn/vulkan/textures.c vk_sampler; read at start)
     int frame_rate;      // FPS_*: the game's draws per second (gameplay stays at 60)
     int memory;          // MEMORY_*: how much memory the renderer may use to spare stutters (settings_low_memory)
+    bool low_gpu_memory; // shader global memory: import only the guest heap windows shaders use, not the whole heap
+                         // (nvn/vulkan/exec.c gwin_decide; read at start; #120 - 8 GB PCs with integrated graphics)
     bool shader_preload; // a stage's shaders get their libraries when the stage sets them up, not at their first draw
                          // (nvn/vulkan/exec.c compile_program; more memory)
     bool shader_wait;    // a draw whose shader is still loading waits for it (a hitch) instead of being left out /

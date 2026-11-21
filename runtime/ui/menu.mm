@@ -1350,6 +1350,10 @@ static void tab_performance(void) {
                    "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
                    "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
     }
+    opt_toggle("Low GPU memory mode", &g_settings.low_gpu_memory, false,
+               "For PCs with integrated graphics and 8 GB of RAM where the game crashes with \"Out of graphics memory\" a "
+               "few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, "
+               "instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start.");
     opt_section("Shaders - advanced");
     {
         static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
