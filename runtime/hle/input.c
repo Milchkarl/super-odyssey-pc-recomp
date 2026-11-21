@@ -659,7 +659,22 @@ static void motion_push(uint64_t now) {
         }
         memcpy(f + 3, mot.gyro, 12);
         memcpy(f + 6, mot.angle, 12);
-        memcpy(f + 9, mot.dir, 36);
+        // The direction as nn::hid has it: its rows the controller's X, Y and Z axes in the world - the transpose of
+        // mot.dir (controller -> world: its columns are those axes, as rotate_dir turns it and the gravity correction
+        // reads it). It was handed over as it is, the opposite rotation: through binoculars the view turned left when
+        // the controller turned right (#53). Savage Wind Recomp (MIT; BOTW's motion aiming through the same nn::hid
+        // states, motion.c fill: dir[i][k] = m[k][i]) hands it over transposed, and its aiming works.
+        // ODYSSEY_MOTION_DIR_ROWS=0: as before (untransposed).
+        static int rows = -1;
+        if (rows < 0) { const char *e = getenv("ODYSSEY_MOTION_DIR_ROWS"); rows = !e || atoi(e) != 0; }
+        if (rows) {
+            for (int i = 0; i < 3; i++)
+                for (int k = 0; k < 3; k++) f[9 + i * 3 + k] = mot.dir[k * 3 + i];
+        } else memcpy(f + 9, mot.dir, 36);
+        // (an identity direction means "no data" to the game - Savage Wind: lying exactly flat and facing ahead, turn it
+        // a hair)
+        if (f[9] == 1 && f[13] == 1 && f[17] == 1 && !f[10] && !f[11] && !f[12] && !f[14] && !f[15] && !f[16])
+            f[10] = 1e-6f, f[12] = -1e-6f;
         // Left and right the other way round, as one consistent mirror (#53): looking around through binoculars turned
         // the view left when the controller turned right - up and down were right (the owner's Steam Deck 2026-11-19,
         // and the reporter's DualSense and Direwolf 3). Invert gyro Y fixed the direction but felt jerky: flipping one
