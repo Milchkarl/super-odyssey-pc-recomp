@@ -1182,6 +1182,10 @@ static bool winimg_make(TexBackend *w) {
 
 // (render lock) src as a present draws it into the window (placement v, parameters pv: vk_present_draw), into the window
 // image w - what the presenter copies into the swapchain's
+// the game picture's shape as last presented (width / height of its place in the window; 0 before the first)
+static float g_picture_aspect;
+float renderer_picture_aspect(void) { return g_picture_aspect; }
+
 static bool compose(TexBackend *w, TexBackend *src, const float v[4], const float pv[8]) {
     if (!src || !src->image || !winimg_make(w)) return false;
     vk_end_pass();
@@ -1880,6 +1884,25 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
         vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+        g_picture_aspect = v[3] > 0 ? v[2] / v[3] : 0;
+        {   // the settings menu's live picture (branch menu-odyssey-look): the game's picture - as placed in the window,
+            // without the window's bars - smaller, filling the rectangle the menu leaves open in its shape (16:9, or
+            // 21:9 with Aspect ratio Fill on an ultrawide screen)
+            extern bool menu_live_picture_px(float r[4]);
+            extern void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh);
+            float h[4];
+            if (menu_live_picture_px(h) && h[2] > h[0] + 4 && h[3] > h[1] + 4 && g_vk.sc_extent.width && g_vk.sc_extent.height) {
+                VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
+                                        .clearValue.color.float32 = {0, 0, 0, 1}};
+                int32_t x0 = (int32_t)fmaxf(0, h[0]), y0 = (int32_t)fmaxf(0, h[1]);
+                uint32_t x1 = (uint32_t)fminf(h[2], (float)g_vk.sc_extent.width), y1 = (uint32_t)fminf(h[3], (float)g_vk.sc_extent.height);
+                if (x1 > (uint32_t)x0 && y1 > (uint32_t)y0) {
+                    VkClearRect cr = {.rect = {{x0, y0}, {x1 - x0, y1 - y0}}, .baseArrayLayer = 0, .layerCount = 1};
+                    vkCmdClearAttachments(cb, 1, &ca, 1, &cr);
+                    vk_present_draw_again(cb, h[0], h[1], h[2] - h[0], h[3] - h[1]);
+                }
+            }
+        }
         vk_checkpoint(cb, "menu overlay");
         vk_queue_lock();  // (ImGui's first frame uploads its fonts through the queue)
         menu_render((void *)cb, g_vk.sc_extent.width, g_vk.sc_extent.height);

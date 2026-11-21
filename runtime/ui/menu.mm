@@ -33,6 +33,7 @@ extern "C" {
 #include "../hle.h"
 #include "../mods.h"
 #include "../localization.h"
+#include "../version.h"  // (APP_VERSION beside the name)
 #include "../ptbr_install.h"
 #include "../diagnostics.h"
 #include "../settings.h"
@@ -49,6 +50,10 @@ void controls_bindings_draw(float scale);  // controls_ui.mm
 static std::atomic<bool> g_open{false};
 static std::atomic<bool> g_quit_prompt{false};
 static std::atomic<bool> g_setup{false};  // the first-start setup page (setup.mm) instead of the menu
+// The live picture (option_rows.mm opt_end): the rectangle of the menu left open onto the game, this frame's and the
+// last one's (the menu is painted before the page says where it is)
+static float g_hole[4], g_hole_prev[4];
+static bool g_hole_set, g_hole_prev_set;
 static std::atomic<bool> g_text_busy{false};  // a text field / the on-screen keyboard has the keys (render thread: ui_text_busy)
 static std::atomic<bool> g_want_window_apply{false};
 static std::atomic<bool> g_draw_mouse_cursor{false};
@@ -113,6 +118,20 @@ static void reset_menu_events(void) {
 
 bool menu_is_open(void) { return g_open.load(); }
 void menu_setup_mode(bool on) { g_setup.store(on); }
+// (render thread, before the menu's frame) last frame's rectangle, in the window's pixels
+extern "C" bool menu_live_picture_px(float r[4]) {
+    if (g_setup.load() || !g_open.load() || !g_hole_set) return false;
+    ImVec2 fb = ImGui::GetIO().DisplayFramebufferScale;
+    float sx = fb.x > 0 ? fb.x : 1, sy = fb.y > 0 ? fb.y : 1;
+    r[0] = g_hole[0] * sx, r[1] = g_hole[1] * sy, r[2] = g_hole[2] * sx, r[3] = g_hole[3] * sy;
+    return true;
+}
+bool menu_live_picture(float x0, float y0, float x1, float y1) {
+    if (g_setup.load() || !g_open.load()) return false;  // (the start page: no game behind it)
+    g_hole[0] = x0, g_hole[1] = y0, g_hole[2] = x1, g_hole[3] = y1;
+    g_hole_set = true;
+    return true;
+}
 static void set_open(bool open);
 extern "C" void menu_test_open(void) {
     set_open(true);
@@ -550,7 +569,7 @@ static void style_init(void) {
     c[ImGuiCol_TabDimmed] = c[ImGuiCol_TabDimmedSelected] = c[ImGuiCol_TabDimmedSelectedOverline] = none;
     c[ImGuiCol_TabHovered] = ImVec4(1, 1, 1, 0.06f);
     c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrabActive] = c[ImGuiCol_ScrollbarGrabActive] = kTextV;
-    c[ImGuiCol_NavCursor] = kAccentV;  // (the controller / keyboard cursor: a red outline)
+    c[ImGuiCol_NavCursor] = kGoldV;  // (the controller / keyboard cursor: a coin-gold outline)
     c[ImGuiCol_SliderGrab] = ImVec4(1, 1, 1, 0.75f);
     c[ImGuiCol_Separator] = kLineV;
     c[ImGuiCol_TableRowBg] = none;
@@ -702,6 +721,9 @@ static bool choice(const char *label, int *value, const char *const *names, int 
         ImGui::EndCombo();
     }
     if (ImGui::IsItemFocused() && !ImGui::IsPopupOpen("##c")) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
             *value = (*value + 1) % n; changed = true;
         }
@@ -737,6 +759,9 @@ static bool slider(const char *label, int *value, int lo, int hi, int step, cons
     ImGui::SetNextItemWidth(-1);
     bool changed = ImGui::SliderInt("##s", value, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
+        for (ImGuiKey k : {ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickLeft,
+                           ImGuiKey_GamepadLStickRight, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+            ImGui::SetKeyOwner(k, ImGui::GetItemID());  // (left / right are the row's: no sideways jump to a tab)
         int v = *value;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) v += step;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) v -= step;
@@ -1965,6 +1990,9 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
 }
 
 // Draw the settings tabs in the current window, with a Prelaunch tab when the launcher supplies one.
+static float hint_icon(ImDrawList *dl, ImVec2 at, float h, const char *tok, bool pad, int fam, float scale);
+static int hint_force(void);
+static float g_tabbar_ends;  // (the room the L / R icons take at each end of the tab bar)
 static void tabs_body(float scale, void (*prelaunch)(float)) {
     // (id: the page; -1 = Prelaunch)
     struct Tab { const char *name; int id; bool on; };
@@ -2003,29 +2031,55 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     // categories in a column on the left, the page on the right. The controller's cursor on a category shows its page
     // at once; A / Enter / a click (or Right) goes into the page; B / Esc in a page comes back here (the menu window:
     // menu_sidebar_focused), B / Esc here closes. L / R (Q / E) switch categories from anywhere.
-    float side_w = 0;
-    {
-        float pad = 22 * scale;
-        for (int k = 0; k < ntabs; k++) side_w = fmaxf(side_w, ImGui::CalcTextSize(tr(tabs[k].name)).x);
-        side_w = fmaxf(side_w + 2 * pad + 8 * scale, 190 * scale);
-    }
+    // (branch menu-odyssey-look: the categories as tabs along the top, L / R (Q / E) drawn at its ends; the
+    // controller's cursor on a tab shows its page, Down / A / a click goes into it, B / Esc in a page comes back up)
     g_sidebar_was = g_sidebar_focused;
-    float item_h = ImGui::GetFontSize() * 2.05f;
+    float fs0 = ImGui::GetFontSize(), item_h = fs0 * 1.85f, bar_pad = 7 * scale;
     int show = g_tab_request >= 0 || g_tab_request == -1 ? g_tab_request : tabs[cur].id;  // (the page drawn this frame)
     bool enter_page = down_from_tab;
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kSidebarV);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12 * scale);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8 * scale, 8 * scale));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4 * scale));
-    ImGui::BeginChild("##nav", ImVec2(side_w, 0), ImGuiChildFlags_AlwaysUseWindowPadding,
-                      ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(bar_pad, bar_pad));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::BeginChild("##nav", ImVec2(0, item_h + 2 * bar_pad), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList *bdl = ImGui::GetWindowDrawList();
+    ImVec2 bp = ImGui::GetCursorScreenPos();
+    float bw = ImGui::GetContentRegionAvail().x;
+    {   // L / R at the ends: the player's own buttons (as the hint bar)
+        ImGuiContext *gc = ImGui::GetCurrentContext();
+        bool padsrc = hint_force() >= 0 ? hint_force() < 3 : gc->NavInputSource == ImGuiInputSource_Gamepad;
+        int fam = hint_force() >= 0 && hint_force() < 3 ? hint_force() : input_pad_family();
+        const char *lk = padsrc ? (fam == 2 ? "L1" : fam == 1 ? "LB" : "L") : "Q";
+        const char *rk = padsrc ? (fam == 2 ? "R1" : fam == 1 ? "RB" : "R") : "E";
+        float ih = fs0 * 1.05f, iy = bp.y + (item_h - ih) * 0.5f;
+        auto icon_w = [&](const char *tok) {  // (hint_icon's own widths, to place the right one)
+            ImFont *f = ImGui::GetFont();
+            if (padsrc) return fmaxf(f->CalcTextSizeA(ih * 0.6f, FLT_MAX, 0, tok).x + ih * 0.6f, ih * 1.25f);
+            return fmaxf(f->CalcTextSizeA(ih * 0.62f, FLT_MAX, 0, tok).x + ih * 0.56f, ih);
+        };
+        float lw = hint_icon(bdl, ImVec2(bp.x + 6 * scale, iy), ih, lk, padsrc, fam, scale);
+        float rw = icon_w(rk);
+        hint_icon(bdl, ImVec2(bp.x + bw - 6 * scale - rw, iy), ih, rk, padsrc, fam, scale);
+        g_tabbar_ends = fmaxf(lw, rw) + 18 * scale;
+    }
+    // the tabs centred between them, fitted: less padding first, then a smaller font (down to 70%)
+    float lo = bp.x + g_tabbar_ends, hi = bp.x + bw - g_tabbar_ends, room = hi - lo;
+    float textsum = 0;
+    for (int k = 0; k < ntabs; k++) textsum += ImGui::CalcTextSize(tr(tabs[k].name)).x;
+    float tpad = 20 * scale, fsc = 1;
+    if (textsum + 2 * ntabs * tpad > room) tpad = fmaxf(5 * scale, (room - textsum) / (2 * ntabs));
+    if (textsum + 2 * ntabs * tpad > room) fsc = fmaxf(0.7f, (room - 2 * ntabs * tpad) / textsum);
+    float total = textsum * fsc + 2 * ntabs * tpad, tx = lo + fmaxf(0, (room - total) * 0.5f);
     for (int k = 0; k < ntabs; k++) {
         const Tab &t = tabs[k];
         ImGui::PushID(t.id + 1000);
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        float w = ImGui::GetContentRegionAvail().x;
+        float w = ImGui::CalcTextSize(tr(t.name)).x * fsc + 2 * tpad;
+        ImVec2 p(tx, bp.y);
+        tx += w;
+        ImGui::SetCursorScreenPos(p);
         ImGui::BeginDisabled(!t.on);
-        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the tint and the bar)
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the fill and the gold outline)
         bool clicked = ImGui::InvisibleButton("##cat", ImVec2(w, item_h), ImGuiButtonFlags_EnableNav);
         ImGui::PopStyleColor();
         // (no Prelaunch in game: the cursor starts on the category that is shown)
@@ -2046,20 +2100,24 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             g_tab_request = show = t.id;
             if (ImGui::GetCurrentContext()->NavCursorVisible) enter_page = true;  // (A / Enter: into the page)
         }
-        if (foc && t.on && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
-                                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, false) ||
-                                          ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)))
+        if (foc && t.on && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false) ||
+                                          ImGui::IsKeyPressed(ImGuiKey_DownArrow, false)))
             enter_page = true;
         bool sel = t.id == show;
-        ImDrawList *dl = ImGui::GetWindowDrawList();
-        float r = 8 * scale, bar = fmaxf(2, 4 * scale), fs = ImGui::GetFontSize();
-        if (sel) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kAccentTintV), r);
-        else if (hov || foc) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + item_h), theme_u32(kSurfaceHoverV), r);
-        if (sel || foc) dl->AddRectFilled(ImVec2(p.x, p.y + item_h * 0.22f), ImVec2(p.x + bar, p.y + item_h * 0.78f),
-                                          sel ? kAccent : kAccentDim, bar * 0.5f);
-        if (foc) dl->AddRect(p, ImVec2(p.x + w, p.y + item_h), sel ? theme_u32(kTextV, 0.55f) : kAccentDim, r, 0, fmaxf(1, 1.5f * scale));
-        dl->AddText(ImVec2(p.x + 18 * scale, p.y + (item_h - fs) * 0.5f), !t.on ? kTextOff : sel || foc || hov ? kText : kTextDim,
-                    tr(t.name));
+        float r = 7 * scale, fs = ImGui::GetFontSize() * fsc;
+        ImVec2 q(p.x + w, p.y + item_h);
+        // (the shown tab: a lighter surface with a red line under its name; red as an accent, not a fill)
+        if (sel || hov || foc) bdl->AddRectFilled(p, q, theme_u32(sel ? kBoxV : kSurfaceHoverV), r);
+        if (sel) {
+            float lw2 = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * fsc, FLT_MAX, 0, tr(t.name)).x;
+            float ly = q.y - fmaxf(3, 5 * scale);
+            bdl->AddRectFilled(ImVec2(p.x + (w - lw2) * 0.5f, ly), ImVec2(p.x + (w + lw2) * 0.5f, ly + fmaxf(2, 3 * scale)), kAccent, 2 * scale);
+        }
+        if (foc) bdl->AddRect(ImVec2(p.x + 1, p.y + 1), ImVec2(q.x - 1, q.y - 1), kGold, r, 0, fmaxf(2, 2.5f * scale));
+        ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, tr(t.name));
+        bdl->AddText(ImGui::GetFont(), fs, ImVec2(p.x + (w - ts.x) * 0.5f, p.y + (item_h - fs) * 0.5f),
+                     !t.on ? kTextOff : sel || foc || hov ? kText : kTextDim, tr(t.name));
         ImGui::EndDisabled();
         ImGui::PopID();
     }
@@ -2067,19 +2125,13 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
     g_sidebar_focused = focused_tab != -99;
-    ImGui::SameLine(0, 20 * scale);
+    ImGui::Dummy(ImVec2(0, 6 * scale));
 
     // ---- the page
     for (int k = 0; k < ntabs; k++) if (tabs[k].id == show) cur = k;
     g_tab = tabs[cur].id;
     opt_focus_first(enter_page);
     ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
-    {   // the page's title: the category, large
-        ImGui::PushFont(g_font_big);
-        ImGui::TextUnformatted(tr(tabs[cur].name));
-        ImGui::PopFont();
-        ImGui::Dummy(ImVec2(0, 2 * scale));
-    }
     // pages that aren't option rows (Controls, Prelaunch): their first control
     if (enter_page && (g_tab == -1 || g_tab == 8)) {
         opt_focus_first(false);
@@ -2537,16 +2589,36 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     }
 
     if (open) {
-        // dim the game behind the menu
-        ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130));
+        // dim the game behind the menu - all but the live picture's window onto it (last frame's place)
+        bool hole = g_hole_prev_set = g_hole_set;
+        memcpy(g_hole_prev, g_hole, sizeof g_hole);
+        g_hole_set = false;
+        const float *H = g_hole_prev;
+        auto around = [&](ImDrawList *dl, ImVec2 a, ImVec2 z, ImU32 col, float rr) {  // (a rectangle less the hole)
+            if (!hole) { dl->AddRectFilled(a, z, col, rr); return; }
+            dl->AddRectFilled(a, ImVec2(z.x, H[1]), col, rr, ImDrawFlags_RoundCornersTop);
+            dl->AddRectFilled(ImVec2(a.x, H[3]), z, col, rr, ImDrawFlags_RoundCornersBottom);
+            dl->AddRectFilled(ImVec2(a.x, H[1]), ImVec2(H[0], H[3]), col);
+            dl->AddRectFilled(ImVec2(H[2], H[1]), ImVec2(z.x, H[3]), col);
+        };
+        around(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 130), 0);
         // a window in the middle with the game around it: about 68% x 80% of the picture; on small screens (the Steam
         // Deck's 1280 x 800) nearly all of it, so the sidebar leaves the rows room (0.4.1)
-        bool small = io.DisplaySize.x <= 1600;
-        float w = small ? io.DisplaySize.x * 0.94f : fminf(io.DisplaySize.x * 0.68f, 1800 * scale);
-        float h = small ? io.DisplaySize.y * 0.92f : fminf(io.DisplaySize.y * 0.80f, 1200 * scale);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        // (branch menu-odyssey-look, owner 2026-11-20: the whole screen, the game seen only in the live picture)
+        float w = io.DisplaySize.x, h = io.DisplaySize.y;
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));  // (painted below, around the live picture)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28 * scale, 18 * scale));
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor();
+        {
+            ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+            around(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y), theme_u32(kPanelV), ImGui::GetStyle().WindowRounding);
+        }
         ImFont *keep_big = g_font_big;  // (the window in the menu's font; header() uses g_font_big)
         g_font_big = g_menu_font_big;
         ImGui::PushFont(g_menu_font);
@@ -2562,6 +2634,12 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImGui::TextUnformatted(RT_APP_NAME);
         }
         ImGui::PopFont();
+        {
+
+            ImGui::SameLine(0, 14 * scale);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (ImGui::GetFontSize() * 0.45f));
+            ImGui::TextDisabled("%s", APP_VERSION);
+        }
         {
             float bx = 44 * scale;
             ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - bx);
