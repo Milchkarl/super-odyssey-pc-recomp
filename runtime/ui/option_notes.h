@@ -54,8 +54,8 @@ static const OptionNote k_option_notes[] = {
      "Switch (the default, as on the Switch). High at high resolutions."},
     {"Draw distance", "Objects and detailed models appear from farther away.",
      "Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms."},
-    {"Sharper HUD and menus", "Crisper edges on the game's HUD, text and menus on large screens.",
-     "Off (the default). On if the HUD looks soft on a large screen; it can make edges look jagged."},
+    {"HUD and menu quality", "Clean, crisp edges on the game's HUD, text and menus on screens larger than the Switch's.",
+     "Switch (the default, as the game draws them). High on a 1080p or larger screen."},
     {"Smooth color gradients", "Removes the visible color bands in skies, fog and dark areas.", "On (the default)."},
     // ---- Performance
     {"Apply low-end PC preset", "Sets the lightest settings in one step.", "Only on a slow PC or integrated graphics."},

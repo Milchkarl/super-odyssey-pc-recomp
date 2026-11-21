@@ -81,6 +81,7 @@ typedef struct {
     bool bloom_prefilter;
     bool bloom_smooth;  // (the HDR composite: its quarter-resolution glow inputs read through a B-spline, bloomUp)
     bool far_smooth;    // (the distant-view panorama: RGBM texels decoded before a B-spline enlargement, farSample)
+    bool hud_smooth;    // (a layout's draw, key->hud_filter: enlarged textures through hudSample)
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
     bool uses_gmem_store;    // STG present: the gmem buffer is not readonly
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
@@ -686,7 +687,10 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
     }
     char e[2000], ex[300] = "";
     if (extra) snprintf(ex, sizeof ex, ", %s", extra);
-    if (c->far_smooth && slot == 0 && type == TEXTYPE_2D && !t->shadow && !off && lod_kind == 0 && !layer &&
+    if (c->hud_smooth && !t->shadow && !off && lod_kind == 0 && ((type == TEXTYPE_2D && !layer) || (type == TEXTYPE_2D_ARRAY && layer))) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "hudSample%s(t%d, %s, rscale[%d])", layer ? "A" : "", slot, P, slot + 1);
+    } else if (c->far_smooth && slot == 0 && type == TEXTYPE_2D && !t->shadow && !off && lod_kind == 0 && !layer &&
         c->stage == STAGE_FRAGMENT) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "farSample(t0, %s, rscale[1])", P);
@@ -2364,6 +2368,83 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "           g1.y * (g0.x * textureLod(src, vec2(a.x, b.y), lod) + g1.x * textureLod(src, b, lod));\n"
                "}\n");
     }
+    if (c->hud_smooth) {
+        // HUD quality High (settings hud_quality; the draws of the game's layouts get this variant: key->hud_filter,
+        // rscale[slot].z = the strength). The HUD's pictures and font glyphs are made for 720 lines; on a larger screen
+        // one bilinear tap enlarges them: soft, with a wobble along curves. Here an enlarged texture (under 0.8 texels a
+        // pixel) is read in two steps:
+        //  1. where the edge is: the 4x4 texels around the point as a cubic B-spline (smooth first and second
+        //     derivatives; colour times alpha, and alpha). The edge's direction n is the main axis of the channels'
+        //     gradients; along it, -g''/g' x the blur's variance is how far the point is from the middle of the edge.
+        //  2. the texture is read with a Catmull-Rom cubic (kept between the four nearest texels: no ringing) at a
+        //     point moved away from the middle of the edge by (scale - 1) x strength x that distance (at most 1.5 x: a
+        //     glyph drawn very large got lumpy beyond): the edge becomes as many times narrower, along a smooth line -
+        //     no steps. The move fades out far from the middle
+        //     (x / (1 + (x / 0.8)^2): the middle of a thin stroke, where the estimate is no distance at all) and on
+        //     weak gradients (shading, noise).
+        // Not enlarged, a scaled render target or strength 0: the game's own single tap.
+        //  The colours are weighted by their alpha in both steps (a transparent texel's colour - often black - would
+        //  otherwise show as a dark rim once the edge is narrow); where alpha is near 0 all around, they are read as is.
+        // Not enlarged, a scaled render target or strength 0: the game's own single tap. The font's glyph sheets are
+        // 2D array textures: hudSampleA, the same on one layer.
+        static const char *const body =
+            "    if (rs.z <= 0.0 || rs.x != 1.0 || rs.y != 1.0) return plain;\n"
+            "    vec2 size = vec2(textureSize(src, 0).xy), du = dFdx(uv) * size, dv = dFdy(uv) * size;\n"
+            "    float m = max(length(vec2(du.x, dv.x)), length(vec2(du.y, dv.y)));\n"  // (texels a pixel)
+            "    if (!(m < 0.8) || m < 0.02) return plain;\n"
+            "    vec2 p = uv * size - 0.5, i = floor(p), f = p - i, f2 = f * f, f3 = f2 * f;\n"
+            "    vec4 t[16];\n"
+            "    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)\n"
+            "        t[y * 4 + x] = HUDTEX((i + vec2(float(x) - 0.5, float(y) - 0.5)) / size);\n"
+            "    vec2 w[4], d[4], h[4];\n"  // (the B-spline's weights, their first and second derivatives)
+            "    w[0] = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0; w[1] = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;\n"
+            "    w[2] = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0; w[3] = f3 / 6.0;\n"
+            "    d[0] = -0.5 * (1.0 - f) * (1.0 - f); d[1] = 1.5 * f2 - 2.0 * f; d[2] = -1.5 * f2 + f + 0.5; d[3] = 0.5 * f2;\n"
+            "    h[0] = 1.0 - f; h[1] = 3.0 * f - 2.0; h[2] = 1.0 - 3.0 * f; h[3] = f;\n"
+            "    vec4 gx = vec4(0.0), gy = vec4(0.0), hxx = vec4(0.0), hxy = vec4(0.0), hyy = vec4(0.0);\n"
+            "    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {\n"
+            "        vec4 q = t[y * 4 + x];\n"
+            "        q.rgb *= q.a;\n"
+            "        gx += q * (d[x].x * w[y].y); gy += q * (w[x].x * d[y].y);\n"
+            "        hxx += q * (h[x].x * w[y].y); hxy += q * (d[x].x * d[y].y); hyy += q * (w[x].x * h[y].y);\n"
+            "    }\n"
+            "    float a = dot(gx, gx), b = dot(gx, gy), c = dot(gy, gy), r = sqrt((a - c) * (a - c) + 4.0 * b * b);\n"
+            "    vec2 v = a >= c ? vec2(a - c + r, 2.0 * b) : vec2(2.0 * b, c - a + r);\n"
+            "    float vl = length(v);\n"
+            "    if (vl < 1e-9) return hudCR(t, f);\n"
+            "    vec2 n = v / vl;\n"
+            "    vec4 gn = gx * n.x + gy * n.y, hn = hxx * (n.x * n.x) + hxy * (2.0 * n.x * n.y) + hyy * (n.y * n.y);\n"
+            "    float den = dot(gn, gn), x = -0.5 * dot(gn, hn) / (den + 1e-6);\n"
+            "    float mv = min((1.0 / m - 1.0) * rs.z, 1.5) * x * smoothstep(0.02, 0.10, sqrt(den)) / (1.0 + x * x * 1.5625);\n"
+            "    if (abs(mv) < 0.004) return hudCR(t, f);\n"
+            "    p += n * mv; i = floor(p); f = p - i;\n"
+            "    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)\n"
+            "        t[y * 4 + x] = HUDTEX((i + vec2(float(x) - 0.5, float(y) - 0.5)) / size);\n"
+            "    return hudCR(t, f);\n"
+            "}\n"
+            "#undef HUDTEX\n";
+        sp(&s, "vec4 hudCR(vec4 t[16], vec2 f) {\n"
+               "    vec2 f2 = f * f, f3 = f2 * f, w[4];\n"
+               "    w[0] = (-f3 + 2.0 * f2 - f) * 0.5; w[1] = (3.0 * f3 - 5.0 * f2 + 2.0) * 0.5;\n"
+               "    w[2] = (-3.0 * f3 + 4.0 * f2 + f) * 0.5; w[3] = (f3 - f2) * 0.5;\n"
+               "    vec4 acc = vec4(0.0), pm = vec4(0.0);\n"
+               "    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {\n"
+               "        vec4 q = t[y * 4 + x] * (w[x].x * w[y].y);\n"
+               "        acc += q; pm += vec4(q.rgb * t[y * 4 + x].a, 0.0);\n"
+               "    }\n"
+               "    vec4 lo = min(min(t[5], t[6]), min(t[9], t[10])), hi = max(max(t[5], t[6]), max(t[9], t[10]));\n"
+               "    acc = clamp(acc, lo, hi);\n"
+               "    if (acc.a > 0.004) acc.rgb = mix(acc.rgb, clamp(pm.rgb / acc.a, lo.rgb, hi.rgb), smoothstep(0.004, 0.1, acc.a));\n"
+               "    return acc;\n"
+               "}\n");
+        sp(&s, "#define HUDTEX(c) textureLod(src, c, 0.0)\n"
+               "vec4 hudSample(sampler2D src, vec2 uv, vec4 rs) {\n"
+               "    vec4 plain = texture(src, uv);\n%s", body);
+        sp(&s, "#define HUDTEX(c) textureLod(src, vec3(c, uvl.z), 0.0)\n"
+               "vec4 hudSampleA(sampler2DArray src, vec3 uvl, vec4 rs) {\n"
+               "    vec2 uv = uvl.xy;\n"
+               "    vec4 plain = texture(src, uvl);\n%s", body);
+    }
     if (c->far_smooth) {
         // The distant view (the panorama behind every kingdom, e.g. the Lost Kingdom's sunset horizon): an RGBA8 image
         // whose alpha scales the colour (HDR = rgb * a^4 * ...), enlarged several times and read at LOD >= 0.5. One
@@ -2640,6 +2721,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             c->bloom_smooth = hash == 0xf42bcd0d74bc1d0eull || hash == 0x025c57bc1bfe1339ull;  // 1.4.1, 1.0.0
             c->far_smooth = hash == 0x5e59c94e801f4d6cull;  // the distant view's G-buffer shader: 1.4.1
         }
+        c->hud_smooth = c->glsl && key->hud_filter;
         c->omap_target = *(const uint32_t *)(sph + 0x48);
         c->omap_depth = (*(const uint32_t *)(sph + 0x4C) >> 1) & 1;
         // ImapGenericVector (SPH bytes 0x18..0x37, one per input, 2 bits per component: 1 constant, 2 perspective,

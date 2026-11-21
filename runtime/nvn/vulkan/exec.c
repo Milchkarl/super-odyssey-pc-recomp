@@ -2891,22 +2891,33 @@ static void hud_blend(uint8_t blend[8], uint8_t *on, uint32_t *mask) {
 // whose panes stayed on one side of the middle in its last frame is moved by (k - 1) x 640 to that side: its corner
 // of the 16:9 screen becomes the picture's corner. Its extent is gathered from its panes' ui2d vertex uniforms (the
 // pane's rect through its model-view, layout units). A pane that covers the screen (stretched already) stays.
+// The same in a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck; k < 1): there the HUD keeps its shape
+// across the picture's width and is shorter than it, centred - the counters sat (1 / k - 1) x 360 units below the top
+// (135 lines of 1080 at 4:3, 40 of a Steam Deck's 800). A layout whose panes stayed above or below the middle moves up
+// or down by that much: to the picture's top or bottom edge, whatever the setting (it is for wide pictures).
+// ODYSSEY_HUD_EDGES_Y=0: not in narrow pictures (as before).
 #define HUD_NL 64
-static struct { uint64_t id, frame; float lo, hi, plo, phi, cur; } hud_lay[HUD_NL];
-static float hud_edge_extent(const float *u, uint64_t size, float *lo, float *hi) {
+static struct { uint64_t id, frame; float lo, hi, plo, phi, cur, ylo, yhi, pylo, pyhi, cury; } hud_lay[HUD_NL];
+static float hud_edge_extent(const float *u, uint64_t size, float *lo, float *hi, float *ylo, float *yhi) {
     if (!u || size != 560 || !(u[0] > 0)) return 0;
     float w = u[132], h = u[133], l = u[134], t = u[135];
     if (!(w > 0) || !(h > 0) || !(w < 1e5f) || !(h < 1e5f)) return 0;
-    *lo = 1e9f, *hi = -1e9f;
+    *lo = *ylo = 1e9f, *hi = *yhi = -1e9f;
     for (int i = 0; i < 4; i++) {
-        float x = l + (i & 1 ? w : 0), y = t - (i & 2 ? h : 0), X = u[16] * x + u[17] * y + u[19];
-        *lo = fminf(*lo, X), *hi = fmaxf(*hi, X);
+        float x = l + (i & 1 ? w : 0), y = t - (i & 2 ? h : 0), X = u[16] * x + u[17] * y + u[19], Y = u[20] * x + u[21] * y + u[23];
+        *lo = fminf(*lo, X), *hi = fmaxf(*hi, X), *ylo = fminf(*ylo, Y), *yhi = fmaxf(*yhi, Y);
     }
     return 1;
 }
-// layout units to move this draw by (0: none)
-static float hud_edge_shift(float k) {
-    if (!ui_mark || !ui_anchored || k <= 1.01f || !g_settings.hud_edges) return 0;
+// layout units to move this draw by, to the right (k > 1) or up (k < 1) (0: none)
+static float hud_edge_shift(float k, float *up) {
+    *up = 0;
+    static int narrow = -1;
+    if (narrow < 0) { const char *e = getenv("ODYSSEY_HUD_EDGES_Y"); narrow = !e || !*e || atoi(e) != 0; }
+    bool wide = k > 1.01f, tall = k < 0.99f && narrow;
+    // (the option - "HUD position (wide)" - is for wide pictures: Centered keeps a 16:9 box there. A narrow picture has
+    // no such box to keep: its HUD always goes to the top and bottom edges)
+    if (!ui_mark || !ui_anchored || !(tall || (wide && g_settings.hud_edges))) return 0;
     uint64_t frame = renderer_present_count();
     int i = 0, free_i = -1, old = 0;
     for (; i < HUD_NL && hud_lay[i].id != ui_anchored; i++) {
@@ -2915,35 +2926,48 @@ static float hud_edge_shift(float k) {
     }
     if (i == HUD_NL) {
         i = free_i >= 0 ? free_i : old;
-        hud_lay[i] = (typeof(hud_lay[0])){ui_anchored, frame, 1e9f, -1e9f, 1e9f, -1e9f, 0};
+        hud_lay[i] = (typeof(hud_lay[0])){ui_anchored, frame, 1e9f, -1e9f, 1e9f, -1e9f, 0, 1e9f, -1e9f, 1e9f, -1e9f, 0};
     }
     if (hud_lay[i].frame != frame) {  // a new frame: the last one's extent decides
         // (the last frame it was drawn in, however long ago: a layout skipped for a frame kept flipping between the
         // middle and the edge)
         if (hud_lay[i].lo <= hud_lay[i].hi) hud_lay[i].plo = hud_lay[i].lo, hud_lay[i].phi = hud_lay[i].hi;
-        hud_lay[i].lo = 1e9f, hud_lay[i].hi = -1e9f, hud_lay[i].frame = frame, hud_lay[i].cur = 0;
+        if (hud_lay[i].ylo <= hud_lay[i].yhi) hud_lay[i].pylo = hud_lay[i].ylo, hud_lay[i].pyhi = hud_lay[i].yhi;
+        hud_lay[i].lo = hud_lay[i].ylo = 1e9f, hud_lay[i].hi = hud_lay[i].yhi = -1e9f, hud_lay[i].frame = frame;
+        hud_lay[i].cur = hud_lay[i].cury = 0;
     }
-    float lo, hi;
+    float lo, hi, ylo, yhi;
     const float *u = (const float *)(uintptr_t)st.ubuf[0][0].addr;
-    bool pane = hud_edge_extent(u, st.ubuf[0][0].size, &lo, &hi);
-    if (!pane) lo = 1e9f, hi = -1e9f;
-    else if (hi - lo >= 1280 * k - 40) lo = -1e8f, hi = 1e8f;  // (a pane across the screen: a screen, not the HUD)
+    bool pane = hud_edge_extent(u, st.ubuf[0][0].size, &lo, &hi, &ylo, &yhi);
+    float kx = wide ? k : 1.0f;  // (the layouts' space is 1280 kx wide, 720 high)
+    bool across = pane && hi - lo >= 1280 * kx - 40, over = pane && yhi - ylo >= 720 - 40;
+    if (!pane) lo = ylo = 1e9f, hi = yhi = -1e9f;
+    if (across) lo = -1e8f, hi = 1e8f;  // (a pane across the screen: a screen, not the HUD)
+    if (over) ylo = -1e8f, yhi = 1e8f;
     hud_lay[i].lo = fminf(hud_lay[i].lo, lo), hud_lay[i].hi = fmaxf(hud_lay[i].hi, hi);
+    hud_lay[i].ylo = fminf(hud_lay[i].ylo, ylo), hud_lay[i].yhi = fmaxf(hud_lay[i].yhi, yhi);
     // a pane moves when it and its layout's last frame are on one side; another draw (text: its own uniforms) goes with
     // the pane before it - the first draw of a layout, or one after a pane across the screen, stays (a menu's picture)
     float shift = hud_lay[i].cur;
     if (pane) {  // (the HUD's own layouts only - odyssey_120.c: by its middle; not one across the screen, nor a pane that is)
         float plo = hud_lay[i].plo, phi = hud_lay[i].phi, mid = (plo + phi) * 0.5f;
-        bool known = plo <= phi && phi - plo < 1280 * k - 40 && hi - lo < 1280 * k - 40;
+        bool known = wide && plo <= phi && phi - plo < 1280 * kx - 40 && !across;
         bool left = known && mid < -100, right = known && mid > 100;
         shift = hud_lay[i].cur = left ? -(k - 1) * 640.0f : right ? (k - 1) * 640.0f : 0;
+        // (narrow: a pane across the width - a band along the bottom or top, stretched to the edge by draw_ - stays too)
+        float pylo = hud_lay[i].pylo, pyhi = hud_lay[i].pyhi, ymid = (pylo + pyhi) * 0.5f;
+        bool yknown = tall && pylo <= pyhi && pyhi - pylo < 720 - 40 && !over && hi - lo < 1280 - 40;
+        bool below = yknown && ymid < -100, above = yknown && ymid > 100;
+        hud_lay[i].cury = above ? (1 / k - 1) * 360.0f : below ? -(1 / k - 1) * 360.0f : 0;
     }
+    *up = hud_lay[i].cury;
     static int lg = -1;
     if (lg < 0) lg = getenv("ODYSSEY_LOG_HUD_EDGES") != NULL;
     if (lg && frame % 120 == 0)
-        LOG("[hud-edge] frame %llu layout %llx draw %s %.0f..%.0f (size %llu), last frame %.0f..%.0f: shift %.0f\n",
+        LOG("[hud-edge] frame %llu layout %llx draw %s x %.0f..%.0f y %.0f..%.0f (size %llu), last frame x %.0f..%.0f y %.0f..%.0f: shift %.0f up %.0f\n",
             (unsigned long long)frame, (unsigned long long)ui_anchored, u && st.ubuf[0][0].size == 560 ? "pane" : "other",
-            lo, hi, (unsigned long long)st.ubuf[0][0].size, hud_lay[i].plo, hud_lay[i].phi, shift);
+            lo, hi, ylo, yhi, (unsigned long long)st.ubuf[0][0].size, hud_lay[i].plo, hud_lay[i].phi, hud_lay[i].pylo, hud_lay[i].pyhi,
+            shift, *up);
     return shift;
 }
 
@@ -7835,6 +7859,26 @@ static float farview_mode(float bq) {
     return env >= 0 ? (float)env : bq > 0 ? 1.0f : 0.0f;
 }
 
+// HUD quality High (settings hud_quality; ODYSSEY_HUD_QUALITY=0/1 overrides, for tests): the layouts' draws use the
+// fragment shader variant that enlarges their textures along smooth edges (ShaderKey hud_filter, maxwell/translate.c
+// hudSample), with this strength in rscale[slot].z (ODYSSEY_HUD_FILTER=<strength>, tests; 0.75 by default: an edge at
+// 3x the Switch's size becomes 2.5 times narrower). Off: the game's own programs and sampling, as on the Switch.
+// ODYSSEY_HUD_FLIP_AT=<frame> (tests): the other quality from that frame on.
+static float hud_filter_strength(void) {
+    static int env = -2;
+    static float k;
+    static long flip_at;
+    if (env == -2) {
+        env = getenv("ODYSSEY_HUD_QUALITY") ? atoi(getenv("ODYSSEY_HUD_QUALITY")) : -1;
+        k = getenv("ODYSSEY_HUD_FILTER") ? (float)atof(getenv("ODYSSEY_HUD_FILTER")) : 0.75f;
+        flip_at = getenv("ODYSSEY_HUD_FLIP_AT") ? atol(getenv("ODYSSEY_HUD_FLIP_AT")) : 0;
+    }
+    bool on = env >= 0 ? env > 0 : g_settings.hud_quality != 0;
+    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) on = !on;
+    return on ? k : 0.0f;
+}
+static float g_hud_draw_filter;  // (draw_) this draw's: > 0 for a layout's draw at High
+
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[8], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
                                  const VkImageView *storage_views) {
@@ -7891,7 +7935,9 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
         } else if (b->binding == 18) {
             // .z: bloom quality High (only the recognised composite reads it: maxwell/translate.c bloomUp)
             // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
+            // (a layout's draw at HUD quality High: .z the enlargement's strength instead - its variant's hudSample)
             float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
+            if (sg && p->fkey.hud_filter) bq = g_hud_draw_filter;
             for (int t = 0; t < si->ntex && t < 64; t++) {
                 rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
             }
@@ -8420,6 +8466,10 @@ static void draw_(CmdRec *r, bool indexed) {
     ShaderKey vkey, fkey;
     base_keys(&vkey, &fkey);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
+    // (HUD quality High: the layouts' draws get the variant that enlarges their textures smoothly - in the vertex key
+    // too: the program table keys on it)
+    g_hud_draw_filter = ui_mark ? hud_filter_strength() : 0.0f;
+    if (g_hud_draw_filter > 0) vkey.hud_filter = fkey.hud_filter = 1;
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
         // rt_kind 3; the picture before it has half floats: textures.c "Banding")
         bool deband = vk_deband();
@@ -8837,13 +8887,41 @@ static void draw_(CmdRec *r, bool indexed) {
             else if (ui2d_ylo <= -359.0f && ui2d_yhi < 200.0f) band = 1;   // (a band along the HUD's bottom edge)
             else if (ui2d_yhi >= 359.0f && ui2d_ylo > -200.0f) band = 2;   // (... its top edge)
         }
-        if (ui_mark && pass_sx > pass_sy * 1.01f) {  // (HUD position: Edges; a stretched pane stays)
-            float shift = hud_edge_shift(pass_sx / pass_sy);
-            if (shift != 0 && k <= 1.0f) {
-                int pw, ph;
-                pass_size(&pw, &ph);
-                vp_ox += shift * pw / (1280.0f * (pass_sx / pass_sy));
+        {   // ODYSSEY_LOG_HUD_DRAWS=1 (tests): each fragment shader the layouts draw with, once, with its textures' sizes
+            static int lg = -1;
+            if (lg < 0) lg = getenv("ODYSSEY_LOG_HUD_DRAWS") != NULL;
+            if (lg && ui_mark && g_debug_frame) {  // (a debug frame: every layout draw's textures, sizes and scales)
+                char line[400];
+                int n = snprintf(line, sizeof line, "[hud-draw] layout %llx fs hash %016llx:", (unsigned long long)ui_anchored,
+                                 (unsigned long long)g_cur_fs_hash);
+                for (int t = 0; t < pr->fi->ntex && t < 8; t++)
+                    n += snprintf(line + n, sizeof line - n, " %ux%u x%.3f,%.3f", tex_wh[1][t][0], tex_wh[1][t][1], tex_sc[1][t][0], tex_sc[1][t][1]);
+                LOG("%s\n", line);
             }
+            if (lg && ui_mark) {
+                static uint64_t seen[512];
+                static int ns;
+                int i = 0;
+                while (i < ns && seen[i] != g_cur_fs_hash) i++;
+                if (i == ns && ns < 512) {
+                    seen[ns++] = g_cur_fs_hash;
+                    char line[400];
+                    int n = snprintf(line, sizeof line, "[hud-draw] fs %llx hash %016llx frame %llu, %d textures:",
+                                     (unsigned long long)st.program->stages[1].code_addr, (unsigned long long)g_cur_fs_hash,
+                                     (unsigned long long)renderer_present_count(), pr->fi->ntex);
+                    for (int t = 0; t < pr->fi->ntex && t < 8; t++)
+                        n += snprintf(line + n, sizeof line - n, " %ux%u(type %d)", tex_wh[1][t][0], tex_wh[1][t][1], pr->fi->tex[t].type);
+                    LOG("%s\n", line);
+                }
+            }
+        }
+        if (ui_mark && (pass_sx > pass_sy * 1.01f || pass_sy > pass_sx * 1.01f)) {  // (HUD position: Edges; a stretched pane stays)
+            float q = pass_sx / pass_sy, up = 0, shift = hud_edge_shift(q, &up);
+            int pw, ph;
+            pass_size(&pw, &ph);
+            if (shift != 0 && k <= 1.0f) vp_ox += shift * pw / (1280.0f * q);
+            // (narrower than 16:9: the HUD is q of the target's height - up is towards y 0)
+            if (up != 0 && ky <= 1.0f && !band) vp_oy -= up * ph * q / 720.0f;
         }
         float vx = vp[0] * vp_sx + vp_ox, vw = vp[2] * vp_sx;
         if (k > 1.0f) { vx -= vw * (k - 1) / 2; vw *= k; }
@@ -10480,18 +10558,8 @@ static VkImageView post_process(VkCommandBuffer cb, TexBackend *b, double ow_d, 
 }
 
 // Inside the window image's rendering (device.c vk_frame_begin): the game image into (vx, vy, vw, vh).
-// HUD sharpening: the game's HUD art is made for 720 lines; on a larger picture its enlarged text and icons are soft.
-// The layer is sharpened when it is composited (shaders.c hud_over.frag): nothing below 900 lines, rising to the full
-// strength at 1440 and above. ODYSSEY_HUD_SHARPEN=<0..1>: the full strength (0: off; 0.6 by default).
-static float hud_sharpness(uint32_t oh) {
-    // (Graphics > Sharper HUD and menus: settings hud_sharpen; the variable, when set, decides instead)
-    static float full = -1;
-    static bool env;
-    if (full < 0) { const char *e = getenv("ODYSSEY_HUD_SHARPEN"); env = e && *e; full = env ? (float)atof(e) : 0.6f; if (full < 0) full = 0; if (full > 1) full = 1; }
-    if (oh < 900 || full <= 0 || (!env && !g_settings.hud_sharpen)) return 0;
-    float t = ((float)oh - 900.0f) / 540.0f;
-    return full * (t > 1 ? 1 : t < 0.15f ? 0.15f : t);
-}
+// (The layer was also sharpened here, 0.4.4 - 0.5.4, "Sharper HUD and menus": an unsharp mask over the enlarged art,
+// which made its bilinear steps stand out. HUD quality High enlarges the art itself instead: hud_filter_strength.)
 // The HUD layer over the (upscaled) picture, at the layer's size (begin_hud_pass); then whether the next frames use it.
 // The picture is the window texture's bytes (sRGB: the game copies its picture in through an sRGB view), the layer
 // linear (as the game's picture): mixed in linear light.
@@ -10503,7 +10571,7 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
         vk_frame_suspend();
         TexBackend *out = post_image(8, ow, oh);
         VkImageView in[3] = {src, post_view(layer)};
-        float pc[8] = {1.0f / ow, 1.0f / oh, hud_sharpness(oh), (float)oh / 720.0f * 0.75f};  // (.w: the radius, pixels)
+        float pc[8] = {1.0f / ow, 1.0f / oh};
         post_pass(cb, "hud_over.frag", in, 2, out, pc, false);
         vk_full_barrier(cb);
         vk_frame_resume();
@@ -10516,15 +10584,11 @@ static VkImageView hud_composite(VkCommandBuffer cb, TexBackend *b, VkImageView 
 #else
     bool temporal = false;
 #endif
-    // (also for its sharpening, where the picture is large enough for it: hud_sharpness)
-    // Not for the sharpening alone while the window shows a corner of the game's texture (handheld mode: 1280x720 of
-    // 1600x900): the layer is not placed for that crop - the pause menu lost its blurred scene and its footer (black
-    // instead), on a Steam Deck in its default console mode (0.4.4 / 0.4.5; owner 2026-11-18).
-    extern void renderer_present_crop(float crop[4]);
-    float crop[4];
-    renderer_present_crop(crop);
-    bool whole = crop[2] > 0.999f && crop[3] > 0.999f;
-    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1 || (whole && hud_sharpness(oh) > 0));
+    // (Only then: a picture already at the window's size has its HUD drawn into it at that size. The 0.4.4 sharpening
+    // turned the layer on for itself, also in handheld mode - the window showing the 1280x720 corner of a 1600x900
+    // texture - where the layer is not placed for that crop: the pause menu lost its blurred scene and its footer on
+    // a Steam Deck, 0.4.4 / 0.4.5.)
+    bool on = env && ow && oh && (temporal || ow > b->width + 1 || oh > b->height + 1);
     if (on != hud.on || (on && (ow != hud.w || oh != hud.h)))
         LOG("[hud] layer %s (%ux%u, the picture %ux%u%s)\n", on ? "on" : "off", ow, oh, b->width, b->height, temporal ? ", temporal" : "");
     hud.on = on;

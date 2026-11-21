@@ -1207,12 +1207,17 @@ static void tab_graphics(void) {
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
                "precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. "
                "Costs almost nothing. Off: the picture exactly as on the Switch.");
-    opt_toggle("Sharper HUD and menus", &g_settings.hud_sharpen, false,
-               "The game's HUD, text and menus are drawn from artwork made for the Switch's 720 lines; enlarged on a "
-               "bigger screen their edges turn soft. On: they are sharpened on screens of 900 lines and more "
-               "(nothing below - a Steam Deck's screen stays as it is), the more the bigger the screen, without "
-               "adding outlines or halos. It makes edges crisper, not more detailed. Off: as the game draws them. "
-               "Changes at once.");
+    {
+        static const char *hq[] = {"Switch", "High"};
+        opt_choice("HUD and menu quality", &g_settings.hud_quality, hq, 2, 0,
+                   "The game's HUD, text and menus are drawn from pictures made for the Switch's 720 lines; "
+                   "stretched over a bigger screen they turn soft and their curves wobble. High: they are enlarged "
+                   "with a filter that follows their edges - round shapes stay round and edges become crisp, without "
+                   "jagged steps, outlines or halos. It works on any screen larger than the Switch's and more the "
+                   "bigger the screen; a Steam Deck's own screen is too close to the Switch's to change. The "
+                   "pictures keep their detail (nothing is redrawn). Costs a little GPU time while a menu covers the "
+                   "screen. Switch: as the game draws them. Changes at once (the HUD may blink the first time).", false);
+    }
 #endif
     opt_end();
 }
