@@ -869,13 +869,12 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGui::Begin("##config", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                        ImGuiWindowFlags_NoBackground);
     ImGui::PushFont(font);
-    backdrop_draw(ImGui::GetBackgroundDrawList(), ImVec2(0, 0), io.DisplaySize, ImGui::GetTime());
-    float margin = 22 * scale, pad = 28 * scale;
-    float cardw = fminf(io.DisplaySize.x - 2 * margin, fmaxf(1240 * scale, io.DisplaySize.x * 0.84f)), cardh = io.DisplaySize.y - 2 * margin;
-    ImVec2 c0((io.DisplaySize.x - cardw) * 0.5f, margin);
-    ImDrawList *bg = ImGui::GetWindowDrawList();
-    bg->AddRectFilled(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kPanelV), 18 * scale);
-    bg->AddRect(c0, ImVec2(c0.x + cardw, c0.y + cardh), theme_u32(kLineV), 18 * scale, 0, fmaxf(1, scale));
+    // (branch menu-odyssey-look, owner 2026-11-20: the start page fills the screen in pitch black, as the menu in game;
+    // the animated pixel-art backdrop stays for the installation page only - setup_page)
+    float pad = 28 * scale;
+    float cardw = io.DisplaySize.x, cardh = io.DisplaySize.y;
+    ImVec2 c0(0, 0);
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, theme_u32(kPanelV));
     // the header: the pipe, the name and the version; in Settings, "Settings" after it
     ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + pad * 0.8f));
     ImGui::BeginGroup();
