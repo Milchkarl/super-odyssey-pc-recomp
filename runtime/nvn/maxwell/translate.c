@@ -2327,6 +2327,16 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (c->bloom_prefilter) {
         // Pair adjacent texels with linear sampling, weighting each by its coverage in the bright-pass pixel.
         // Evenly spaced taps left uneven weights on the HDR texel grid, making tiny lights pulse during pans.
+        // The area averaged is what the game's one bilinear tap covers at its own resolution: 2x2 of its texels (the
+        // tap sits on the corner between them), so at 1.6x 3.2x3.2 of ours. Averaging the bright-pass pixel's whole
+        // footprint (16x16 game texels), as before, fed every small bright detail into the glow - the lens flare's
+        // dotted ghosts, sand sparkles, the sun's edge: a wide halo and square glow blocks that the Switch (and an
+        // emulator at 3x) don't have. ODYSSEY_BLOOM_TAP=<game texels> (tests; 0 = the whole footprint, as before).
+        {
+            const char *e = getenv("ODYSSEY_BLOOM_TAP");
+            float tap = e ? (float)atof(e) : 2.0f;
+            sp(&s, "const float BLOOM_TAP = %.3f;\n", tap);
+        }
         sp(&s, "vec2 bloomPair(float p, float lo, float hi) {\n"
                "    float a = clamp(min(hi, p + 1.0) - max(lo, p), 0.0, 1.0);\n"
                "    float b = clamp(min(hi, p + 2.0) - max(lo, p + 1.0), 0.0, 1.0);\n"
@@ -2337,6 +2347,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    vec2 size = vec2(textureSize(src, int(lod)));\n"
                "    vec2 footprint = fwidth(uv) * size;\n"
                "    if (any(lessThanEqual(footprint, vec2(0.0)))) return textureLod(src, uv, lod);\n"
+               "    if (BLOOM_TAP > 0.0) footprint = min(footprint, BLOOM_TAP * scale);\n"
                "    vec2 lo = uv * size - 0.5 * footprint, hi = lo + footprint;\n"
                "    ivec2 first = ivec2(floor(lo)), end = ivec2(ceil(hi));\n"
                "    vec4 color = vec4(0.0);\n"
