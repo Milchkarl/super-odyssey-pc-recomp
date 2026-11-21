@@ -43,24 +43,35 @@ game.
 ## Features
 
 - **The whole game from your own copy**, versions 1.0.0 and 1.4.1 - no emulator runs while you play
-- **Frame rates from 60 to 240 FPS**, every frame really drawn, with **Match display** picking the smoothest rate for
-  your screen
-- **Resolutions up to 4K and beyond** (up to 4x the Switch's), and any screen shape: 16:9, 16:10, 21:9, 32:9, 4:3 or
-  Fill, with the HUD at the edges on ultrawide
+- **60 FPS on a Steam Deck**, and at 60 FPS on integrated graphics such as the Radeon graphics built into a Ryzen 9
+  9950X3D
+- **Frame rates from 60 to 240 FPS**, with **Match display** picking the smoothest rate for your screen (above 60 is
+  less smooth than 60 for now: see [Known issues](#known-issues))
+- **Resolutions up to 4K and beyond** (up to 4x the Switch's), and any screen shape: **Fill window** takes the
+  window's own shape - wider than 16:9 shows more at the sides, and with **Narrow picture view > Full width** narrower
+  screens (16:10, 4:3) show more above and below - or a fixed 16:9, 16:10, 21:9, 32:9 or 4:3 with bars
 - **Upscaling** with NVIDIA DLSS / DLAA, AMD FSR 1 / 2 / 3.1 / 4 and Intel XeSS, the HUD drawn at full resolution over
   the upscaled picture, plus **frame generation** (AMD FSR, NVIDIA DLSS beta) and NVIDIA Reflex
-- **Shaders prepared before you play**, and again by themselves after a driver update, so they are not compiled
-  while you play (a rare effect nobody has recorded yet can still hitch once)
-- **Sharper than the Switch when you want it**: FXAA or SMAA, 2x / 4x shadow maps, texture detail, 16x anisotropic
-  filtering, smooth colour gradients, a sharper HUD on large screens - and **the Switch's own look by default**
-- **Any controller**, with button icons that match it (Xbox, PlayStation, Switch), a Joy-Con pair, motion controls
-  and vibration; **keyboard and mouse** with a real mouse camera, and the mouse in the game's own menus
-- **A start screen and settings menu made for controller, mouse and keyboard**, where every option says what it does
-  and what is recommended, with button hints drawn for the device you are using - in English, Korean and Brazilian
-  Portuguese
-- **Steam Deck and PC handhelds**: 1280 x 800 at 60 FPS in Gaming Mode
+- **Shaders prepared before you play**, and again by themselves after a driver update or an update of the port, so
+  they are not compiled while you play (a rare effect nobody has recorded yet can still hitch once)
+- **Native code where it counts**: some of the game's heaviest work runs as native PC code instead of recompiled
+  Switch code - unpacking the game's files when a kingdom loads takes much less CPU, with fewer drops right after
+- **Much lower memory use** than the first versions, and a Low memory option for PCs with less RAM
+- **Sharper than the Switch when you want it**: FXAA or SMAA, 2x / 4x shadow maps, texture detail, bloom, draw
+  distance, 16x anisotropic filtering, smooth colour gradients, a sharper HUD on large screens - and **the Switch's own
+  look by default**
+- **Any controller**, with button icons that match it (Xbox, PlayStation, Switch), a Joy-Con pair and vibration;
+  **keyboard and mouse** with a real mouse camera, and the mouse in the game's own menus
+- **Gyro / motion controls** with DualSense, DualShock 4, Switch Pro, Joy-Con, 8BitDo and the **Steam Deck's own
+  gyro** (also with Steam Input on): shake to throw Cappy, motion aiming, binoculars; sensitivity, inversion,
+  calibration and a shake button
+- **A settings menu with a live picture**: tabs along the top, every option saying what it does and what is
+  recommended, and the game itself shown while you change graphics settings - made for controller, mouse and keyboard,
+  in English, Korean and Brazilian Portuguese
+- **Steam Deck and PC handhelds**: 1280 x 800 at 60 FPS in Gaming Mode, a native Linux AppImage
 - **Built-in updates**, RomFS mods, 5.1 surround, a performance overlay, Discord activity (off by default)
-- **Crash reports you can read**: what happened, where, and a signature to match the same crash between players
+- **Crash reports you can read**: what happened, where, and a signature to match the same crash between players -
+  also when the game is started from a launcher
 
 <p align="center"><a href="docs/media/cap-120fps-4k-overlay.jpg"><img src="docs/media/cap-120fps-4k-overlay.jpg" alt="Cap Kingdom at 4K and 120 FPS with the performance overlay" width="80%"></a></p>
 <p align="center"><sub>Cap Kingdom at 3840 x 2160 and 120 FPS with the port's own performance overlay (0.4.4, upscaling and anti-aliasing off): the graphics card at 63%, the game using 3% of the CPU and 6.5 GB of RAM. One PC, an RTX 4090 with a Ryzen 9 9950X3D; other PCs and busier places will show other numbers.</sub></p>
@@ -69,7 +80,7 @@ game.
   <a href="docs/media/start-screen.jpg"><img src="docs/media/start-screen.jpg" alt="The start screen" width="49%"></a>
   <a href="docs/media/settings-in-game.jpg"><img src="docs/media/settings-in-game.jpg" alt="The settings menu in game" width="49%"></a>
 </p>
-<p align="center"><sub>The start screen and the settings menu (0.4.1): Play first, categories in a sidebar, every option explained.</sub></p>
+<p align="center"><sub>The start screen and the settings menu in game (0.5.3): Play first, categories as tabs along the top, every option explained, and the game's live picture on the right.</sub></p>
 
 ## Status
 
@@ -128,16 +139,17 @@ You can also download the new zip from [Releases](../../releases) and extract it
 This is a preview. Known problems and things not done yet:
 
 - **Being worked on** (from the [issues](../../issues)):
-  - The game freezes on Radeon RX 7800 XT under Linux (#21).
-  - The Steam Deck's own gyro isn't read yet (#68); a no-sound report on the Deck (#43).
-  - Sounds that click or crackle (#97): one cause was found and fixed in 0.4.5 (see
-    [What we measured and fixed](#what-we-measured-and-fixed)); reports from other PCs are still open.
-  - A tutorial video that stays black with FSR 3.1 on (#66): turn FSR 3.1 off, or use FSR 1, to see the videos.
-  - Memory on PCs with 16 GB of RAM (#75, #61): 0.4.3 uses much less on our test PC; we are waiting to hear how it
-    is on those PCs.
-- **Frame rates above 60** are less tested than 60, on both game versions: some objects or effects can move unevenly,
-  and the busiest places (New Donk City seen from high up, riding its power lines) can drop frames on any PC.
-  Painting transitions play at 60 FPS on purpose.
+  - "Out of graphics memory" a few seconds in on 8 GB laptops with integrated graphics (#120, #99): a fix is being
+    tested.
+  - Visual corruption in some scenes (#66), running dust drawn as black squares on some AMD cards (#103), effects
+    still missing a shader (#104), graphics glitches with Intel graphics on Linux (#98).
+  - Low frame rate in Wooded Kingdom on some PCs (#75), and the death screen disappearing (#114).
+  - Steam Deck: portable-mode UI scaling (#100).
+- **Frame rates above 60** aren't fully smooth yet: the game itself updates 60 times a second, and on 1.4.1 only
+  the frames are drawn faster, so motion looks like 60. The busiest places (New Donk City seen from high up, riding its
+  power lines) can drop frames on any PC. Painting transitions play at 60 FPS on purpose.
+- **Draw distance > Very high** is heavy: in New Donk City it halved the frame rate on a fast PC. High costs almost
+  nothing.
 - **Version 1.4.1** is newer in this port than 1.0.0 and less tested.
 - **A short stutter can still happen** the first time a rare effect is drawn whose pipeline state nobody has recorded
   yet. It's prepared then and kept for next time.
@@ -167,25 +179,27 @@ For a graphics glitch, pressing **F9** where it happens saves the frame's detail
 
 - Windows 10 / 11 (x64), a 64-bit CPU - AVX2 (Intel Haswell / AMD Zen or newer) recommended; older CPUs without AVX2
   (Intel Sandy / Ivy Bridge and earlier) are supported but slower - a GPU with Vulkan 1.3 and an up-to-date driver
-- 8 GB RAM (16 GB recommended), about 12 GB free disk space
+- 8 GB RAM (16 GB recommended; 8 GB laptops with integrated graphics can run out of graphics memory for now, #120),
+  about 12 GB free disk space
 - The extracted `exefs` and `romfs` folders of your own Super Mario Odyssey (1.0.0, or 1.4.1 with the update applied)
 
 ## Settings
 
-Open the menu with **F1** or **Esc** (controller: Home / Guide button, or Back + Start). The categories are in a
-sidebar on the left: move onto one to see it, press A / Enter / Right (or click) to go into it, B / Esc to come back,
-and L / R (Q / E) to switch from anywhere. The bar at the bottom shows what your buttons do, and the text on the right
-explains the selected option and says what is recommended.
+Open the menu with **F1** or **Esc** (controller: Home / Guide button, or Back + Start). The categories are tabs
+along the top: L / R (Q / E) switch them from anywhere, Down / A goes into the page, B / Esc comes back. Left / Right
+change the selected option. In game, the right side shows the game itself as you change settings, and below it what
+the selected option does and what is recommended. The bar at the bottom shows what your buttons do.
 
-- **Display**: windowed, borderless or exclusive fullscreen, display resolution, VSync, aspect ratio, console mode
+- **Display**: windowed, borderless or exclusive fullscreen, display resolution, VSync, aspect ratio, narrow picture
+  view, console mode, dynamic resolution
 - **Graphics**: internal resolution, anti-aliasing, upscaling and frame generation, texture filtering and detail,
-  shadow quality, smooth gradients, sharper HUD and menus
+  shadow quality, bloom quality, draw distance, smooth gradients, sharper HUD and menus
 - **Performance**: early frame hand-off, multithreaded rendering, frame rate (60 to 240 FPS or Match display),
   Discord activity, shader preparation, memory use
 - **Overlay**: the FPS counter, and the performance overlay with what it shows, where and how large
 - **Audio**: volume, stereo or 5.1, reverb, movie audio, mute in background
-- **Controls**: motion controls, vibration, stick deadzone and speed, mouse camera, mouse in menus, button prompts,
-  key and button rebinding
+- **Controls**: motion controls (gyro sensitivity, inversion, calibration, shake button), vibration, stick deadzone
+  and speed, mouse camera, mouse in menus, button prompts, key and button rebinding
 - **Language**, **Mods** (RomFS mods on and off), **Updates**
 
 ## Controls
@@ -210,8 +224,11 @@ The game's button icons follow what you play with: after a key press or mouse mo
 LB / RB / LT / RT), PlayStation (cross circle square triangle, L1 / R1 / L2 / R2) or the Switch's. With two controllers
 connected, the one you press a button on takes over. Menu > Controls > *Button prompts* can fix them to one style.
 
-Motion controls (shake to throw Cappy at a target, and the game's other motion moves) use the controller's gyro and
-accelerometer: PlayStation and Switch Pro controllers. Menu > Controls > *Motion controls* turns them off.
+Motion controls (shake to throw Cappy at a target, motion aiming, looking through binoculars, and the game's other
+motion moves) use the controller's gyro and accelerometer: PlayStation, Switch Pro, Joy-Con, 8BitDo and the Steam
+Deck's own. On the Deck it works with Steam Input on; leave the gyro unmapped in Steam's controller layout so Steam
+doesn't also move the camera with it. Menu > Controls has the gyro's sensitivity, inversion and calibration, a
+**Shake button** (throw Cappy with a button instead of shaking) and *Motion controls* to turn them off.
 
 ## Files
 
@@ -289,6 +306,10 @@ Bug reports are read and worked on the same way: the maintainer tests, and Claud
   is ported from (MIT license, `tools/vendor/macnativegames`), and
   **[TotK PC Recomp](https://github.com/valentderah/totk-pc-recomp)**'s hactool build script (`tools/build_hactool.py`,
   MIT) used for checking
+- **[Savage Wind Recomp](https://github.com/Revivedx/SavageWindRecomp)** by Revivedx and its contributors - how the
+  motion sensor's orientation is handed to the game, which fixed gyro aiming through binoculars (#53) (MIT license).
+- **Rekarina** - the settings menu's layout (tabs along the top, a live picture beside the options) was inspired by
+  its menu; no code or artwork from it is used.
 - [OdysseyDecomp](https://github.com/MonsterDruide1/OdysseyDecomp) - names and structure of the game's code, used for
   reading and debugging (no code from it is in this repository)
 - [Switchbrew](https://switchbrew.org) and [envytools](https://github.com/envytools/envytools) - documentation of the
@@ -320,8 +341,10 @@ Steam Deck** before it is merged; nothing from a contributor ships untested. Nev
   pointer (#86).
 - **zzzarathustra-dev** - shaders precompiled before the first start and the first Steam Deck defaults (0.2.1).
 - **Codex** (OpenAI) - fixes and features across the runtime (see [Who made this](#who-made-this)).
-- Everyone who reported a bug with logs, crash reports, screenshots and saves: most fixes started there - the
-  painting crash was found from two players' reports (#72, #85), the frame generation crash from one log (#77).
+- Everyone who reported a bug with logs, crash reports, screenshots, videos and saves: most fixes started there -
+  the painting crash was found from two players' reports (#72, #85), the frame generation crash from one log (#77),
+  the long-session crash from one report (#113), the reversed binocular gyro from a player's video (#53), and several
+  reports came with their own investigation (#94, #120, #121). Thank you - keep them coming.
 
 ## What we measured and fixed
 
@@ -394,6 +417,20 @@ Nothing here was judged by feel alone. The tools are in the source, as `ODYSSEY_
   happened 425 times, with 138 isolated ticks in the output; with a new sound starting at its own volume, as on the
   console, there were none, and the maintainer confirmed it by ear in stereo and 5.1.
 - Not listened to on a Steam Deck. Crackling from a busy PC (the sound device running dry) is a different cause.
+
+### Shaders, CPU and the Steam Deck (0.5.0 - 0.5.3)
+
+- **Shader stutter after updates:** the saved shader translations were labelled with the build's time, so every new
+  version threw them away and the first kingdom translated thousands of shaders while playing. They are now labelled
+  with the translator's own source, and the shipped pipeline seed is checked against each release before it goes out.
+- **Native file unpacking:** the game unpacks its compressed files (Yaz0) with recompiled code on a worker thread;
+  that function now runs as native code, which took most of the CPU cost out of the drops right after a kingdom loads.
+- **Steam Deck hitches:** with 8 CPU threads or fewer the port now runs 2 shader workers and 1 translator instead of
+  4 + 2, so they no longer starve the game's main thread; in the bench walk no frame went over 50 ms.
+- **Draw distance:** measured in New Donk City at a 120 FPS target - Switch 119 FPS, High 120, Very high 55-61, with
+  the time spent in the game's own updates of faraway objects (CPU), not in the graphics card. The menu now says so.
+- **Gyro through binoculars (#53):** the motion sensor's orientation was handed to the game the wrong way round (the
+  inverse rotation); handed over as Savage Wind Recomp does, both directions are right on a Steam Deck.
 
 ### Still open
 
