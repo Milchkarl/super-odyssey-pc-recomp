@@ -1352,6 +1352,9 @@ static void tab_graphics(void) {
     opt_toggle("Motion blur", &g_settings.motion_blur, true,
                "The game blurs the picture a little while the camera turns. Off: the picture stays sharp while it turns. "
                "On: as on the Switch. Changes at once.");
+    opt_toggle("Snapshot Mode at full frame rate", &g_settings.snapshot_full_rate, false,
+               "The game holds Snapshot Mode (D-pad Down) to 30 FPS. On: it runs at 60 FPS like the rest of the game. "
+               "Off: as on the Switch. Changes at once.");
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
                "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
