@@ -12,6 +12,7 @@
 #include "../ipc.h"
 #include "../mods.h"
 #include "../paths.h"
+#include "../romfs_read.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -22,7 +23,7 @@ const char *g_save_dir = "save";
 static int romfs_fd = -1;
 
 // ------------------------------------------------------------------ RomFS file index (offset -> path)
-typedef struct { uint64_t start, size; char *path; int fd; const uint8_t *mem; } Overlay;
+typedef struct { uint64_t start, size; char *path; int fd; const uint8_t *mem; uint8_t *owned; } Overlay;  // (owned: mem to free)
 // in-image patches (copies of RomFS tables with changes): header, dir meta, file hash, file meta
 typedef struct { uint64_t off, size; uint8_t *data; } Patch;
 static Patch patches[8];
@@ -42,6 +43,7 @@ RT_ON_RESET(fs_reset) {
     for (int i = 0; i < ov_n; i++) {
         if (ov[i].fd >= 0) close(ov[i].fd);
         free(ov[i].path);
+        free(ov[i].owned);
     }
     for (int i = 0; i < npatches; i++) free(patches[i].data);  // (ov_meta and the extended table are among these)
     for (int i = 0; i < rom_nfiles; i++) free(rom_files[i].path);
@@ -233,6 +235,31 @@ static void rom_check_version(void) {
     rt_fail(msg);
 }
 
+// A mod's archive (.szs) missing files the game's own copy has: those files from the game's copy (romfs_read.c,
+// sarc_fill_missing) - a mod made for another game version, such as the JumpManClub Brasil translation on 1.0.0
+// (no SelectBalloonListParts.msbt: a crash at start-up). NULL: the mod's file as it is. ODYSSEY_MOD_ARCHIVE_FILL=0: off.
+static uint8_t *mod_archive_fill(int fd, const RomFile *rf, const ModFile *m, size_t *out_n) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_MOD_ARCHIVE_FILL"); on = !e || atoi(e) != 0; }
+    size_t pl = strlen(rf->path);
+    if (!on || pl < 4 || strcasecmp(rf->path + pl - 4, ".szs") || m->size > (64u << 20) || rf->size > (64u << 20)) return NULL;
+    uint8_t *mraw = malloc(m->size ? m->size : 1), *oraw = malloc(rf->size ? rf->size : 1), *res = NULL;
+    int hf = open(m->host, O_RDONLY);
+    bool ok = hf >= 0 && pread(hf, mraw, m->size, 0) == (ssize_t)m->size && pread(fd, oraw, rf->size, (off_t)rf->off) == (ssize_t)rf->size;
+    if (hf >= 0) close(hf);
+    size_t mn = 0, odn = 0, sn = 0;
+    uint8_t *md = ok ? yaz0_decode(mraw, m->size, &mn) : NULL, *od = md ? yaz0_decode(oraw, rf->size, &odn) : NULL;
+    int added = 0;
+    uint8_t *sarc = od ? sarc_fill_missing(md, mn, od, odn, &sn, &added) : NULL;
+    if (sarc) {
+        res = yaz0_store(sarc, sn, mraw, out_n);
+        LOG("[fs] mods: %s: %d file%s from the game's own copy (not in the mod's: made for another game version)\n",
+            rf->path, added, added == 1 ? "" : "s");
+    }
+    free(sarc), free(od), free(md), free(oraw), free(mraw);
+    return res;
+}
+
 static void rom_index(int fd) {
     uint64_t h[10];
     if (pread(fd, h, sizeof h, 0) != (ssize_t)sizeof h) return;
@@ -283,15 +310,18 @@ static void rom_index(int fd) {
             fstat(fd, &rs);
             ov_end = (rs.st_size + 0xF) & ~0xFull;
         }
-        uint64_t rel = ov_end - rom_data_off, size = m->size;
+        size_t merged_n = 0;
+        uint8_t *merged = mod_archive_fill(fd, &rom_files[i], m, &merged_n);
+        uint64_t rel = ov_end - rom_data_off, size = merged ? merged_n : m->size;
         memcpy(ov_meta + rom_files[i].meta + 8, &rel, 8);
         memcpy(ov_meta + rom_files[i].meta + 0x10, &size, 8);
         if (ov_n == ov_cap) { ov_cap = ov_cap ? ov_cap * 2 : 256; ov = realloc(ov, sizeof *ov * ov_cap); }
         ov[ov_n].start = ov_end;
         ov[ov_n].size = size;
-        ov[ov_n].path = strdup(m->host);
+        ov[ov_n].path = merged ? NULL : strdup(m->host);
         ov[ov_n].fd = -1;
-        ov[ov_n].mem = NULL;
+        ov[ov_n].mem = merged;
+        ov[ov_n].owned = merged;
         ov_n++;
         ov_end = (ov_end + size + 0xF) & ~0xFull;
     }
