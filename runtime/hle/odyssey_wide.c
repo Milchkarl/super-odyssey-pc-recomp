@@ -71,7 +71,8 @@ static float camera_shape(void);
 float odyssey_wide_camera(void) {
     float k = camera_shape();
     Cpu *c;
-    if (k < 1.0f && g_settings.narrow_full && (c = kernel_current_cpu())) {
+    extern bool odyssey_pause_menu_open(void);  // (hle/odyssey_120.c: the pause menu's model needs the unwidened view)
+    if (k < 1.0f && g_settings.narrow_full && !odyssey_pause_menu_open() && (c = kernel_current_cpu())) {
         float *fovy = (float *)&c->v[2];
         if (*fovy > 0.01f && *fovy < 3.0f) {
             float f = 2.0f * atanf(tanf(*fovy * 0.5f) / k);

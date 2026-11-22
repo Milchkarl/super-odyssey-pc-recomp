@@ -261,6 +261,19 @@ static void subjective_start(Cpu *c) {
     original_subjective_start(c);
 }
 
+// The pause menu's Mario and Cappy at 16:10 / 4:3 with "Narrow picture view" Full width (#112): the menu places their
+// model where a HUD position (310, -960: far below the screen's bottom edge) lies in the 3D view
+// (StageSceneStatePauseMenu::updatePlayerPose -> al::calcWorldPosFromLayoutPos, both called directly: not hookable
+// here). That view is taller there (its field of view widened: odyssey_wide.c), so the same position lay lower and the
+// model sank and shrank. While the pause menu is up (its state's appear .. kill, virtual: hookable) the view is not
+// widened (odyssey_wide_camera asks odyssey_pause_menu_open): the menu looks as with Cropped sides, where the model is
+// in its place.
+static GuestFn original_pause_appear, original_pause_kill;
+static _Atomic bool pause_menu_open;
+bool odyssey_pause_menu_open(void) { return atomic_load(&pause_menu_open); }
+static void pause_appear(Cpu *c) { atomic_store(&pause_menu_open, true); original_pause_appear(c); }
+static void pause_kill(Cpu *c) { atomic_store(&pause_menu_open, false); original_pause_kill(c); }
+
 static GuestFn original_follow_update;
 static uint32_t follow_speed_off, follow_angle_off, follow_vholder_off;  // (1.0.0: 0x1e4 / 0x1b8 / 0x150; 1.4.1: +8)
 extern bool input_mouse_direct(float *dh, float *dv);
@@ -996,6 +1009,13 @@ void odyssey_native_120_boot(void) {
         const char *e = getenv("ODYSSEY_HUD_MARKS");
         if ((!e || atoi(e) != 0) && (original_layout_draw = dispatch_lookup(ld)))
             hle_override(ld, layout_draw, "Odyssey layouts: their draws marked (the HUD at the output resolution)");
+    }
+    {   // the pause menu open (pause_appear / pause_kill): its view not widened
+        uint64_t pa = main->base + (v141 ? 0x495830 : 0x4ea240), pk = main->base + (v141 ? 0x4958b0 : 0x4ea2a8);
+        if ((original_pause_appear = dispatch_lookup(pa)) && (original_pause_kill = dispatch_lookup(pk))) {
+            hle_override(pa, pause_appear, "Odyssey pause menu: open");
+            hle_override(pk, pause_kill, "Odyssey pause menu: closed");
+        }
     }
     {   // the first-person view at Mario's facing (subjective_start)
         uint64_t st = main->base + (v141 ? 0x6e95b0 : 0x97be9c);
