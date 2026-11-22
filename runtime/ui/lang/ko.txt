@@ -506,3 +506,18 @@ For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic reso
 Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between. ||| 60 초과는 실험적 기능: 게임 버전 1.4.1에서는 추가 프레임이 게임의 60회 업데이트를 반복하므로 움직임은 여전히 60처럼 보입니다. 1.0.0에서는 마리오와 카메라가 그 사이에도 움직입니다.
 Sets the lightest settings in one step. ||| 가장 가벼운 설정을 한 번에 적용합니다.
 Only on a slow PC or integrated graphics. ||| 느린 PC나 내장 그래픽에서만.
+Motion blur ||| 모션 블러
+The game blurs the picture a little while the camera turns. Off: the picture stays sharp while it turns. On: as on the Switch. Changes at once. ||| 카메라가 회전하는 동안 게임이 화면을 약간 흐리게 합니다. 끄기: 회전 중에도 화면이 선명합니다. 켜기: Switch와 같음. 바로 적용됩니다.
+Mouse smoothing ||| 마우스 스무딩
+Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still turns as far in total, slightly later. 0%: raw, as the mouse moves. ||| 마우스를 움직일 때 카메라의 끊김을 고르게 합니다: 매 갱신마다 이전 움직임을 섞습니다. 전체 회전량은 같고 조금 늦게 따라옵니다. 0%: 마우스 그대로.
+Mouse camera stays where you put it ||| 마우스 카메라를 둔 자리에 유지
+The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, it only turns when you move the mouse. Off: as on the Switch. ||| 보통 카메라는 마리오가 걸으면 뒤로 돌아가고 스스로 수평을 맞춥니다. 켜기: 마우스로 카메라를 조작하는 동안에는 마우스를 움직일 때만 회전합니다. 끄기: Switch와 같음.
+First-person view faces Mario's way ||| 1인칭 시점이 마리오가 보는 방향으로 시작
+The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera was looking, as on the Switch. ||| 1인칭 시점(오른쪽 스틱 누르기)이 마리오가 향한 방향을 보며 시작합니다. 끄기: 카메라가 보던 방향, Switch와 같음.
+Shake ||| 흔들기
+Spin throw ||| 회전 던지기
+Screenshot ||| 스크린샷
+Action ||| 동작
+Press a button or key (Delete clears)... ||| 버튼이나 키를 누르세요 (Delete: 지우기)...
+Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was bound to. ||| 흔들기: 누르고 있는 동안 게임은 컨트롤러가 흔들린 것으로 봅니다 - 유도 모자 던지기, 회전, 흔들기 동작이며 모션 조작이 꺼져 있어도 됩니다. 회전 던지기: 한 번 누르면 캐피를 마리오 주위로 회전시켜 던집니다. 스크린샷: 창을 게임 폴더 안의 screenshots 폴더에 그림으로 저장합니다. 칸을 선택한 뒤 아무 버튼, 키 또는 마우스 버튼을 누르세요 (Delete: 지우기). 지정한 버튼은 원래 연결된 게임 버튼을 더 이상 누르지 않습니다.
+The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next start of the game. ||| 게임이 amiibo를 요청할 때 인식되는 피규어입니다: 플레이 중 방향 버튼 오른쪽을 길게 누르면(또는 amiibo 아저씨에게 답하면) 이 피규어가 자동으로 터치됩니다 - NFC 리더나 amiibo 파일이 필요 없습니다. 마리오 피규어는 잠깐 무적, 피치는 라이프 업 하트, 쿠파는 로컬 코인 위치, 그 밖의 피규어는 파워문 힌트를 줍니다. 웨딩 피규어는 의상도 미리 줍니다. 없음: 이전처럼 amiibo 없음. 변경은 게임을 다음에 시작할 때 적용됩니다.
