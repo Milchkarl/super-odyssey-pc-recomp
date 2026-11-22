@@ -3,6 +3,7 @@
 #include "xess_sdk.h"
 #include "fsr2.h"
 #include "sl_glue.h"
+#include "gtao.h"
 
 #ifndef __APPLE__
 // (the temporal upscalers' common pipeline - scene detection, jitter, depth, motion vectors - on every Vulkan build;
@@ -395,6 +396,7 @@ void vk_dlss_set_camera(const DlssCamera *camera) {
     if (!logged && getenv("ODYSSEY_DLSS_HISTORY_TRACE")) { LOG("[dlss-history] first camera received\n"); logged = true; }
     dlss.camera = *camera;
     dlss.camera_ready = true;
+    vk_gtao_set_projection(camera->projection);  // (ambient occlusion: gtao.c)
 }
 
 void vk_dlss_queue_camera(const DlssCamera *camera) {

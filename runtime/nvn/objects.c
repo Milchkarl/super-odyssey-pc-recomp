@@ -1470,6 +1470,9 @@ NVN(nvnQueuePresentTexture) {
     static int forced = -2;
     if (forced == -2) forced = getenv("ODYSSEY_PRESENT_INTERVAL") ? atoi(getenv("ODYSSEY_PRESENT_INTERVAL")) : -1;
     int interval = forced >= 0 ? forced : w->interval;
+    // Snapshot Mode at the full frame rate (settings snapshot_full_rate, #123): the game presents every second vsync
+    // there (interval 2: 30 FPS); every vsync instead
+    if (forced < 0 && interval == 2 && g_settings.snapshot_full_rate) interval = 1;
     int i = (int)A(2);
     NvnTexture *tex = i >= 0 && i < w->num ? HOST(NvnTexture, w->textures[i]) : NULL;
     // ODYSSEY_LOG_GAME_TIME=1: the game thread's time from the end of one present to the next present (its frame without

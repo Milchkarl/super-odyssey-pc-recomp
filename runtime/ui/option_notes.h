@@ -52,6 +52,8 @@ static const OptionNote k_option_notes[] = {
     {"Shadow quality", "Sharper, steadier shadow edges.", "Switch (the default). High or Ultra on a fast graphics card."},
     {"Bloom quality", "Smoother edges on the glow around bright sky and lights, and a smoother far horizon.",
      "Switch (the default, as on the Switch). High at high resolutions."},
+    {"Ambient occlusion", "Soft shading in corners and under characters and objects (not on the Switch).",
+     "Off (the default, as on the Switch). On with a fast graphics card."},
     {"Draw distance", "Objects and detailed models appear from farther away.",
      "Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms."},
     {"HUD and menu quality", "Clean, crisp edges on the game's HUD, text and menus on screens larger than the Switch's.",

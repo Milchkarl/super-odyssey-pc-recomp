@@ -92,6 +92,25 @@ for _a in DRAW_SITES:
     PATCHES[_a] = _draw_distance(DRAW_SITES)
 
 
+# Shadow distance (runtime/hle/odyssey_draw.c odyssey_shadow_distance): al::ShadowDirector::getCurrentFar - how far from
+# the camera the sun's shadow map reaches (its parameter's far x the director's scale: fmul s0, s0, s1) - times the factor.
+SHADOW_SITES = {0x7000a1e574: 0x1e210800}
+
+
+def _shadow_distance(sites):
+    def patch(gen, a):
+        w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+        assert w == sites[a], f'{a:#x}: {w:#x}'
+        code = ' '.join(gen.render_single(gen.lift(a), a, None, set()))
+        return (f'{code} {{ extern float odyssey_shadow_distance(void); '
+                f'FP_SETS(0, VSF32(0) * odyssey_shadow_distance()); }}  /* {a:#x}: shadow distance */')
+    return patch
+
+
+for _a in SHADOW_SITES:
+    PATCHES[_a] = _shadow_distance(SHADOW_SITES)
+
+
 # Debug hooks (make gen with ODYSSEY_HOOKS=<addr>[,<addr>...], hex): each listed instruction first calls the runtime's
 # odyssey_debug_hook(c, addr) (runtime/hle/odyssey_debug.c, ODYSSEY_HOOK_LOG says what it logs), then runs as usual.
 # Only instructions that fall through or return (no branches).
@@ -171,6 +190,9 @@ def _wide_141(gen, a):
 PATCHES_141 = {SITES_141[HEAP_LOCK_SITE]: _heap_lock}
 for _a in WIDE_SITES_141:
     PATCHES_141[_a] = _wide_141
+SHADOW_SITES_141 = {0x700079e6a4: 0x1e210800}  # al::ShadowDirector::getCurrentFar: fmul s0, s0, s1 (the same code)
+for _a in SHADOW_SITES_141:
+    PATCHES_141[_a] = _shadow_distance(SHADOW_SITES_141)
 DRAW_SITES_141 = {SITES_141[a]: v for a, v in DRAW_SITES.items()}
 for _a in DRAW_SITES_141:
     PATCHES_141[_a] = _draw_distance(DRAW_SITES_141)

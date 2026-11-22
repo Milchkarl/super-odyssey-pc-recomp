@@ -118,6 +118,18 @@ typedef struct {
     bool motion_invert_y;  // the gyro's yaw (turning left / right) the other way round
     float motion_gyro_bias[3];  // the gyro's offset at rest, Switch axes, turns a second (Calibrate gyro; 0: learned as played)
     int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
+    // Extra actions (Controls, "click, then press" - runtime/hle/bindings.c bind_action_*; #62, #73, #123): a controller
+    // button (PADB_*, -1 none) and a key / mouse button (0 none) each. A button or key given to one of them no longer
+    // also presses the game button it is bound to.
+    int spin_pad, spin_key;  // the spin throw: the left stick turned a full circle and the throw pressed (hle/input.c)
+    int shot_pad, shot_key;  // a screenshot of the window, saved as a PNG in the screenshots folder (platform)
+    int amiibo;              // the virtual amiibo figure (runtime/hle/nfp.c k_figures; 0: none - no NFC reader)
+    bool motion_blur;        // the game's blur while the camera turns (on: as the Switch; off: translate.c camBlurSample)
+    int shadow_distance;     // 0 as the Switch, 1 high (2x), 2 very high (4x): how far the sun's shadows reach (hle/odyssey_draw.c)
+    bool snapshot_full_rate; // Snapshot Mode not held to 30 FPS (nvn/objects.c nvnQueuePresentTexture, #123)
+    bool first_person_mario; // the first-person view starts the way Mario faces, not the camera (hle/odyssey_120.c, #118)
+    bool mouse_no_recenter;  // the follow camera doesn't turn by itself while the mouse has it (hle/odyssey_120.c, #88)
+    int mouse_smoothing;     // percent, 0..90: the mouse camera's movement averaged over recent samples (0: raw)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is
     // Each controller stick (runtime/hle/input.c stick_shape): the inner deadzone (percent of its travel that counts as
@@ -156,6 +168,8 @@ typedef struct {
     int shadow_quality;  // 0 as the Switch, 1 high (2x), 2 ultra (4x): shadow map size (nvn/vulkan/textures.c shadow_factor)
     int bloom_quality;   // 0 as the Switch, 1 high: the glow images enlarged with a smooth (B-spline) filter instead of
                          // bilinear (maxwell/translate.c bloomUp, set per draw in exec.c stage_set; ODYSSEY_BLOOM_QUALITY)
+    int ambient_occlusion;  // 0 off (as the Switch: its levels have none), 1 on: GTAO from the scene's depth, darkening
+                            // corners and contact (nvn/vulkan/gtao.c; ODYSSEY_GTAO=0/1)
     int draw_distance;   // 0 as the Switch, 1 high (2x), 2 very high (4x): actors, their detail models and fades
                          // reach farther (runtime/hle/odyssey_draw.c; ODYSSEY_DRAW_DISTANCE=<factor> for tests)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,

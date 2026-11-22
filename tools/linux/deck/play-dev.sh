@@ -15,7 +15,7 @@ if [ -f "$N" ] && [ $(( $(date +%s) - $(stat -c %Y "$N") )) -lt 120 ]; then
     . "$N"
     mv "$N" "$OUT/run.env"
     ("$D/deck-threads.sh" "$OUT/threads.log" &) ; ("$D/deck-gpu.sh" "$OUT/gpu.log" &)
-    timeout 900 "$APP" > "$OUT/run.log" 2>&1
+    timeout "${TMO:-900}" "$APP" > "$OUT/run.log" 2>&1  # (TMO: the run's time limit - a game code rebuild takes longer)
     echo "EXIT=$?" >> "$OUT/run.log"
     touch "$OUT/game-exited"
     exit 0

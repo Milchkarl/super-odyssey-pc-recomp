@@ -226,9 +226,58 @@ static GuestFn original_quality_reduce;
 // target the angle eases to (the holder at +0x150 / 1.4.1 +0x158: angle +0xc0, target +0xc4); the mouse moves both,
 // within the stick's own limits (-35..85 degrees, measured: the game clamps only what the stick does).
 // (input.c input_mouse_direct; ODYSSEY_MOUSE_DIRECT=0: through the stick as before; ODYSSEY_LOG_FOLLOW=1: the angles)
+// The first-person view facing the way Mario looks (Controls: "First-person view starts", #118). The game starts
+// al::CameraPoserSubjective looking the way the camera did (start: the last camera's look direction as its angle),
+// unless a start angle was set for it (al::setSubjectiveCameraStartAngleH: a flag and the angle in degrees, 1.0.0
+// +0x180 / +0x184, 1.4.1 +0x188 / +0x18c). Here that angle is Mario's own facing - his pose keeper's rotation
+// (player_movement keeps the actor) - for the posers nothing else set one for.
+static GuestFn original_subjective_start;
+static uint32_t subjective_flag_off;  // (the angle: 4 bytes after)
+static _Atomic uint64_t g_player_actor;
+static void subjective_start(Cpu *c) {
+    uint64_t self = c->x[0], actor = atomic_load(&g_player_actor);
+    static uint64_t ours[8];
+    static int nours;
+    bool mine = false;
+    for (int i = 0; i < nours; i++) mine |= ours[i] == self;
+    uint8_t *flag = (uint8_t *)(uintptr_t)(self + subjective_flag_off);
+    if (g_settings.first_person_mario && actor >= GUEST_LO && actor < GUEST_HI - 0x58 && (mine || !*flag)) {
+        uint64_t keeper = *(uint64_t *)(uintptr_t)(actor + 0x50);
+        if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x40) {
+            const float *q = (const float *)(uintptr_t)(keeper + 0x14);  // (sead::Quatf x y z w)
+            float n = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+            if (n > 0.9f && n < 1.1f) {
+                // his front: the rotation's +Z
+                float fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1]);
+                float deg = atan2f(fx, fz) * 57.29578f;
+                *flag = 1;
+                memcpy(flag + 4, &deg, 4);
+                if (!mine && nours < 8) ours[nours++] = self;
+                static int nlog;
+                if (nlog++ < 8) LOG("[camera] first-person view starts at Mario's facing: %.1f degrees\n", deg);
+            }
+        }
+    } else if (mine && !g_settings.first_person_mario) *flag = 0;  // (the option turned off: as the game)
+    original_subjective_start(c);
+}
+
+// The pause menu's Mario and Cappy at 16:10 / 4:3 with "Narrow picture view" Full width (#112): the menu places their
+// model where a HUD position (310, -960: far below the screen's bottom edge) lies in the 3D view
+// (StageSceneStatePauseMenu::updatePlayerPose -> al::calcWorldPosFromLayoutPos, both called directly: not hookable
+// here). That view is taller there (its field of view widened: odyssey_wide.c), so the same position lay lower and the
+// model sank and shrank. While the pause menu is up (its state's appear .. kill, virtual: hookable) the view is not
+// widened (odyssey_wide_camera asks odyssey_pause_menu_open): the menu looks as with Cropped sides, where the model is
+// in its place.
+static GuestFn original_pause_appear, original_pause_kill;
+static _Atomic bool pause_menu_open;
+bool odyssey_pause_menu_open(void) { return atomic_load(&pause_menu_open); }
+static void pause_appear(Cpu *c) { atomic_store(&pause_menu_open, true); original_pause_appear(c); }
+static void pause_kill(Cpu *c) { atomic_store(&pause_menu_open, false); original_pause_kill(c); }
+
 static GuestFn original_follow_update;
 static uint32_t follow_speed_off, follow_angle_off, follow_vholder_off;  // (1.0.0: 0x1e4 / 0x1b8 / 0x150; 1.4.1: +8)
 extern bool input_mouse_direct(float *dh, float *dv);
+static float follow_mouse_dh, follow_mouse_dv;  // what the mouse turned since follow_movement last looked
 static void follow_update(Cpu *c) {
     uint64_t self = c->x[0];
     float dh = 0, dv = 0;
@@ -242,8 +291,10 @@ static void follow_update(Cpu *c) {
             if (dv < 0 && t < lo) t = *target < lo ? *target : lo;  // (never further out than it already is)
             if (dv > 0 && t > hi) t = *target > hi ? *target : hi;
             *angle += t - *target;
+            follow_mouse_dv += t - *target;
             *target = t;
         }
+        follow_mouse_dh += dh;
     }
     static int lg = -1;
     if (lg < 0) lg = getenv("ODYSSEY_LOG_FOLLOW") != NULL;
@@ -255,7 +306,44 @@ static void follow_update(Cpu *c) {
                 *(float *)(uintptr_t)(self + follow_angle_off), *(float *)(uintptr_t)(self + follow_speed_off),
                 *(float *)(uintptr_t)(holder + 0xc0), *(float *)(uintptr_t)(holder + 0xc4), dh, dv);
     }
+    // No auto-centring with the mouse (Controls: "Mouse camera stays where you put it", #88): while the mouse has the
+    // camera and the right stick is at rest, the follow camera turns only as far as the mouse moved - its own turning
+    // behind Mario as he walks (updateInputOrSubTargetTurnH) and its return to a level view are undone each update.
+    extern bool input_mouse_has_camera(void);
+    bool hold = g_settings.mouse_no_recenter && input_mouse_has_camera();
+    uint64_t holder = hold ? *(uint64_t *)(uintptr_t)(self + follow_vholder_off) : 0;
+    float h0 = 0, v0 = 0, vt0 = 0;
+    if (hold) {
+        h0 = *(float *)(uintptr_t)(self + follow_angle_off);
+        if (holder > 0x7000000000ull) v0 = *(float *)(uintptr_t)(holder + 0xc0), vt0 = *(float *)(uintptr_t)(holder + 0xc4);
+    }
     original_follow_update(c);
+    if (hold) {
+        *(float *)(uintptr_t)(self + follow_angle_off) = h0 + dh;
+        *(float *)(uintptr_t)(self + follow_speed_off) = 0;
+        if (holder > 0x7000000000ull) *(float *)(uintptr_t)(holder + 0xc0) = v0, *(float *)(uintptr_t)(holder + 0xc4) = vt0;
+    }
+}
+// ... and around the poser's whole movement (its nerves turn and level the camera outside update: exeFollow's turn behind
+// Mario, exeResetAngle): the angles are put back to where they were, plus what the mouse turned meanwhile
+static GuestFn original_follow_movement;
+static void follow_movement(Cpu *c) {
+    extern bool input_mouse_has_camera(void);
+    uint64_t self = c->x[0];
+    bool hold = g_settings.mouse_no_recenter && input_mouse_has_camera();
+    uint64_t holder = hold ? *(uint64_t *)(uintptr_t)(self + follow_vholder_off) : 0;
+    float h0 = 0, v0 = 0, vt0 = 0;
+    if (hold) {
+        h0 = *(float *)(uintptr_t)(self + follow_angle_off);
+        if (holder > 0x7000000000ull) v0 = *(float *)(uintptr_t)(holder + 0xc0), vt0 = *(float *)(uintptr_t)(holder + 0xc4);
+    }
+    follow_mouse_dh = follow_mouse_dv = 0;
+    original_follow_movement(c);
+    if (hold) {
+        *(float *)(uintptr_t)(self + follow_angle_off) = h0 + follow_mouse_dh;
+        if (holder > 0x7000000000ull)
+            *(float *)(uintptr_t)(holder + 0xc0) = v0 + follow_mouse_dv, *(float *)(uintptr_t)(holder + 0xc4) = vt0 + follow_mouse_dv;
+    }
 }
 // The HUD at the output resolution (nvn/vulkan/exec.c "HUD layer"): nn::ui2d::Layout::Draw(DrawInfo&, gfx::CommandBuffer&)
 // draws one layout - the HUD, menus, wipes - into the command buffer (the gfx one holds its NVNcommandBuffer* at +0xb8,
@@ -559,6 +647,7 @@ static void player_movement(Cpu *c) {
     static uint64_t updates;
     uint64_t actor = c->x[0];
     odyssey_pose_player(actor);
+    atomic_store(&g_player_actor, actor);
     {   // ODYSSEY_TEST_PLACE=<frame>:<x>:<y>:<z>[;...] (tests, any build): from that frame Mario's translation is set
         // there for three ticks, in order - a test's way to a spot far from a stage's start
         static int n = -1, cur, left;
@@ -921,12 +1010,28 @@ void odyssey_native_120_boot(void) {
         if ((!e || atoi(e) != 0) && (original_layout_draw = dispatch_lookup(ld)))
             hle_override(ld, layout_draw, "Odyssey layouts: their draws marked (the HUD at the output resolution)");
     }
+    {   // the pause menu open (pause_appear / pause_kill): its view not widened
+        uint64_t pa = main->base + (v141 ? 0x495830 : 0x4ea240), pk = main->base + (v141 ? 0x4958b0 : 0x4ea2a8);
+        if ((original_pause_appear = dispatch_lookup(pa)) && (original_pause_kill = dispatch_lookup(pk))) {
+            hle_override(pa, pause_appear, "Odyssey pause menu: open");
+            hle_override(pk, pause_kill, "Odyssey pause menu: closed");
+        }
+    }
+    {   // the first-person view at Mario's facing (subjective_start)
+        uint64_t st = main->base + (v141 ? 0x6e95b0 : 0x97be9c);
+        subjective_flag_off = v141 ? 0x188 : 0x180;
+        if ((original_subjective_start = dispatch_lookup(st)))
+            hle_override(st, subjective_start, "Odyssey first-person view: can start at Mario's facing");
+    }
     {   // the mouse camera, direct (follow_update)
         uint64_t upd = main->base + (v141 ? 0xbd2b0 : 0xca8b0);
         follow_speed_off = v141 ? 0x1ec : 0x1e4, follow_angle_off = v141 ? 0x1c0 : 0x1b8, follow_vholder_off = v141 ? 0x158 : 0x150;
         const char *e = getenv("ODYSSEY_MOUSE_DIRECT");
         if ((!e || atoi(e) != 0) && (original_follow_update = dispatch_lookup(upd)))
             hle_override(upd, follow_update, "Odyssey follow camera: mouse turns it directly");
+        uint64_t mov = main->base + (v141 ? 0xbb740 : 0xc8e08);
+        if ((!e || atoi(e) != 0) && (original_follow_movement = dispatch_lookup(mov)))
+            hle_override(mov, follow_movement, "Odyssey follow camera: no turning by itself under the mouse (option)");
     }
     {   // Dynamic resolution off (setting game_dynres; ODYSSEY_GAME_DYNRES=0/1): al::GraphicsQualityController - the game's
         // own load-driven quality, a nerve machine Wait -> Reduce -> Recover - lowers the resolution when frames run

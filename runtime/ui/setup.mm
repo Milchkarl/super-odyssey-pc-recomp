@@ -967,6 +967,25 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGui::SameLine(0, 14 * scale);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8 * scale);
     ImGui::TextColored(kTextDimV, "%s %s", tr("Version"), APP_VERSION);
+    {   // which game is installed - the base game or with its update (#110): its main's build id (as runtime/loader.c)
+        static int ver = -1;  // 0 unknown, 1: 1.0.0, 2: 1.4.1
+        if (ver < 0) {
+            ver = 0;
+            uint8_t id[8];
+            FILE *f = fopen("extracted/exefs/main", "rb");
+            if (f && !fseek(f, 0x40, SEEK_SET) && fread(id, 1, 8, f) == 8) {
+                static const uint8_t v100[8] = {0x3c, 0xa1, 0x2d, 0xfa, 0xaf, 0x9c, 0x82, 0xda};
+                static const uint8_t v141[8] = {0xb4, 0x24, 0xbe, 0x15, 0x0a, 0x8e, 0x7d, 0x78};
+                ver = !memcmp(id, v141, 8) ? 2 : !memcmp(id, v100, 8) ? 1 : 0;
+            }
+            if (f) fclose(f);
+        }
+        if (ver) {
+            ImGui::SameLine(0, 18 * scale);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8 * scale);  // (on the version's line)
+            ImGui::TextColored(kTextDimV, "%s %s", tr("Game"), ver == 2 ? "1.4.1" : "1.0.0");
+        }
+    }
     ImGui::EndGroup();
 #ifndef __APPLE__
     if (g_prep.load() == PREP_ASK || g_prep.load() == PREP_RUN) {  // (the shader preparation: this card only)
@@ -1136,12 +1155,19 @@ bool config_run(void) {
                 vj = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
                 LOG("[config] test controller %s\n", vj ? "attached" : SDL_GetError());
             }
-            int b = frame == 90 || frame == 110 ? SDL_GAMEPAD_BUTTON_DPAD_DOWN : frame == 180 ? SDL_GAMEPAD_BUTTON_START : -1;
+            // (=quit, with ODYSSEY_CONFIG_VIEW=settings ODYSSEY_MENU_TAB=9: down to Quit to Desktop at 90, A at 130,
+            // build/config_quit.png at 160 - its confirmation - then Right and A at 200 / 240: the page closes, #133)
+            static int quit_test = -1;
+            if (quit_test < 0) quit_test = pad_test && !strcmp(getenv("ODYSSEY_CONFIG_PAD_TEST"), "quit");
+            int b = quit_test ? (frame == 90 ? SDL_GAMEPAD_BUTTON_DPAD_DOWN : frame == 130 || frame == 240 ? SDL_GAMEPAD_BUTTON_SOUTH :
+                                 frame == 200 ? SDL_GAMEPAD_BUTTON_DPAD_RIGHT : -1)
+                              : frame == 90 || frame == 110 ? SDL_GAMEPAD_BUTTON_DPAD_DOWN : frame == 180 ? SDL_GAMEPAD_BUTTON_START : -1;
             if (vj && b >= 0) SDL_SetJoystickVirtualButton(vj, b, true);
-            if (vj && (frame == 95 || frame == 115 || frame == 185)) {
+            if (vj && (frame == 95 || frame == 115 || frame == 135 || frame == 185 || frame == 205 || frame == 245)) {
                 for (int k = 0; k < SDL_GAMEPAD_BUTTON_COUNT; k++) SDL_SetJoystickVirtualButton(vj, k, false);
             }
-            if (pad_test && frame == 150) { page_frame(w, "build/config_pad.png"); continue; }
+            if (pad_test && frame == 150 && !quit_test) { page_frame(w, "build/config_pad.png"); continue; }
+            if (quit_test && frame == 160) { page_frame(w, "build/config_quit.png"); continue; }
         }
         bool s = shot && frame == atol(shot);
 #ifndef __APPLE__

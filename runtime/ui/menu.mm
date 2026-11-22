@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <atomic>
 #include <algorithm>
 #include <vector>
@@ -29,6 +30,9 @@
 #include "imgui_impl_vulkan.h"
 extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.cpp
 #endif
+extern "C" void controls_actions_draw(void);   // runtime/ui/controls_ui.mm: shake, spin throw, screenshot bindings
+extern "C" int nfp_figure_count(void);         // runtime/hle/nfp.c: the virtual amiibo's figures
+extern "C" const char *nfp_figure_name(int i);
 
 extern "C" {
 #include "../hle.h"
@@ -37,6 +41,7 @@ extern "C" {
 #include "../version.h"  // (APP_VERSION beside the name)
 #include "../ptbr_install.h"
 #include "../diagnostics.h"
+#include "../platform.h"
 #include "../settings.h"
 #include "../updater.h"
 #include "menu.h"
@@ -108,6 +113,129 @@ static void push(const QEvent &e) {
     pthread_mutex_unlock(&q_lock);
 }
 
+// ---- Menu recorder (Quit tab, Diagnostics: "Record menu input"; off until chosen, not saved): every input the window
+// gets - each controller button and stick direction with the controller it came from, mouse buttons with their click
+// count and source, touches, keys - whether or not the menu is open, and what the menu did with it: the events it took
+// per frame, the row the cursor is on, each row a press changed and how, tabs, opening and closing. One text line each,
+// with the time and the menu's frame, to menu-recording.txt beside the log (the game's folder when there is none).
+// For problems such as one press acting twice: two controllers sending the same press, a click and a touch together.
+static std::atomic<FILE *> g_rec{nullptr};
+static pthread_mutex_t g_rec_lock = PTHREAD_MUTEX_INITIALIZER;
+static char g_rec_path[1024];
+static uint64_t g_rec_t0;
+static std::atomic<int> g_rec_frame{0};
+extern "C" void menu_rec(const char *fmt, ...) {
+    FILE *f = g_rec.load();
+    if (!f) return;
+    char line[600];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    pthread_mutex_lock(&g_rec_lock);
+    if ((f = g_rec.load())) {
+        fprintf(f, "%9.3f s  frame %-7d %s\n", (SDL_GetTicksNS() - g_rec_t0) / 1e9, g_rec_frame.load(), line);
+        fflush(f);  // (a crash or a forced quit keeps every line)
+    }
+    pthread_mutex_unlock(&g_rec_lock);
+}
+static void rec_start(void) {
+    if (g_rec.load()) return;
+    const char *log = plat_log_path();
+    char dir[1024] = ".";
+    if (log && *log) {
+        strlcpy(dir, log, sizeof dir);
+        char *s = strrchr(dir, '/'), *b = strrchr(dir, '\\');
+        if (b > s) s = b;
+        if (s) *s = 0;
+        else strlcpy(dir, ".", sizeof dir);
+    }
+    snprintf(g_rec_path, sizeof g_rec_path, "%s/menu-recording.txt", dir);
+    FILE *f = fopen(g_rec_path, "w");
+    if (!f) { LOG("[menu] recording: could not open %s\n", g_rec_path); g_rec_path[0] = 0; return; }
+    g_rec_t0 = SDL_GetTicksNS();
+    fprintf(f, "Menu recording, %s %s\n", RT_APP_NAME, APP_VERSION);
+    int n = 0;
+    SDL_JoystickID *pads = SDL_GetGamepads(&n);
+    fprintf(f, "Controllers connected: %d\n", n);
+    for (int i = 0; pads && i < n; i++)
+        fprintf(f, "  pad %u \"%s\" %04x:%04x%s\n", (unsigned)pads[i], SDL_GetGamepadNameForID(pads[i]) ? SDL_GetGamepadNameForID(pads[i]) : "?",
+                SDL_GetGamepadVendorForID(pads[i]), SDL_GetGamepadProductForID(pads[i]),
+                SDL_IsJoystickVirtual(pads[i]) ? " (virtual)" : "");
+    SDL_free(pads);
+    fprintf(f, "\n");
+    g_rec.store(f);
+    LOG("[menu] recording menu input to %s\n", g_rec_path);
+}
+static void rec_stop(void) {
+    pthread_mutex_lock(&g_rec_lock);
+    FILE *f = g_rec.exchange(nullptr);
+    if (f) { fprintf(f, "(recording stopped)\n"); fclose(f); }
+    pthread_mutex_unlock(&g_rec_lock);
+    if (f) LOG("[menu] menu recording stopped: %s\n", g_rec_path);
+}
+static const char *rec_pad_button(int b) {
+    static const char *const n[] = {"A(south)", "B(east)", "X(west)", "Y(north)", "Back", "Guide", "Start", "LStick",
+                                    "RStick", "L", "R", "DpadUp", "DpadDown", "DpadLeft", "DpadRight", "Misc1",
+                                    "RPaddle1", "LPaddle1", "RPaddle2", "LPaddle2", "Touchpad"};
+    return b >= 0 && b < (int)(sizeof n / sizeof *n) ? n[b] : "?";
+}
+// the raw event, before the menu decides anything (menu_handle_event's first line)
+static void rec_event(const SDL_Event *e) {
+    static bool env_checked;  // ODYSSEY_MENU_RECORD=1 (e.g. Steam's launch options): recording from the start
+    if (!env_checked) {
+        env_checked = true;
+        const char *v = getenv("ODYSSEY_MENU_RECORD");
+        if (v && atoi(v)) rec_start();
+    }
+    if (!g_rec.load()) return;
+    const unsigned long long ms = (unsigned long long)(e->common.timestamp / 1000000);
+    switch (e->type) {
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        menu_rec("pad %u %-9s %s  (event time %llu ms)", (unsigned)e->gbutton.which, rec_pad_button(e->gbutton.button),
+                 e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? "down" : "up", ms);
+        break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: {  // (only crossing the menu's stick thresholds, not every movement)
+        static int8_t zone[64][6];
+        int a = e->gaxis.axis, w = (int)(e->gaxis.which & 63);
+        if (a < 0 || a > 5) break;
+        float v = e->gaxis.value / 32767.0f;
+        int z = v > 0.55f ? 1 : v < -0.55f ? -1 : 0;
+        if (z != zone[w][a]) {
+            zone[w][a] = (int8_t)z;
+            static const char *const an[] = {"LeftX", "LeftY", "RightX", "RightY", "LTrigger", "RTrigger"};
+            menu_rec("pad %u axis %s %s (%.2f)  (event time %llu ms)", (unsigned)e->gaxis.which, an[a],
+                     z > 0 ? "+" : z < 0 ? "-" : "centre", v, ms);
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        menu_rec("mouse %s button %d %s, clicks %d at %.0f,%.0f%s  (event time %llu ms)",
+                 e->button.which == SDL_TOUCH_MOUSEID ? "(from touch)" : e->button.which == SDL_PEN_MOUSEID ? "(from pen)" : "",
+                 e->button.button, e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "down" : "up", e->button.clicks, e->button.x,
+                 e->button.y, "", ms);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        menu_rec("mouse wheel %.1f,%.1f  (event time %llu ms)", e->wheel.x, e->wheel.y, ms);
+        break;
+    case SDL_EVENT_FINGER_DOWN: case SDL_EVENT_FINGER_UP:
+        menu_rec("touch %s at %.3f,%.3f  (event time %llu ms)", e->type == SDL_EVENT_FINGER_DOWN ? "down" : "up", e->tfinger.x,
+                 e->tfinger.y, ms);
+        break;
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:
+        menu_rec("key %s %s%s  (event time %llu ms)", SDL_GetScancodeName(e->key.scancode),
+                 e->type == SDL_EVENT_KEY_DOWN ? "down" : "up", e->key.repeat ? " (repeat)" : "", ms);
+        break;
+    case SDL_EVENT_GAMEPAD_ADDED: case SDL_EVENT_GAMEPAD_REMOVED:
+        menu_rec("pad %u %s", (unsigned)e->gdevice.which, e->type == SDL_EVENT_GAMEPAD_ADDED ? "connected" : "disconnected");
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED: case SDL_EVENT_WINDOW_FOCUS_LOST:
+        menu_rec("window focus %s", e->type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "gained" : "lost");
+        break;
+    default: break;
+    }
+}
+
 static void reset_menu_events(void) {
     pthread_mutex_lock(&q_lock);
     q_events.clear();
@@ -143,6 +271,7 @@ void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
     g_open.store(open);
+    menu_rec("menu %s", open ? "OPENED" : "CLOSED");
     reset_menu_events();
     input_reset();  // nothing held while the menu had focus leaks into the game
     bind_capture_cancel();
@@ -266,6 +395,7 @@ extern "C" bool menu_overlay_lockfree(void) { return !capturing() && (!menu_stat
 extern "C" bool menu_input_captured(void) { return capturing(); }
 
 bool menu_handle_event(const SDL_Event *e) {
+    rec_event(e);
     if (e->type == SDL_EVENT_DISPLAY_ADDED || e->type == SDL_EVENT_DISPLAY_REMOVED) {
         g_displays_dirty.store(true);
         g_want_window_apply.store(true);
@@ -682,7 +812,16 @@ static void drain_events(ImGuiIO &io) {
     std::vector<QEvent> ev;
     ev.swap(q_events);
     pthread_mutex_unlock(&q_lock);
+    g_rec_frame.store(ImGui::GetFrameCount());
     for (const QEvent &q : ev) {
+        if (g_rec.load()) switch (q.kind) {  // (the menu recorder: what reached the menu this frame)
+        case QEvent::KEY: menu_rec("  menu gets %s %s", ImGui::GetKeyName(q.key), q.down ? "down" : "up"); break;
+        case QEvent::ANALOG: menu_rec("  menu gets %s %.2f", ImGui::GetKeyName(q.key), q.value); break;
+        case QEvent::MOUSE_BUTTON: menu_rec("  menu gets mouse button %d %s", q.button, q.down ? "down" : "up"); break;
+        case QEvent::WHEEL: menu_rec("  menu gets wheel %.1f,%.1f", q.x, q.y); break;
+        case QEvent::RESET: menu_rec("  menu input reset"); break;
+        default: break;
+        }
         switch (q.kind) {
         case QEvent::KEY: io.AddKeyEvent(q.key, q.down); break;
         case QEvent::ANALOG: io.AddKeyAnalogEvent(q.key, q.value > 0.1f, q.value); break;
@@ -1182,16 +1321,29 @@ static void tab_graphics(void) {
                    "Switch. Applies from the next area loaded.", false);
     }
     {
-        static const char *bq[] = {"Switch", "High"};
-        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 2, 0,
+        static const char *sd[] = {"Switch", "High (2x)", "Very high (4x)"};
+        opt_choice("Shadow distance", &g_settings.shadow_distance, sd, 3, 0,
+                   "How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same "
+                   "shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with "
+                   "it. Switch: as on the Switch. Changes at once.", false);
+        static const char *bq[] = {"Switch", "High", "Off"};
+        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 3, 0,
                    "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
                    "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
                    "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
                    "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
                    "stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon "
                    "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
-                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as "
-                   "on the Switch. Changes at once.", false);
+                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Off: no glow "
+                   "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false);
+        static const char *ao[] = {"Off", "Medium", "High"};
+        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 0,
+                   "Darkens the places light reaches less: the corners between steps and walls, the ground under "
+                   "Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch "
+                   "version: an addition (GTAO, worked out from the scene's depth each frame). High: at full "
+                   "resolution, about 1 ms a frame at 1440p on a fast graphics card. Medium: worked out at half the "
+                   "resolution each way, a little softer, about a quarter of the cost. Less with an Upscale method. "
+                   "Off: as on the Switch. Changes at once.", false);
         static const char *dd[] = {"Switch", "High", "Very high"};
         opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
                    "Enemies, coins, characters and other objects appear from farther away, and models switch to their "
@@ -1202,6 +1354,12 @@ static void tab_graphics(void) {
                    "at once.",
                    false);
     }
+    opt_toggle("Motion blur", &g_settings.motion_blur, true,
+               "The game blurs the picture a little while the camera turns. Off: the picture stays sharp while it turns. "
+               "On: as on the Switch. Changes at once.");
+    opt_toggle("Snapshot Mode at full frame rate", &g_settings.snapshot_full_rate, false,
+               "The game holds Snapshot Mode (D-pad Down) to 30 FPS. On: it runs at 60 FPS like the rest of the game. "
+               "Off: as on the Switch. Changes at once.");
     opt_toggle("Smooth color gradients", &g_settings.deband, true,
                "Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps "
                "(bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more "
@@ -1364,7 +1522,7 @@ static void tab_performance(void) {
         g_settings.memory = MEMORY_LOW, g_settings.frame_rate = FPS_60, g_settings.antialias = AA_OFF;
         g_settings.temporal_off = true, g_settings.upscaler = UPSCALE_BILINEAR, g_settings.frame_gen = FG_OFF;
         g_settings.shadow_quality = 0, g_settings.texture_detail = 0, g_settings.draw_distance = 0;
-        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0;
+        g_settings.aniso = ANISO_GAME, g_settings.bloom_quality = 0, g_settings.ambient_occlusion = 0;
         settings_save();
         LOG("[menu] low-end PC preset applied\n");
     }
@@ -1557,6 +1715,15 @@ static void tab_quit(float scale) {
         else result = "Could not save";
     }
     if (report[0] && opt_action("Show report file", "", report)) diagnostics_show_report(report);
+    if (opt_action("Record menu input", g_rec.load() ? "Recording" : "Off",
+                   "For a problem with the menu (a press acting twice, the cursor jumping): records every press of the "
+                   "controller, mouse, touch screen and keyboard, and what the menu did with it, to a text file. Choose "
+                   "it, do what shows the problem, then choose it again to stop, and attach the file to the bug report. "
+                   "It keeps recording with the menu closed, until you stop it or quit. Nothing is uploaded.")) {
+        if (g_rec.load()) rec_stop();
+        else rec_start();
+    }
+    if (g_rec_path[0] && opt_action("Show recording file", "", g_rec_path)) diagnostics_show_report(g_rec_path);
     if (!checked_previous) {
         diagnostics_last_crash_info(previous, sizeof previous, previous_reason, sizeof previous_reason, NULL);
         checked_previous = true;
@@ -1825,24 +1992,24 @@ static void tab_about(void) {
              "Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) "
              "and saved. Use it if the game sees motion while the controller lies still.");
     }
-    {   // the shake button / key (runtime/hle/input.c hid_sixaxis_states)
-        static const int pads[] = {-1, 7, 8, 16, 17, 18, 19, 20, 15};  // (PADB values: none, L3, R3, paddles, touchpad, misc)
-        static const char *const pnames[] = {"None", "Left stick press", "Right stick press", "Right paddle 1",
-                                             "Left paddle 1", "Right paddle 2", "Left paddle 2", "Touchpad", "Share / Capture"};
-        int pi = 0;
-        for (int k = 0; k < 9; k++) if (pads[k] == g_settings.motion_shake_pad) pi = k;
-        if (choice("Shake button", &pi, pnames, 9)) g_settings.motion_shake_pad = pads[pi];
-        static const int keys[] = {0, BIND_MOUSE_MIDDLE, BIND_MOUSE_X1, BIND_MOUSE_X2, SDL_SCANCODE_LCTRL, SDL_SCANCODE_LSHIFT,
-                                   SDL_SCANCODE_R, SDL_SCANCODE_TAB, SDL_SCANCODE_V};
-        static const char *const knames[] = {"None", "Middle mouse button", "Mouse button 4", "Mouse button 5",
-                                             "Left Ctrl", "Left Shift", "R", "Tab", "V"};
-        int ki = 0;
-        for (int k = 0; k < 9; k++) if (keys[k] == g_settings.motion_shake_key) ki = k;
-        if (choice("Shake key", &ki, knames, 9)) g_settings.motion_shake_key = keys[ki];
+    {   // the virtual amiibo (runtime/hle/nfp.c, #48)
+        static const char *names[32];
+        int n = nfp_figure_count() < 32 ? nfp_figure_count() : 32;
+        for (int i = 0; i < n; i++) names[i] = nfp_figure_name(i);
+        int i = g_settings.amiibo >= 0 && g_settings.amiibo < n ? g_settings.amiibo : 0;
+        if (choice("amiibo", &i, names, n)) g_settings.amiibo = i;
+        hint("The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle "
+             "amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a "
+             "short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the "
+             "wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next "
+             "start of the game.");
     }
-    hint("Shake without moving the controller: while this button or key is held, the game sees the controller shaken - "
-         "the motion cap throw (homing at a target), spins and shake moves. Works with Motion controls off and on "
-         "controllers or keyboards without motion sensors. If a key is also bound to a game button, it does both.");
+    controls_actions_draw();  // shake, spin throw, screenshot: any button and any key (controls_ui.mm, hle/bindings.c)
+    hint("Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins "
+         "and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. "
+         "Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then "
+         "press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was "
+         "bound to.");
     toggle("Vibration", &g_settings.rumble);
     {
         static const int pct[] = {25, 50, 75, 100};
@@ -1880,6 +2047,9 @@ static void tab_about(void) {
     toggle("Invert stick vertical", &g_settings.stick_camera_invert_y);
     hint("The main gameplay camera only. Mario's movement and menu navigation keep their normal controls. "
          "The game's own camera inversion options also apply.");
+    toggle("First-person view faces Mario's way", &g_settings.first_person_mario);
+    hint("The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera "
+         "was looking, as on the Switch.");
     ImGui::Spacing();
     header("Mouse");
     toggle("Mouse camera", &g_settings.mouse_camera);
@@ -1889,6 +2059,12 @@ static void tab_about(void) {
     camera_speed("Mouse vertical speed", &g_settings.mouse_sensitivity_y);
     hint("Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a "
          "stick (the usual follow camera; the other camera kinds take the mouse as a stick).");
+    toggle("Mouse camera stays where you put it", &g_settings.mouse_no_recenter);
+    hint("The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, "
+         "it only turns when you move the mouse. Off: as on the Switch.");
+    slider("Mouse smoothing", &g_settings.mouse_smoothing, 0, 90, 10, "%d%%");
+    hint("Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still "
+         "turns as far in total, slightly later. 0%: raw, as the mouse moves.");
     toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
     toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
     hint("Moving the mouse up turns the camera down instead.");
@@ -2052,11 +2228,16 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     int cur = 0;  // g_tab / g_tab_request hold ids
     for (int i = 0; i < ntabs; i++) if (tabs[i].id == g_tab) cur = i;
     if (!tabs[cur].on) cur = 0;
+    {   // (the menu recorder)
+        static int rec_last = -1000;
+        if (g_tab != rec_last) menu_rec("tab \"%s\"", tabs[cur].name ? tabs[cur].name : "?"), rec_last = g_tab;
+    }
     // L/R (or Q/E) switch tabs, skipping greyed-out ones (not while typing: Q / E are letters then, and the on-screen
     // keyboard has the controller)
     if (g_tab_request_ext >= 0) { g_tab_request = g_tab_request_ext; g_tab_request_ext = -1; }
     bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
     static int focused_tab = -99;  // the tab the controller's cursor is on (from the frame before; -99: none)
+    bool lr_in_page = false;  // L / R with the cursor on a row of the page: it goes to the new page's first row
     if (!any_popup && !typing) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
                  : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1 : 0;
@@ -2068,9 +2249,14 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             g_tab_request = tabs[i].id;
             // the cursor on the tab bar goes along (left behind, A on it switched straight back; user 2026-10-11)
             if (focused_tab != -99) g_focus_tab = tabs[i].id, g_focus_frames = 0;
+            // ... and from a row of the page, to the new page's first row. Left alone, the row it was on disappears
+            // with its page, ImGui puts the cursor on the first item it finds - the Display tab - and the cursor
+            // arriving on a tab shows that tab: L / R showed the next tab and then Display a frame later (owner's
+            // menu recording, 2026-11-21: from Audio, Overlay then Display)
+            else if (ImGui::GetCurrentContext()->NavCursorVisible) lr_in_page = true;
         }
     }
-    bool down_from_tab = false;  // (the sidebar: Down moves between categories; Right / A goes into the page)
+    bool down_from_tab = lr_in_page;  // (the sidebar: Down moves between categories; Right / A goes into the page)
     // ---- The sidebar (0.4.1, owner 2026-11-17: "modern, more controller and mouse and keyboard friendly"): the
     // categories in a column on the left, the page on the right. The controller's cursor on a category shows its page
     // at once; A / Enter / a click (or Right) goes into the page; B / Esc in a page comes back here (the menu window:
@@ -2380,6 +2566,7 @@ void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*pr
     ImGui::GetStyle().ScaleAllSizes(scale);
     tabs_body(scale, prelaunch);
     ptbr_dialog(scale);
+    quit_dialog(scale);  // (the configuration page before the game shows the Quit tab too - #133)
     ImGui::GetStyle() = saved;
     g_font = f0, g_font_big = f1;
 }
@@ -2655,7 +2842,8 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));  // (painted below, around the live picture)
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28 * scale, 18 * scale));
+        // (the content out to the screen's edges: a thin margin only - owner 2026-11-21)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14 * scale, 10 * scale));
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor();

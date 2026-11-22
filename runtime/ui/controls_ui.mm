@@ -39,6 +39,57 @@ static void cell(int dev, int slot, int fam, int cap_dev, int cap_slot, int ms_l
     if (waiting && !ImGui::IsItemVisible()) ImGui::SetScrollHereY(0.5f);  // (a capture started by a test hook)
 }
 
+// The extra actions (shake, spin throw, screenshot): a controller button and a key each, "click, then press" as above
+// (Delete / Backspace clears one). Their buttons and keys no longer also press the game button they're bound to.
+extern "C" void controls_actions_draw(void) {
+    int fam = bind_label_family();
+    int cd, cs, ms;
+    bind_capture_active(&cd, &cs, &ms);
+    static int seen_serial = -1;
+    static char msg[160];
+    int rdev, rslot, rother, serial;
+    int kind = bind_last_result(&rdev, &rslot, &rother, &serial);
+    if (seen_serial < 0) seen_serial = serial;
+    if (serial != seen_serial) {
+        seen_serial = serial;
+        if (rdev >= BIND_DEV_ACT_PAD && rslot >= 0) {
+            int pv = *bind_action_pad(rslot), kv = *bind_action_key(rslot);
+            const char *now = rdev == BIND_DEV_ACT_PAD ? (pv >= 0 ? bind_pad_label(pv, fam) : tr("None")) : (kv > 0 ? bind_key_label(kv) : tr("None"));
+            if (kind == 1) snprintf(msg, sizeof msg, tr("%s is now %s."), tr(bind_action_name(rslot)), now), settings_save();
+            else if (kind == 3) snprintf(msg, sizeof msg, tr("Cancelled: %s unchanged."), tr(bind_action_name(rslot)));
+            else if (kind == 4) snprintf(msg, sizeof msg, tr("Nothing pressed: %s unchanged."), tr(bind_action_name(rslot)));
+        }
+    }
+    if (msg[0]) ImGui::TextColored(kAccentSoftV, "%s", msg);
+    if (!ImGui::BeginTable("##actions", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) return;
+    ImGui::TableSetupColumn(tr("Action"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    ImGui::TableSetupColumn(tr("Controller"), ImGuiTableColumnFlags_WidthStretch, 1.3f);
+    ImGui::TableSetupColumn(tr("Keyboard"), ImGuiTableColumnFlags_WidthStretch, 1.3f);
+    ImGui::TableHeadersRow();
+    for (int act = 0; act < BIND_ACT_COUNT; act++) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(tr(bind_action_name(act)));
+        for (int dev = BIND_DEV_ACT_PAD; dev <= BIND_DEV_ACT_KEY; dev++) {
+            ImGui::TableNextColumn();
+            bool waiting = cd == dev && cs == act;
+            char lbl[96];
+            int pv = *bind_action_pad(act), kv = *bind_action_key(act);
+            if (waiting) snprintf(lbl, sizeof lbl, "%s  %d##a%d_%d", tr("Press a button or key (Delete clears)..."), (ms + 999) / 1000, dev, act);
+            else snprintf(lbl, sizeof lbl, "%s##a%d_%d", dev == BIND_DEV_ACT_PAD ? (pv >= 0 ? bind_pad_label(pv, fam) : tr("None"))
+                                                                            : (kv > 0 ? bind_key_label(kv) : tr("None")), dev, act);
+            if (waiting) ImGui::PushStyleColor(ImGuiCol_Button, kAccentDeepV);
+            if (ImGui::Button(lbl, ImVec2(-FLT_MIN, 0))) {
+                if (waiting) bind_capture_cancel();
+                else bind_capture_begin(dev, act);
+            }
+            if (waiting) ImGui::PopStyleColor();
+        }
+    }
+    ImGui::EndTable();
+}
+
 extern "C" void controls_bindings_draw(float scale) {
     (void)scale;
     int fam = bind_label_family();
@@ -91,7 +142,7 @@ extern "C" void controls_bindings_draw(float scale) {
     int rdev, rslot, rother, serial;
     int kind = bind_last_result(&rdev, &rslot, &rother, &serial);
     if (seen_serial < 0) seen_serial = serial;
-    if (serial != seen_serial) {
+    if (serial != seen_serial && rdev < BIND_DEV_ACT_PAD) {  // (the extra actions' results: controls_actions_draw)
         seen_serial = serial;
         const char *now = rslot < 0 ? "" : rdev == BIND_DEV_PAD ? bind_pad_label(g_bind_pad[rslot], fam) : bind_key_label(g_bind_key[rslot]);
         if (kind == 5) snprintf(msg, sizeof msg, "%s", tr(rdev == BIND_DEV_PAD ? "Controller bindings reset to the defaults." : "Keyboard bindings reset to the defaults."));

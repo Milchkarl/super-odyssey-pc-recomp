@@ -28,3 +28,20 @@ float odyssey_draw_distance(void) {
     int q = g_settings.draw_distance;
     return k[q < 0 ? 0 : q > 2 ? 2 : q];
 }
+
+// Shadow distance (Graphics: "Shadow distance": Switch / High / Very high; #123): how far from the camera the sun's
+// shadows are drawn (al::ShadowDirector::getCurrentFar, tools/odyssey_patches.py SHADOW_SITES), times 1 / 2 / 4. The
+// shadow map then covers more ground with the same texels: softer shadows near Mario unless Shadow quality is raised
+// with it. ODYSSEY_SHADOW_DISTANCE=<factor> for tests.
+float odyssey_shadow_distance(void) {
+    static float env = -1.0f;
+    if (env < 0.0f) {
+        const char *e = getenv("ODYSSEY_SHADOW_DISTANCE");
+        float v = e && *e ? (float)atof(e) : 0.0f;
+        env = v >= 0.25f && v <= 16.0f ? v : 0.0f;
+    }
+    if (env > 0.0f) return env;
+    static const float k[] = {1.0f, 2.0f, 4.0f};
+    int q = g_settings.shadow_distance;
+    return k[q < 0 ? 0 : q > 2 ? 2 : q];
+}

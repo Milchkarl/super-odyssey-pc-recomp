@@ -488,6 +488,10 @@ Bloom quality ||| 블룸 품질
 The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, and stretches it over the screen; its edges along bright sky and lights then show small steps, more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as on the Switch. Changes at once. ||| 게임은 빛 번짐(블룸, 빛줄기)을 화면 너비의 4분의 1 크기인 작은 이미지로 그린 뒤 화면 전체로 늘립니다. 그래서 밝은 하늘과 조명 가장자리에 작은 계단이 보이며, 선명한 고해상도 화면에서 더 눈에 띕니다. 높음: 더 부드러운 필터로 늘려서 가장자리가 고르게 흐려집니다. 빛 번짐의 모양과 세기, 디테일은 게임 그대로입니다(더 높은 해상도로 그리지는 않습니다). 높음은 왕국 뒤편의 뿌연 먼 지평선도 부드럽게 합니다(하늘에 늘려 그린 작은 그림이라 텍셀이 블록과 얼룩으로 보입니다). GPU 시간이 조금 듭니다(빠른 그래픽 카드, 4K에서 프레임당 약 0.3ms). Switch: Switch와 같습니다. 즉시 적용됩니다.
 Smoother edges on the glow around bright sky and lights, and a smoother far horizon. ||| 밝은 하늘과 조명 주변 빛 번짐의 가장자리와 먼 지평선이 더 부드러워집니다.
 Switch (the default, as on the Switch). High at high resolutions. ||| Switch(기본값, Switch와 같음). 높은 해상도에서는 높음.
+Ambient occlusion ||| 앰비언트 오클루전
+Darkens the places light reaches less: the corners between steps and walls, the ground under Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch version: an addition (GTAO, worked out from the scene's depth each frame). Costs GPU time: about 1 ms a frame at 1440p and 2.5 ms at 4K on a fast graphics card, less with an Upscale method. Off: as on the Switch. Changes at once. ||| 빛이 덜 닿는 곳을 어둡게 합니다: 계단과 벽 사이의 모서리, 마리오와 적, 물체 아래의 땅, 접힌 곳과 틈새. 장면에 깊이감을 더합니다. Switch 버전에는 없는 추가 기능입니다(GTAO, 매 프레임 장면의 깊이로 계산). GPU 시간이 듭니다: 빠른 그래픽 카드에서 1440p 기준 프레임당 약 1 ms, 4K에서 2.5 ms이며, 업스케일 방식을 쓰면 더 적습니다. 끄기: Switch와 같음. 바로 적용됩니다.
+Soft shading in corners and under characters and objects (not on the Switch). ||| 모서리와 캐릭터, 물체 아래의 부드러운 음영 (Switch에는 없음).
+Off (the default, as on the Switch). On with a fast graphics card. ||| 끄기 (기본값, Switch와 같음). 빠른 그래픽 카드라면 켜기.
 Normal (the default). Low on a PC with less than 12 GB of RAM. ||| 보통(기본값). RAM이 12GB 미만인 PC에서는 낮음.
 (Recommended) ||| (권장)
 Bottom left (the default), or as you like. ||| 왼쪽 아래(기본값), 또는 원하는 대로.
@@ -502,3 +506,23 @@ For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic reso
 Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between. ||| 60 초과는 실험적 기능: 게임 버전 1.4.1에서는 추가 프레임이 게임의 60회 업데이트를 반복하므로 움직임은 여전히 60처럼 보입니다. 1.0.0에서는 마리오와 카메라가 그 사이에도 움직입니다.
 Sets the lightest settings in one step. ||| 가장 가벼운 설정을 한 번에 적용합니다.
 Only on a slow PC or integrated graphics. ||| 느린 PC나 내장 그래픽에서만.
+Motion blur ||| 모션 블러
+The game blurs the picture a little while the camera turns. Off: the picture stays sharp while it turns. On: as on the Switch. Changes at once. ||| 카메라가 회전하는 동안 게임이 화면을 약간 흐리게 합니다. 끄기: 회전 중에도 화면이 선명합니다. 켜기: Switch와 같음. 바로 적용됩니다.
+Mouse smoothing ||| 마우스 스무딩
+Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still turns as far in total, slightly later. 0%: raw, as the mouse moves. ||| 마우스를 움직일 때 카메라의 끊김을 고르게 합니다: 매 갱신마다 이전 움직임을 섞습니다. 전체 회전량은 같고 조금 늦게 따라옵니다. 0%: 마우스 그대로.
+Mouse camera stays where you put it ||| 마우스 카메라를 둔 자리에 유지
+The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, it only turns when you move the mouse. Off: as on the Switch. ||| 보통 카메라는 마리오가 걸으면 뒤로 돌아가고 스스로 수평을 맞춥니다. 켜기: 마우스로 카메라를 조작하는 동안에는 마우스를 움직일 때만 회전합니다. 끄기: Switch와 같음.
+First-person view faces Mario's way ||| 1인칭 시점이 마리오가 보는 방향으로 시작
+The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera was looking, as on the Switch. ||| 1인칭 시점(오른쪽 스틱 누르기)이 마리오가 향한 방향을 보며 시작합니다. 끄기: 카메라가 보던 방향, Switch와 같음.
+Shake ||| 흔들기
+Spin throw ||| 회전 던지기
+Screenshot ||| 스크린샷
+Action ||| 동작
+Press a button or key (Delete clears)... ||| 버튼이나 키를 누르세요 (Delete: 지우기)...
+Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was bound to. ||| 흔들기: 누르고 있는 동안 게임은 컨트롤러가 흔들린 것으로 봅니다 - 유도 모자 던지기, 회전, 흔들기 동작이며 모션 조작이 꺼져 있어도 됩니다. 회전 던지기: 한 번 누르면 캐피를 마리오 주위로 회전시켜 던집니다. 스크린샷: 창을 게임 폴더 안의 screenshots 폴더에 그림으로 저장합니다. 칸을 선택한 뒤 아무 버튼, 키 또는 마우스 버튼을 누르세요 (Delete: 지우기). 지정한 버튼은 원래 연결된 게임 버튼을 더 이상 누르지 않습니다.
+The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next start of the game. ||| 게임이 amiibo를 요청할 때 인식되는 피규어입니다: 플레이 중 방향 버튼 오른쪽을 길게 누르면(또는 amiibo 아저씨에게 답하면) 이 피규어가 자동으로 터치됩니다 - NFC 리더나 amiibo 파일이 필요 없습니다. 마리오 피규어는 잠깐 무적, 피치는 라이프 업 하트, 쿠파는 로컬 코인 위치, 그 밖의 피규어는 파워문 힌트를 줍니다. 웨딩 피규어는 의상도 미리 줍니다. 없음: 이전처럼 amiibo 없음. 변경은 게임을 다음에 시작할 때 적용됩니다.
+Snapshot Mode at full frame rate ||| 스냅샷 모드를 전체 프레임 속도로
+The game holds Snapshot Mode (D-pad Down) to 30 FPS. On: it runs at 60 FPS like the rest of the game. Off: as on the Switch. Changes at once. ||| 게임은 스냅샷 모드(방향 버튼 아래)를 30 FPS로 제한합니다. 켜기: 게임의 나머지처럼 60 FPS로 실행됩니다. 끄기: Switch와 같음. 바로 적용됩니다.
+Shadow distance ||| 그림자 거리
+Very high (4x) ||| 매우 높음 (4x)
+How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with it. Switch: as on the Switch. Changes at once. ||| 카메라에서 얼마나 멀리까지 태양 그림자를 그릴지 정합니다: 더 먼 물체도 그림자를 유지합니다. 같은 그림자 맵이 더 넓은 땅을 덮으므로 마리오 근처 그림자는 더 부드러워집니다 - 그림자 품질도 함께 올리세요. Switch: Switch와 같음. 바로 적용됩니다.

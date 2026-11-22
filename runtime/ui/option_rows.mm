@@ -15,6 +15,7 @@
 #include "i18n.h"
 #include "osk.h"
 #include "theme.h"
+extern "C" void menu_rec(const char *fmt, ...);  // (menu.mm: the menu recorder)
 
 extern "C" float renderer_picture_aspect(void);  // (runtime/nvn/vulkan/device.c)
 static float g_scale = 1;
@@ -132,6 +133,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         static std::string last;
         static int nlog;
         if (last != label && nlog++ < 300) LOG("[menufocus] %s (ImGui frame %d)\n", label, ImGui::GetFrameCount());
+        if (last != label) menu_rec("cursor on \"%s\"", label_en);
         last = label;
     }
     if (hov) g_desc_hover = desc ? desc : "", g_title_hover = label;
@@ -230,6 +232,10 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         else dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + w + 1, p.y + h + 1), off ? theme_u32(kGoldV, 0.4f) : kGold, r + 1, 0, th);
     }
     ImGui::PopID();
+    if (step || (clicked && (off || blocked)))  // (the menu recorder: what a press did to this row)
+        menu_rec("row \"%s\" (value \"%s\"): %s%s", label_en, value_en.c_str(),
+                 step == 2 ? "pressed" : step > 0 ? "right" : step < 0 ? "left" : "click ignored",
+                 off ? " (greyed out)" : blocked ? " (left/right blocked this frame)" : clicked ? " - by a click or A" : "");
     return step;
 }
 
@@ -362,18 +368,13 @@ void opt_end(void) {
         ImVec2 ds = ImGui::GetIO().DisplaySize;
         float asp = renderer_picture_aspect();
         if (asp < 0.5f || asp > 6) asp = ds.x > 0 && ds.y > 0 ? ds.x / ds.y : 16.0f / 9;
-        float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.55f;
+        float pw = x1 - x0, ph = pw / asp, maxh = avail.y * 0.6f;
         if (ph > maxh) ph = maxh, pw = ph * asp;
         float ox0 = x0, ox1 = x1;
         x0 = ox0 + (ox1 - ox0 - pw) * 0.5f, x1 = x0 + pw;
         if (menu_live_picture(x0, y, x1, y + ph)) {
             dl->AddRect(ImVec2(x0 - 1, y - 1), ImVec2(x1 + 1, y + ph + 1), theme_u32(kSidebarV), r, 0, fmaxf(2, 3 * g_scale));
-            const char *lab = tr("Live picture");
-            ImVec2 ts = ImGui::CalcTextSize(lab);
-            float lp = 8 * g_scale;
-            dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + ts.x + 2 * lp, y + ts.y + lp), theme_u32(kSidebarV), r,
-                              ImDrawFlags_RoundCornersTopLeft | ImDrawFlags_RoundCornersBottomRight);
-            dl->AddText(ImVec2(x0 + lp, y + lp * 0.5f), kText, lab);
+            float lp = 8 * g_scale;  // (no "Live picture" label on it: the picture speaks for itself - owner 2026-11-21)
             char fps[32];
             snprintf(fps, sizeof fps, "%.0f fps", ImGui::GetIO().Framerate);
             ImVec2 fsz = ImGui::CalcTextSize(fps);
