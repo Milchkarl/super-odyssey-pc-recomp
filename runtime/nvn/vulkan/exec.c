@@ -2209,6 +2209,7 @@ static float pass_sx = 1, pass_sy = 1;
 static float vp_sx = 1, vp_sy = 1, vp_ox = 0, vp_oy = 0;
 static float tex_sc[2][64][2];
 static uint32_t tex_wh[2][64][2];
+static uint64_t g_glow_inputs;  // (draw_) the HDR composite's glow inputs, a bit per fragment texture: stage_set
 
 // ---- HUD layer: the game's layouts at the output resolution
 // The game draws its HUD (nn::ui2d layouts: runtime/hle/odyssey_120.c layout_draw marks them, CMD_UI_MARK) into its
@@ -7974,10 +7975,11 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
             // (a layout's draw at HUD quality High: .z the enlargement's strength instead - its variant's hudSample)
             float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
-            if (sg && !g_settings.motion_blur) bq += 4.0f;  // (Motion blur off: translate.c camBlurSample)
             if (sg && p->fkey.hud_filter) bq = g_hud_draw_filter;
             for (int t = 0; t < si->ntex && t < 64; t++) {
-                rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
+                // (the HDR composite: Bloom quality on its glow inputs only - the others read as the game reads them)
+                float z = sg && p->fkey.glow_comp ? ((g_glow_inputs >> t) & 1 ? bq : 0.0f) : bq;
+                rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = z; rs[1 + t][3] = fv;
             }
             bi[n] = ubo_span(copy_dedupe(sg ? DEDUPE_RSCALE_F : DEDUPE_RSCALE_V, rs, sizeof rs, 256), sizeof rs);
         } else {
@@ -8508,6 +8510,17 @@ static void draw_(CmdRec *r, bool indexed) {
     // too: the program table keys on it)
     g_hud_draw_filter = ui_mark ? hud_filter_strength() : 0.0f;
     if (g_hud_draw_filter > 0) vkey.hud_filter = fkey.hud_filter = 1;
+    {   // The game's HDR composite (scene + glow, tone mapped): the full-screen draw into the picture (R11G11B10F,
+        // NVN format 0x3d) and its luma (R8, 0x1). Found by that rather than by its code: it has a dozen versions -
+        // by kingdom, and while the camera turns - and two known by hash left Bloom quality and Motion blur doing
+        // nothing in most kingdoms. Its variant reads its inputs through bloomUp (translate.c), steered per input below.
+        NvnTexture *c0 = st.rt.ncolor == 2 ? st.rt.color[0] : NULL, *c1 = c0 ? st.rt.color[1] : NULL;
+        static int comp_on = -1;
+        if (comp_on < 0) { const char *e = getenv("ODYSSEY_GLOW_COMPOSITE"); comp_on = !e || atoi(e) != 0; }
+        if (comp_on && c0 && c1 && c0->format == 0x3d && c1->format == 0x1 && c0->width == c1->width &&
+            c0->height == c1->height && g_draw_fullscreen)
+            vkey.glow_comp = fkey.glow_comp = 1;
+    }
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
         // rt_kind 3; the picture before it has half floats: textures.c "Banding")
         bool deband = vk_deband();
@@ -8871,6 +8884,26 @@ static void draw_(CmdRec *r, bool indexed) {
         float sc[2]; uint32_t wh[2];
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
         tex_sc[1][i][0] = sc[0]; tex_sc[1][i][1] = sc[1]; tex_wh[1][i][0] = wh[0]; tex_wh[1][i][1] = wh[1];
+    }
+    g_glow_inputs = 0;
+    if (pr->fkey.glow_comp && st.rt.color[0]) {
+        // The composite's inputs by their size against the picture's (all R11G11B10F, NVN 0x3f): a quarter is the glow
+        // (Bloom quality steers it: stage_set), a half the blurred copy it mixes in while the camera turns, the
+        // picture's own size the sharp scene. Motion blur off: the sharp scene in the blurred copy's place (#123).
+        uint32_t w = st.rt.color[0]->width, h = st.rt.color[0]->height;
+        int blurred = -1, sharp = -1;
+        for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
+            NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
+            if (!t || t->format != 0x3f || pr->fi->tex[i].type != TEXTYPE_2D) continue;
+            if (t->width * 4 == w && t->height * 4 == h) g_glow_inputs |= 1ull << i;
+            else if (t->width * 2 == w && t->height * 2 == h) blurred = i;
+            else if (t->width == w && t->height == h) sharp = i;
+        }
+        if (!g_settings.motion_blur && blurred >= 0 && sharp >= 0) {
+            fii[blurred] = fii[sharp];
+            tex_sc[1][blurred][0] = tex_sc[1][sharp][0], tex_sc[1][blurred][1] = tex_sc[1][sharp][1];
+            tex_wh[1][blurred][0] = tex_wh[1][sharp][0], tex_wh[1][blurred][1] = tex_wh[1][sharp][1];
+        }
     }
     if (prof) prof_tex += SDL_GetTicksNS() - prof_tx_;
     if (fabsf(pass_sx - pass_sy) > 0.01f * pass_sy && st.rt.ncolor && renderer_texture_presented(st.rt.color[0])) {
@@ -9442,6 +9475,17 @@ static void debug_draw(Prog *pr, CmdRec *r, bool indexed) {
                         f[v * 4 + 2], f[v * 4 + 3]);
             }
         }
+    }
+    {   // the fragment shader by the translator's own hash (translate.c, ODYSSEY_LOG_FS_HASH / ODYSSEY_LOG_GLSL): the
+        // log's "fs hash" above is another; and whether it is the HDR composite's variant (ShaderKey glow_comp)
+        uint64_t th = 0;
+        if (pr->code[1]) {
+            size_t ext = maxwell_code_extent((const uint8_t *)(uintptr_t)pr->code[1], pr->cmax[1], STAGE_FRAGMENT);
+            th = 1469598103934665603ull;
+            for (size_t i = 0x30; i < ext; i++) th = (th ^ ((const uint8_t *)(uintptr_t)pr->code[1])[i]) * 1099511628211ull;
+        }
+        LOG("[draw]   fs translator hash %016llx%s, rscale %d\n", (unsigned long long)th,
+            pr->fkey.glow_comp ? " (HDR composite)" : "", (int)pr->fi->uses_rscale);
     }
     for (int i = 0; i < pr->vi->ntex && i < 64; i++) {  // vertex textures (displacement maps): which, size, format
         NvnTexture *t = shader_texture_object(0, &pr->vi->tex[i]);

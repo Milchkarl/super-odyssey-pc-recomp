@@ -79,8 +79,7 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool bloom_prefilter;
-    bool cam_blur;      // (the HDR composite's variant with the camera's motion blur: camBlurSample, bloomUp)
-    bool bloom_smooth;  // (the HDR composite: its quarter-resolution glow inputs read through a B-spline, bloomUp)
+    bool bloom_smooth;  // (the HDR composite, key->glow_comp: its 2D inputs read through bloomUp, steered per input)
     bool far_smooth;    // (the distant-view panorama: RGBM texels decoded before a B-spline enlargement, farSample)
     bool hud_smooth;    // (a layout's draw, key->hud_filter: enlarged textures through hudSample)
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
@@ -695,11 +694,7 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         c->stage == STAGE_FRAGMENT) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "farSample(t0, %s, rscale[1])", P);
-    } else if (c->cam_blur && slot == 0 && type == TEXTYPE_2D && !t->shadow && !off && lod_kind == 1) {
-        c->uses_rscale = true;  // (the blurred half-size scene: the sharp one - slot 2 - with Motion blur off)
-        snprintf(e, sizeof e, "camBlurSample(t0, t2, %s, %s, rscale[1])", P, lod);
-    } else if (((c->bloom_smooth && slot <= 1) || (c->cam_blur && slot == 1)) && type == TEXTYPE_2D && !t->shadow && !off &&
-               lod_kind <= 1) {
+    } else if (c->bloom_smooth && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "bloomUp(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
     } else if (c->bloom_prefilter && slot == 1 && type == TEXTYPE_2D && !t->shadow && lod_kind <= 1) {
@@ -2366,21 +2361,15 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    return color / (footprint.x * footprint.y);\n"
                "}\n");
     }
-    if (c->cam_blur)
-        // Motion blur off (settings motion_blur; rscale[slot].z >= 4): while the camera turns, the game's composite
-        // mixes a blurred half-size copy of the scene (slot 0) over the sharp one (slot 2) - the sharp one in both
-        // places then, so nothing is blurred (#123)
-        sp(&s, "vec4 camBlurSample(sampler2D blurred, sampler2D sharp, vec2 uv, float lod, vec4 rs) {\n"
-               "    return rs.z > 3.5 ? textureLod(sharp, uv, 0.0) : textureLod(blurred, uv, lod);\n"
-               "}\n");
-    if (c->bloom_smooth || c->cam_blur) {
-        // Bloom quality High (settings bloom_quality: rscale[slot].z = 1): the composite enlarges the game's glow
-        // images (400x225 and smaller, whatever the screen's size) with a cubic B-spline - four bilinear taps -
-        // instead of one bilinear tap, whose steps showed as blocks around bright sky (#102). The screen-sized scene
-        // input is read as before; at Switch quality (z = 0) both are read as the game does.
+    if (c->bloom_smooth) {
+        // The HDR composite's inputs, as the draw steers each one (exec.c draw_, rscale[slot].z): 0 read as the game
+        // reads it (the scene, its blurred copy, the exposure, a lens texture), 1 the glow image enlarged with a cubic
+        // B-spline - four bilinear taps - instead of one bilinear tap, whose steps showed as blocks around bright sky
+        // (Bloom quality High, #102), 2 the glow left out (Bloom quality Off). The game has a dozen versions of this
+        // shader (kingdoms, the camera turning), the glow at any of their inputs: the draw finds it by its size.
         sp(&s, "vec4 bloomUp(sampler2D src, vec2 uv, float lod, vec4 rs) {\n"
                "    vec2 size = vec2(textureSize(src, int(lod)));\n"
-               "    float q = mod(rs.z, 4.0);\n"  // (+4: Motion blur off, camBlurSample's)
+               "    float q = rs.z;\n"
                "    if (q < 0.5 || size.x > 480.0) return textureLod(src, uv, lod);\n"
                "    if (q > 1.5) return vec4(0.0);\n"  // (z = 2, tests: the glow left out - what is glow and what isn't)
                "    vec2 p = uv * size - 0.5, i = floor(p), f = p - i, f2 = f * f, f3 = f2 * f;\n"
@@ -2742,9 +2731,8 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             size_t ext = maxwell_code_extent(blob, max_size, stage);
             uint64_t hash = 1469598103934665603ull;
             for (size_t i = 0x30; i < ext; i++) hash = (hash ^ blob[i]) * 1099511628211ull;
-            c->bloom_smooth = hash == 0xf42bcd0d74bc1d0eull || hash == 0x025c57bc1bfe1339ull;  // 1.4.1, 1.0.0
-            // (its variant while the camera turns, with the camera's motion blur: the same code in 1.0.0 and 1.4.1)
-            c->cam_blur = hash == 0xb092419b94b20ebaull;
+            // (the composite itself is found by the draw, key->glow_comp: by its hash only 2 of its dozen versions were)
+            c->bloom_smooth = key->glow_comp;
             {   // ODYSSEY_LOG_FS_HASH=1 (finding a shader for a flag like these): each fragment shader's hash and size
                 static int lg = -1;
                 if (lg < 0) lg = getenv("ODYSSEY_LOG_FS_HASH") != NULL;

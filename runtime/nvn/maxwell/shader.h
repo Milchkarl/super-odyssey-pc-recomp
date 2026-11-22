@@ -52,6 +52,9 @@ typedef struct {
     uint8_t split_compute_x;  // one 1536-thread guest group mapped to three 512-thread Vulkan groups
     uint8_t hud_filter;     // (fragment, GLSL) a layout's draw with HUD quality High: its enlarged 2D textures read
                             // through hudSample (translate.c). In the padding: keys without it hash as before.
+    uint8_t glow_comp;      // (fragment, GLSL) the game's HDR composite (exec.c draw_: scene + glow into the picture
+                            // and its luma): its 2D textures read through bloomUp, which the draw's rscale steers per
+                            // texture (translate.c). In the padding, as hud_filter.
 } ShaderKey;
 
 typedef struct {
