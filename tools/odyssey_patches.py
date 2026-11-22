@@ -237,3 +237,25 @@ def _coop_camera(gen, addr):
 
 PATCHES[0x700044dfb8] = _coop_camera
 PATCHES_141[0x70003f0cd4] = _coop_camera
+
+
+# Sherm, the tank capture (TankStateHack::updateCamera), resets its camera's gyro aim
+# (alCameraPoserFunction::resetGyro) when a flag of its asks: the camera's view (CameraPoser +0xa8, 1.4.1 +0xb0) is
+# read without a check, and a camera without its view crashed reading address 0 - a player entering a pipe in the
+# rainy Metro Kingdom with a Sherm nearby (#138, game 1.4.1). The three calls are skipped while the view is missing;
+# the reset then happens at the next update that has it.
+def _tank_reset_gyro(target, view_off):
+    def patch(gen, a):
+        ins = gen.lift(a)
+        assert ins.kind == 'bl' and ins.target == target, f'{a:#x}: unexpected resetGyro call'
+        code = ' '.join(gen.render_single(ins, a, None, set()))
+        return (f'{{ extern void f_{target:x}(Cpu *); uint64_t poser = c->x[0]; '
+                f'if (poser && *(const uint64_t *)(uintptr_t)(poser + {view_off:#x})) '
+                f'{{ {code} }} }}  /* {a:#x}: resetGyro only with a camera view (#138) */')
+    return patch
+
+
+for _a in (0x700018c3c8, 0x700018c5ac, 0x700018c6c8):
+    PATCHES[_a] = _tank_reset_gyro(0x7000835b20, 0xa8)
+for _a in (0x7000170b04, 0x7000170bb4, 0x7000170cd0):
+    PATCHES_141[_a] = _tank_reset_gyro(0x70005abe10, 0xb0)
