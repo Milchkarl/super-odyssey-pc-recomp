@@ -16,10 +16,16 @@ for Windows, Linux and the Steam Deck, made by static recompilation and built on
 game.
 
 <p align="center">
-  <a href="docs/media/cascade-4k.jpg"><img src="docs/media/cascade-4k.jpg" alt="Cascade Kingdom at 4K" width="24%"></a>
-  <a href="docs/media/sand-4k.jpg"><img src="docs/media/sand-4k.jpg" alt="Sand Kingdom at 4K" width="24%"></a>
-  <a href="docs/media/wooded-4k.jpg"><img src="docs/media/wooded-4k.jpg" alt="Wooded Kingdom at 4K" width="24%"></a>
-  <a href="docs/media/metro-4k.jpg"><img src="docs/media/metro-4k.jpg" alt="Metro Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-1-metro-street.jpg"><img src="docs/media/shot-1-metro-street.jpg" alt="Metro Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-2-cap-moon.jpg"><img src="docs/media/shot-2-cap-moon.jpg" alt="Cap Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-3-cascade-falls.jpg"><img src="docs/media/shot-3-cascade-falls.jpg" alt="Cascade Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-4-sand-town.jpg"><img src="docs/media/shot-4-sand-town.jpg" alt="Sand Kingdom at 4K" width="24%"></a>
+</p>
+<p align="center">
+  <a href="docs/media/shot-5-wooded-forest.jpg"><img src="docs/media/shot-5-wooded-forest.jpg" alt="Wooded Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-6-sand-odyssey.jpg"><img src="docs/media/shot-6-sand-odyssey.jpg" alt="The Odyssey in the Sand Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-7-lost-dusk.jpg"><img src="docs/media/shot-7-lost-dusk.jpg" alt="Lost Kingdom at 4K" width="24%"></a>
+  <a href="docs/media/shot-8-metro-rooftop.jpg"><img src="docs/media/shot-8-metro-rooftop.jpg" alt="Metro Kingdom rooftops at 4K" width="24%"></a>
 </p>
 <p align="center"><sub>Screenshots taken in Super Odyssey PC Recomp at 3840 x 2160 (click for full size). The game is © Nintendo; you need your own copy to run it.</sub></p>
 
