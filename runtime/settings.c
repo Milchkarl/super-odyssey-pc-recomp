@@ -63,6 +63,7 @@ Settings g_settings = {
     .xess_mode = DLSS_QUALITY, .xess_sharpness = 20, .xess_cas_sharpness = 20,
     .fsr1_sharpness = 90,
     .deband = true,
+    .motion_blur = true,  // (as the Switch)
     .hud_quality = 0,  // (Switch: as the game draws it. The 0.4.4 sharpening, hud_sharpen, made the art look aliased - owner 2026-11-21)
     .antialias = AA_OFF,  // (owner 2026-11-20: the defaults for everyone - Off)
     .rumble = true,
@@ -387,6 +388,7 @@ void settings_load(void) {
             g_settings.dlss_rcas_sharpness = n < 0 ? 0 : n > 100 ? 100 : n;
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
+        else if (!strcmp(key, "motion_blur")) g_settings.motion_blur = atoi(val) != 0;
         else if (!strcmp(key, "hud_quality")) g_settings.hud_quality = !strcmp(val, "high") || atoi(val) > 0;
         else if (!strcmp(key, "hud_sharpen")) {}  // (0.4.4 - 0.5.4: the sharpening HUD quality replaced; not carried over)
         else if (!strcmp(key, "aspect")) {
@@ -517,6 +519,7 @@ void settings_save(void) {
             g_settings.shot_pad, g_settings.shot_key);
     fprintf(f, "mouse_smoothing = %d\n", g_settings.mouse_smoothing);
     fprintf(f, "amiibo = %d\n", g_settings.amiibo);
+    fprintf(f, "motion_blur = %d\n", g_settings.motion_blur);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);
     fprintf(f, "stick_deadzone_right = %d\n", g_settings.stick_deadzone_r);
     fprintf(f, "stick_range_left = %d\n", g_settings.stick_range_l);

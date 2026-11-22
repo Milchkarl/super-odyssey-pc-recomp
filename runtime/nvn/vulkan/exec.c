@@ -7943,6 +7943,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
             // (a layout's draw at HUD quality High: .z the enlargement's strength instead - its variant's hudSample)
             float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
+            if (sg && !g_settings.motion_blur) bq += 4.0f;  // (Motion blur off: translate.c camBlurSample)
             if (sg && p->fkey.hud_filter) bq = g_hud_draw_filter;
             for (int t = 0; t < si->ntex && t < 64; t++) {
                 rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
