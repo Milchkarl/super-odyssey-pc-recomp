@@ -2566,6 +2566,7 @@ void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool, void (*pr
     ImGui::GetStyle().ScaleAllSizes(scale);
     tabs_body(scale, prelaunch);
     ptbr_dialog(scale);
+    quit_dialog(scale);  // (the configuration page before the game shows the Quit tab too - #133)
     ImGui::GetStyle() = saved;
     g_font = f0, g_font_big = f1;
 }
