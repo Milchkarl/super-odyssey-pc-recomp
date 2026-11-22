@@ -19,7 +19,7 @@
     "timeout": 3600,
     "done": ["{data}/setup-done.txt"],
     "keeps_copy": true,
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "saves": [
     "{data}/save",
