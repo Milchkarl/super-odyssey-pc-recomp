@@ -5992,6 +5992,84 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
     return true;
 }
 
+// The warm-up on several threads: start-up spent ~6 s building ~2,600 pipelines one at a time (~2 ms each, the
+// driver linking from its cache; ~15 s, the budget's end, after a driver or game update). The builds themselves run on
+// worker threads in play as well (build_pipeline / link_pipeline); what the warm-up shares - the pipeline table, its
+// program table, the shader pack read for a program's SPIR-V, the miss counters - is behind warm_lock. A slot is
+// claimed by writing its key (pipe_slot then skips it for other keys; one left without a pipe is built in play, as a
+// key never warmed). ODYSSEY_PREWARM_THREADS=<n>: that many (1: one at a time, as before).
+static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool use_libraries) {
+    pthread_mutex_lock(&warm_lock);
+    uint32_t slot = pipe_slot(hash);
+    if (slot == PIPE_TAB || pipe_tab[slot].pipe || pipe_tab[slot].key == hash) {
+        g_warm_miss[0]++;
+        pthread_mutex_unlock(&warm_lock);
+        return false;
+    }
+    pipe_tab[slot].key = hash;  // (claimed)
+    Pipe *pp = calloc(1, sizeof *pp);
+    bool in_range = false;
+    if (pp) {
+        memcpy((uint8_t *)&pp->k + PIPE_STATE_OFFSET, r->state, sizeof r->state);
+        in_range = r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2;
+        if (in_range) pp->k.prog = prewarm_program(r, use_libraries);
+    }
+    pthread_mutex_unlock(&warm_lock);
+    if (!pp) return false;
+    if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
+    bool ok = atomic_load(&pp->state) == 1;
+    pthread_mutex_lock(&warm_lock);
+    if (ok) {
+        pp->recorded = true;
+        pipe_tab[slot].pipe = pp;
+    } else g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
+    pthread_mutex_unlock(&warm_lock);
+    if (!ok) free(pp);
+    return ok;
+}
+typedef struct {
+    const PipeRecipe *recipes;
+    const uint32_t *order;
+    uint32_t count, recent;
+    bool libs;
+    uint64_t t0, memory, memory_budget, time_budget;
+    _Atomic uint32_t next, warmed, compute, attempted;
+    _Atomic bool stop;
+} WarmJob;
+static int warm_worker(void *arg) {
+    WarmJob *j = arg;
+    for (;;) {
+        if (atomic_load(&j->stop)) break;
+        uint32_t a = atomic_fetch_add(&j->next, 1);
+        if (a >= j->count) break;
+        // (the same bounds as before: driver allocations for libraries can be much larger than the recipe file)
+        if (a && a % 16 == 0 && (plat_private_bytes() > j->memory + j->memory_budget || plat_now_ns() - j->t0 > j->time_budget)) {
+            atomic_store(&j->stop, true);
+            break;
+        }
+        atomic_fetch_add(&j->attempted, 1);
+        uint32_t index = j->order ? j->order[a] : a < j->recent ? j->count - j->recent + a : a - j->recent;
+        const PipeRecipe *r = &j->recipes[index];
+        uint64_t hash = pipe_recipe_hash(r);
+        if (!r->spv[1]) {
+            pthread_mutex_lock(&warm_lock);
+            uint32_t c = prewarm_compute(r, hash);
+            pthread_mutex_unlock(&warm_lock);
+            atomic_fetch_add(&j->compute, c);
+            continue;
+        }
+        if (warm_graphics_pipeline_mt(r, hash, j->libs)) atomic_fetch_add(&j->warmed, 1);
+    }
+    return 0;
+}
+static int warm_threads(void) {
+    const char *e = getenv("ODYSSEY_PREWARM_THREADS");
+    if (e) return atoi(e) < 1 ? 1 : atoi(e) > 32 ? 32 : atoi(e);
+    int n = SDL_GetNumLogicalCPUCores() - 2;  // (the game's own start-up and the window keep two)
+    return n < 1 ? 1 : n > 8 ? 8 : n;
+}
+
 static bool warm_uses_libraries(void) {
     const char *shared = getenv("ODYSSEY_SHARED_LIBS");
     return g_vk.gpl && (!shared || atoi(shared) != 0);
@@ -6129,7 +6207,20 @@ void vk_pipeline_prewarm(bool build) {
     if (recent > 768) recent = 768;
     uint32_t *order = build ? prioritize_first_scene(recipes, h.count, recent) : NULL;
     uint32_t attempted = 0;
-    for (; build && attempted < h.count; attempted++) {
+    int nthreads = build ? warm_threads() : 1;
+    if (build && nthreads > 1) {
+        WarmJob job = {.recipes = recipes, .order = order, .count = h.count, .recent = recent, .libs = use_libraries,
+                       .t0 = t0, .memory = memory, .memory_budget = memory_budget, .time_budget = time_budget};
+        SDL_Thread *th[32];
+        int started = 0;
+        for (int i = 0; i < nthreads; i++)
+            if ((th[started] = SDL_CreateThread(warm_worker, "warmup", &job))) started++;
+        if (!started) warm_worker(&job);
+        for (int i = 0; i < started; i++) SDL_WaitThread(th[i], NULL);
+        warmed = atomic_load(&job.warmed), compute = atomic_load(&job.compute), attempted = atomic_load(&job.attempted);
+        LOG("[vk] warm-up on %d threads\n", started ? started : 1);
+    }
+    for (; build && nthreads <= 1 && attempted < h.count; attempted++) {
         uint32_t index = order ? order[attempted] : attempted < recent ? h.count - recent + attempted : attempted - recent;
         const PipeRecipe *r = &recipes[index];
         // Driver allocations for libraries can be much larger than the recipe file. Keep startup bounded.
