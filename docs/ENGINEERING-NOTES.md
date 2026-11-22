@@ -32,17 +32,20 @@ RTX 4090) or Steam Deck OLED unless it says otherwise. The code is MIT licensed:
   bug that only that catalog test caught, which is why it now runs first.
 - Every kingdom is visited by a scripted tour (`tools/kingdom_tour.py`, [KINGDOM-TOUR.md](KINGDOM-TOUR.md)). An exit
   code alone doesn't count: the log must show the warp accepted and the stage reached.
+- A picture change is checked with the change on and off in the same tour, kingdom by kingdom: a difference that is
+  only animation (water, fog, a moving creature) is set apart from a real one by looking at the difference image.
+- Before a release, committed memory is compared kingdom by kingdom with the build before: the same growth in every
+  kingdom means nothing new leaks (a leak once showed only there, not in RAM in use).
 
 **Ways our own tests lied to us**
 
 | What happened | What it cost | The fix |
 |---|---|---|
-| The monitors were powered off for an overnight run | The graphics driver reported no active display and every present waited ~250 ms: the game ran at 4-10 FPS, so the high-frame-rate crash under test could not happen. A night of runs proved nothing | Keep the display on (cover it with a black window instead) and check for a 60 FPS title screen before trusting a run |
-| A bench passed `WARP=none` to mean "no warp" | The test code took `none` as a stage name; the game crashed looking for `noneMap.byml` right after Continue. It looked like a real crash on the Steam Deck | The warp code accepts `none`; reproduce on a second machine before believing a crash |
-| The test folder missed a DLL the release ships | Frame generation silently stayed off, so a reported crash "didn't reproduce" | Test the release's own files |
 | A screenshot tool captured the image before the upscaler | An upscaler bug could not show in the pictures | Capture what reaches the window |
 | A first sound-gap counter counted an empty queue before each block | It reported gaps that weren't audible and hid the real pattern | Count what the sound device itself reports (its short pulls) |
 | A checkout with Windows line endings built the Linux package | A carriage return in the AppImage's file name, in its `.desktop` file and in `AppRun` ("execv error") | Convert line endings when sending sources to Linux; strip `\r` where a version string is read |
+| A time-limited Steam Deck run started a game code rebuild (~19 min there) | The time limit killed the compilers mid-build: eight files "failed" at once with exit 255 and no message, which read like a compiler bug | A run's limit must cover a rebuild (`TMO`); failures that all land at the same second are a kill, not an error |
+| A scripted test at "the player's coordinates" for a visual bug | The camera, the save's progress and the time of the scene differ, so the effect didn't appear and a wrong cause was chased for hours | Ask for a matched pair: the same spot in the port and in an emulator, full-size PNG, then compare those pixels |
 
 ## Crashes
 
@@ -142,6 +145,60 @@ Players reported the frame rate falling after a while. On Linux and the Steam De
 - **FSR 4 on a card it isn't made for** ([#66](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/66)):
   AMD's runtime offered its FSR 4 provider on a Radeon RX 6700 XT, and the picture broke whenever the game changed its
   resolution. FSR 4 is offered on the RX 9000 series only; other cards get FSR 3.1.
+
+### The glow: a mip chain read at the wrong level ([#102](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/102))
+
+The glow around the sun, clouds and bright objects came out as stacked blocks with hard edges; an emulator showed a
+wide, smooth fade. Bloom Off changed nothing, because this is a different effect: the game's glare.
+
+- **The chain:** one 100x56 target with 5 levels (100x56 down to 6x3). On the way down each level is drawn from the one
+  above and blurred; on the way up each draw **writes level N and reads level N + 1** (the sampler clamped to that one
+  level) and adds it in. The last step stretches level 1 to a 400x225 glow image.
+- **The bug:** a draw that samples the texture it renders into is a feedback loop in Vulkan. Our fast path for mip
+  chains bound levels 0 .. N - 1, right for the way down; for the way up, the clamp to level N + 1 then fell on level
+  N - 1, a larger, sharper one. The widest, softest levels never reached the screen, and the sharp ones showed as
+  blocks.
+- **The fix:** a draw that reads only levels past the one it writes gets a copy of every level in its place (three tiny
+  copies a frame). After: in the same scene, the port and the emulator agree to 1-2% in average colour, contrast and
+  saturation.
+- **How it was found:** a pass dump of one frame (`ODYSSEY_DEBUG_FRAME`), the draw log's sampler level clamps
+  (`lod 4.00..4.00` on a draw into level 3), and a contour-band view of the sky (the blue minus red channel cut into
+  steps), which makes a soft halo and a stepped one obvious.
+
+*For other projects: when a pass renders one mip level and samples others, give it exactly the levels it asks for, at
+their own numbers. A clamp that remaps a level number reads the wrong level without any error.*
+
+### The glow at high resolutions (0.7.0)
+
+The game picks its bright parts for the glow with one bilinear tap per pixel of a small image, and on the Switch that
+tap covers 2x2 texels of its picture. Above the Switch's resolution the port averaged each small pixel's whole
+footprint (16x16 of the game's texels) instead, which fed every small bright detail into the glow - sand sparkles, the
+flare's dotted ghosts, the sun's edge - as a wide halo and square glow blocks. The bright pass now averages only what
+the Switch's one tap covers.
+
+### The lens flare: what the GPU decides and what the CPU reads
+
+The sun's flare hides when the sun is behind something. The game tests that on the GPU: 25 points around the sun read
+the depth buffer in a vertex shader and add up into a 1x1 target, and the flare's own vertex shader reads that target.
+Nothing goes back to the CPU, so a port must bind the **scaled** depth image to vertex shaders, as for fragment shaders.
+The game only runs this test while the sun is on screen: a test view without the sun shows none of it.
+
+### Sharper than the emulator? Measure it
+
+Players compared the port with an emulator and found the emulator sharper. Measured on matched screenshots (the
+standard deviation of a Laplacian filter over the same region, plus colour statistics):
+
+- At the same settings the two match in colour and contrast. The emulator's extra "detail" is mostly aliasing: it
+  renders near the screen's size, and its wires and edges show the same steps as the port at native resolution.
+- Rendering at 4K and showing 1440p, the port's downscale keeps as much detail as a Lanczos filter, so there is nothing
+  to gain there.
+- DLAA costs about 14% of the fine detail; its sharpening at 80 brings it back.
+
+### Ambient occlusion
+
+GTAO from the scene's depth, as an addition: Off (the Switch), Medium (half resolution each way, about a quarter of
+High's cost) and High. Measured: 60 FPS in every kingdom on the test PC at either level, and Medium left the Steam
+Deck's Bonneton walk at 60 FPS. Off by default.
 
 ## Sound: crackling during loads ([#83](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/83), [#84](https://github.com/Simon3Sarkis/super-odyssey-pc-recomp/issues/84))
 
