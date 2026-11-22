@@ -256,6 +256,7 @@ static const struct { int code, bit; } k_menu_mouse[] = {
 static uint8_t menu_mouse_latch[3];          // the button each mouse button gives while held: bit + 1, 0xff none, 0 up
 static _Atomic uint64_t menu_wheel_bit;      // the D-pad bit a wheel step holds now
 static _Atomic int menu_wheel_steps[2];      // wheel notches waiting: up, down
+static _Atomic int32_t menu_map_zoom;        // on the map, a wheel step tilts the right stick instead: its y now
 static _Atomic uint64_t window_focus_ns;     // when the window last came to the front
 static bool mouse_code_bound(int code) {
     for (int i = 0; i < BIND_KEY_COUNT; i++)
@@ -356,8 +357,9 @@ static void menu_mouse_frame(void) {
         was = m;
     }
     if (until && now < until) {
-        if (atomic_load(&menu_wheel_bit) && now >= until - MENU_WHEEL_HOLD_NS) {
+        if ((atomic_load(&menu_wheel_bit) || atomic_load(&menu_map_zoom)) && now >= until - MENU_WHEEL_HOLD_NS) {
             atomic_store(&menu_wheel_bit, 0);
+            atomic_store(&menu_map_zoom, 0);
             recompute_keyboard();
         }
         return;
@@ -367,7 +369,10 @@ static void menu_mouse_frame(void) {
         int n = atomic_load(&menu_wheel_steps[d]);
         if (n > 0 && atomic_compare_exchange_strong(&menu_wheel_steps[d], &n, n - 1)) {
             if (!in_game_menu()) { atomic_store(&menu_wheel_steps[d], 0); continue; }  // (the menu closed meanwhile)
-            atomic_store(&menu_wheel_bit, 1ull << (d ? BIND_DOWN : BIND_UP));
+            extern bool odyssey_map_open(void);  // (hle/odyssey_pointer.c)
+            // On the map the wheel zooms (#82, #106): the game zooms it with the right stick, up closer
+            if (odyssey_map_open()) atomic_store(&menu_map_zoom, d ? -32767 : 32767);
+            else atomic_store(&menu_wheel_bit, 1ull << (d ? BIND_DOWN : BIND_UP));
             until = now + 2 * MENU_WHEEL_HOLD_NS;
             recompute_keyboard();
             return;
@@ -1614,7 +1619,8 @@ static void fill_state(Cpu *c) {
         if (lm < 0) lm = getenv("ODYSSEY_LOG_MOUSE") != NULL;
         if (lm && (mrx || mry) && n++ % 20 == 0) LOG("[input] mouse camera: right stick %d %d%s\n", mrx, mry, menu ? " (menu up: dropped)" : "");
     }
-    int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx + mrx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pad_ry + mry) + script_ry);
+    int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx + mrx) + script_rx);
+    int32_t ry = clamp_axis((menu ? 0 : key_ry + pad_ry + mry + atomic_load(&menu_map_zoom)) + script_ry);
     // stick directions also appear as buttons (bits 16-23)
     if (lx < -16000) b |= 1ull << 16;
     if (ly > 16000) b |= 1ull << 17;

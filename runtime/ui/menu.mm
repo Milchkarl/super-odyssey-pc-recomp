@@ -1321,6 +1321,11 @@ static void tab_graphics(void) {
                    "Switch. Applies from the next area loaded.", false);
     }
     {
+        static const char *sd[] = {"Switch", "High (2x)", "Very high (4x)"};
+        opt_choice("Shadow distance", &g_settings.shadow_distance, sd, 3, 0,
+                   "How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same "
+                   "shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with "
+                   "it. Switch: as on the Switch. Changes at once.", false);
         static const char *bq[] = {"Switch", "High", "Off"};
         opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 3, 0,
                    "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
