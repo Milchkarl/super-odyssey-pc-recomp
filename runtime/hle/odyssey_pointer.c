@@ -1,4 +1,4 @@
-// The mouse pointer in the game's menus (#64, prototype; 1.4.1 only). The game's menus know no pointer: each one keeps
+// The mouse pointer in the game's menus (#64, prototype; 1.0.0 and 1.4.1). The game's menus know no pointer: each one keeps
 // its own selection and moves it on the D-pad. For a menu whose items we can find, the pointer over an item that
 // isn't selected becomes the selection at once, set the way the game's own D-pad step sets it (its index, then the
 // items' "Wait" / "Select" actions and the menu's update), and a left click is its A (the mouse in menus). Where the
@@ -7,7 +7,10 @@
 //
 // Menus, by their state's nerve (RTTI: the nerve class's vtable, slot 0 = execute(NerveKeeper *), host at [keeper]):
 //   SceneStateSelectMode, its select nerve (new game: Start / Assist Mode): items at +0x30 (selected while the byte
-//   at +0x59 is 1) and +0x38; 0x700046ae80(this, instant) updates their look (disassembly of 1.4.1).
+//   at +0x59 is 1) and +0x38; updateCursorParts(this, instant) updates their look (disassembly of 1.4.1).
+// The objects' layouts are the same in 1.0.0 and 1.4.1 (each offset below checked in both versions' code); only the
+// addresses differ (g_a). 1.0.0's from its symbols; its CommonVerticalList Active / MapLayout Wait nerves are inlined
+// copies of exeActive / exeWait (as in 1.4.1), found by their code.
 //   MenuSelectParts, its Select nerve (the title menu and the pause menu), CommonVerticalList (Options and its pages,
 //   the data manager's file lists), WindowConfirmData / WindowConfirm (yes / no windows): below.
 // Not yet: the cursor sound on a pointer move; shops, the wardrobe, dialogue choices, the Odyssey's world map, the
@@ -25,13 +28,34 @@
 
 bool input_pointer_layout(float *x, float *y);  // runtime/hle/input.c
 
-#define CALC_PANE_TRANS 0x7000630b60ull  // al::calcPaneTrans(sead::Vector3f *out, const al::IUseLayout *, const char *pane)
-#define STR_CURSOR 0x7000e846f5ull       // "Cursor" (the game's own string)
-#define START_ACTION 0x700062f120ull     // al::startAction(IUseLayoutAction *, const char *action, const char *pane)
-#define STR_WAIT 0x7000e75a89ull         // "Wait"
-#define STR_SELECT 0x7000e846eeull       // "Select"
-#define MENU_SELECT_UPDATE 0x70001d7290ull  // MenuSelectParts: what exeSelect calls after a step (the cursor's place)
-#define SELECT_MODE_UPDATE 0x700046ae80ull  // SceneStateSelectMode: the items' look from +0x59 (this, instant)
+typedef struct {
+    uint64_t calc_pane_trans;     // al::calcPaneTrans(sead::Vector3f *out, const al::IUseLayout *, const char *pane)
+    uint64_t start_action;        // al::startAction(IUseLayoutAction *, const char *action, const char *pane)
+    uint64_t set_pane_local_trans;  // al::setPaneLocalTrans(IUseLayout *, const char *pane, const Vector3f &)
+    uint64_t str_cursor, str_wait, str_select, str_par_cursor;  // "Cursor", "Wait", "Select", "ParCursor" (the game's)
+    uint64_t menu_select_update;  // MenuSelectParts::startActionMarioSelectIndex: what exeSelect calls after a step
+    uint64_t select_mode_update;  // SceneStateSelectMode::updateCursorParts(this, instant): the items' look from +0x59
+    uint64_t order_off, order_on; // MenuSelectParts: the item order tables (the byte at +0x58 0 / not 0)
+    uint64_t nrv_select_mode, nrv_menu_select[2], nrv_vertical_list, nrv_confirm_data, nrv_confirm, nrv_map_wait;
+} PointerAddrs;
+static const PointerAddrs k_v141 = {
+    0x7000630b60ull, 0x700062f120ull, 0x7000630d50ull, 0x7000e846f5ull, 0x7000e75a89ull, 0x7000e846eeull, 0x7000e65417ull,
+    0x70001d7290ull, 0x700046ae80ull, 0x7000ec8288ull, 0x7000ec8270ull,
+    0x700046b580ull, {0x70001d7a20ull, 0}, 0x70001c6c90ull, 0x70001ea5a0ull, 0x700070ce20ull, 0x70001d4910ull,
+};
+static const PointerAddrs k_v100 = {  // (MenuSelectParts: two nerves run exeSelect in 1.0.0)
+    0x70008b2218ull, 0x70008b0b0cull, 0x70008b26acull, 0x700182b99bull, 0x700181c5bcull, 0x700182b984ull, 0x700182b9bfull,
+    0x70001f978cull, 0x70004c493cull, 0x70018af570ull, 0x70018af55cull,
+    0x70004c510cull, {0x70001f9f3cull, 0x70001f9f50ull}, 0x70001e3a88ull, 0x70002117ccull, 0x700099c460ull, 0x70001f6c94ull,
+};
+static const PointerAddrs *g_a = &k_v141;
+#define CALC_PANE_TRANS (g_a->calc_pane_trans)
+#define STR_CURSOR (g_a->str_cursor)
+#define START_ACTION (g_a->start_action)
+#define STR_WAIT (g_a->str_wait)
+#define STR_SELECT (g_a->str_select)
+#define MENU_SELECT_UPDATE (g_a->menu_select_update)
+#define SELECT_MODE_UPDATE (g_a->select_mode_update)
 static int g_log = -1;
 
 // A game function called from a hook (the game thread), three arguments; the caller's registers kept
@@ -95,7 +119,7 @@ static void select_mode(Cpu *c) {
 }
 
 // ---- MenuSelectParts (the pause menu's list): count at +0x18, the selected index at +0x1c, the items' layout actors
-// at +0x28 [order[index]], the order table chosen by the byte at +0x58 (0: 0x7000ec8288, else 0x7000ec8270)
+// at +0x28 [order[index]], the order table chosen by the byte at +0x58 (g_a: order_off / order_on)
 static GuestFn g_menu_select;
 static void menu_select(Cpu *c) {
     uint64_t self = *(uint64_t *)(uintptr_t)c->x[1];
@@ -103,7 +127,7 @@ static void menu_select(Cpu *c) {
     if (self && input_pointer_layout(&px, &py)) {
         int n = *(int32_t *)(uintptr_t)(self + 0x18), sel = *(int32_t *)(uintptr_t)(self + 0x1c);
         uint64_t parts = *(uint64_t *)(uintptr_t)(self + 0x28);
-        const int32_t *order = (const int32_t *)(uintptr_t)(*(uint8_t *)(uintptr_t)(self + 0x58) ? 0x7000ec8270ull : 0x7000ec8288ull);
+        const int32_t *order = (const int32_t *)(uintptr_t)(*(uint8_t *)(uintptr_t)(self + 0x58) ? g_a->order_on : g_a->order_off);
         float pts[8][2];
         bool ok = n >= 1 && n <= 6 && parts && sel >= 0 && sel < n;
         for (int i = 0; ok && i < n; i++)
@@ -209,8 +233,8 @@ static void confirm_data(Cpu *c) {
 // ---- WindowConfirm (the game's other yes / no and choice windows): the button count at +0x130, the selected one at
 // +0x134, the buttons' layout actors at +0x150 (+0x148 of them). A step (exeWait 0x700070c830): "Wait" on the old,
 // the index, "Select" on the new, then the window's "ParCursor" pane moved to the new button's "Cursor" pane.
-#define SET_PANE_LOCAL_TRANS 0x7000630d50ull  // al::setPaneLocalTrans(IUseLayout *, const char *pane, const Vector3f &)
-#define STR_PAR_CURSOR 0x7000e65417ull        // "ParCursor"
+#define SET_PANE_LOCAL_TRANS (g_a->set_pane_local_trans)
+#define STR_PAR_CURSOR (g_a->str_par_cursor)
 static GuestFn g_confirm;
 static void confirm(Cpu *c) {
     uint64_t self = *(uint64_t *)(uintptr_t)c->x[1];
@@ -253,7 +277,7 @@ static void confirm(Cpu *c) {
 
 // ---- MapLayout (the map, Minus): its Wait nerve runs while the map is up (its lists too). A does nothing there, so a
 // bound left click keeps its binding on the map (#90: a left click bound to Y opens the map's lists, as before the
-// mouse in menus took bound buttons; hle/input.c). Nerve found through RTTI (MapLayoutNrvWait, 1.4.1).
+// mouse in menus took bound buttons; hle/input.c). Nerve found through RTTI (MapLayoutNrvWait, 1.4.1), by its code in 1.0.0.
 static GuestFn g_map_wait;
 static _Atomic uint64_t g_map_seen_ns;
 static void map_wait(Cpu *c) {
@@ -310,25 +334,26 @@ static void probe_boot(const char *path) {
 
 void odyssey_pointer_boot(void) {
     static bool done;
-    if (done || !loader_main_is_v141()) return;
+    if (done) return;
     done = true;
+    g_a = loader_main_is_v141() ? &k_v141 : &k_v100;
     if (g_log < 0) g_log = getenv("ODYSSEY_POINTER_PROBE") != NULL;
     if (getenv("ODYSSEY_POINTER_NERVES")) { probe_boot(getenv("ODYSSEY_POINTER_NERVES")); return; }
-    const uint64_t select_mode_nerve = 0x700046b580ull;  // SceneStateSelectMode's select nerve: execute
-    if ((g_select_mode = dispatch_lookup(select_mode_nerve))) hle_override(select_mode_nerve, select_mode, "menu pointer: select mode");
-    const uint64_t menu_select_nerve = 0x70001d7a20ull;  // MenuSelectParts's Select nerve: execute
-    if ((g_menu_select = dispatch_lookup(menu_select_nerve))) hle_override(menu_select_nerve, menu_select, "menu pointer: pause menu");
-    const uint64_t vertical_list_nerve = 0x70001c6c90ull;  // CommonVerticalList's Active nerve: execute
-    if ((g_vertical_list = dispatch_lookup(vertical_list_nerve)))
-        hle_override(vertical_list_nerve, vertical_list, "menu pointer: vertical list");
-    const uint64_t confirm_data_nerve = 0x70001ea5a0ull;  // WindowConfirmData's Wait nerve: execute
-    if ((g_confirm_data = dispatch_lookup(confirm_data_nerve))) hle_override(confirm_data_nerve, confirm_data, "menu pointer: data window");
-    const uint64_t confirm_nerve = 0x700070ce20ull;  // WindowConfirm's Wait nerve: execute
-    if ((g_confirm = dispatch_lookup(confirm_nerve))) hle_override(confirm_nerve, confirm, "menu pointer: confirm window");
-    const uint64_t map_wait_nerve = 0x70001d4910ull;  // MapLayout's Wait nerve: execute
-    if ((g_map_wait = dispatch_lookup(map_wait_nerve))) hle_override(map_wait_nerve, map_wait, "menu mouse: map");
-    if (g_log) LOG("[pointer] menus: select mode %s, pause menu %s, vertical list %s, data window %s, window %s, map %s\n",
-                   g_select_mode ? "hooked" : "not found", g_menu_select ? "hooked" : "not found",
+    if ((g_select_mode = dispatch_lookup(g_a->nrv_select_mode))) hle_override(g_a->nrv_select_mode, select_mode, "menu pointer: select mode");
+    // (1.0.0: two nerves, each "ldr x0, [x1]; b exeSelect" - either's original runs exeSelect for the other too)
+    for (int i = 0; i < 2 && g_a->nrv_menu_select[i]; i++) {
+        GuestFn f = dispatch_lookup(g_a->nrv_menu_select[i]);
+        if (!f) continue;
+        if (!g_menu_select) g_menu_select = f;
+        hle_override(g_a->nrv_menu_select[i], menu_select, "menu pointer: pause menu");
+    }
+    if ((g_vertical_list = dispatch_lookup(g_a->nrv_vertical_list)))
+        hle_override(g_a->nrv_vertical_list, vertical_list, "menu pointer: vertical list");
+    if ((g_confirm_data = dispatch_lookup(g_a->nrv_confirm_data))) hle_override(g_a->nrv_confirm_data, confirm_data, "menu pointer: data window");
+    if ((g_confirm = dispatch_lookup(g_a->nrv_confirm))) hle_override(g_a->nrv_confirm, confirm, "menu pointer: confirm window");
+    if ((g_map_wait = dispatch_lookup(g_a->nrv_map_wait))) hle_override(g_a->nrv_map_wait, map_wait, "menu mouse: map");
+    if (g_log) LOG("[pointer] menus (%s): select mode %s, pause menu %s, vertical list %s, data window %s, window %s, map %s\n",
+                   loader_main_is_v141() ? "1.4.1" : "1.0.0", g_select_mode ? "hooked" : "not found", g_menu_select ? "hooked" : "not found",
                    g_vertical_list ? "hooked" : "not found", g_confirm_data ? "hooked" : "not found",
                    g_confirm ? "hooked" : "not found", g_map_wait ? "hooked" : "not found");
 }
