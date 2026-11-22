@@ -1337,7 +1337,7 @@ static void tab_graphics(void) {
                    "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Off: no glow "
                    "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false);
         static const char *ao[] = {"Off", "Medium", "High"};
-        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 1,
+        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 0,
                    "Darkens the places light reaches less: the corners between steps and walls, the ground under "
                    "Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch "
                    "version: an addition (GTAO, worked out from the scene's depth each frame). High: at full "

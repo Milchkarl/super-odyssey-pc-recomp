@@ -86,7 +86,6 @@ Settings g_settings = {
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
     .aniso = ANISO_GAME,  // (the game's own level, as on the Switch - owner 2026-11-16: the defaults look as the original)
-    .ambient_occlusion = 1,  // (Medium - owner 2026-11-22: on by default; half resolution, about a quarter of High's cost)
     .frame_rate = FPS_60,
     .shader_preload = false,  // (it costs a lot of memory: nvn/vulkan/exec.c preload_room)
     // (Faster kingdom arrival off by default since 2026-11-20 - owner; its four parts stay on, used once it is turned on)
