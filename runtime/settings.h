@@ -118,6 +118,12 @@ typedef struct {
     bool motion_invert_y;  // the gyro's yaw (turning left / right) the other way round
     float motion_gyro_bias[3];  // the gyro's offset at rest, Switch axes, turns a second (Calibrate gyro; 0: learned as played)
     int motion_shake_key;  // a key (SDL scancode) or mouse button (BIND_MOUSE_*) doing the same (0: none)
+    // Extra actions (Controls, "click, then press" - runtime/hle/bindings.c bind_action_*; #62, #73, #123): a controller
+    // button (PADB_*, -1 none) and a key / mouse button (0 none) each. A button or key given to one of them no longer
+    // also presses the game button it is bound to.
+    int spin_pad, spin_key;  // the spin throw: the left stick turned a full circle and the throw pressed (hle/input.c)
+    int shot_pad, shot_key;  // a screenshot of the window, saved as a PNG in the screenshots folder (platform)
+    int mouse_smoothing;     // percent, 0..90: the mouse camera's movement averaged over recent samples (0: raw)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is
     // Each controller stick (runtime/hle/input.c stick_shape): the inner deadzone (percent of its travel that counts as

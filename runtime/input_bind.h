@@ -71,6 +71,17 @@ int bind_pad_from_name(const char *name);
 // Button prompts (runtime/nvn/texpatch.c): the controller button now driving Switch input `slot` (BIND_A..)
 int bind_prompt_host(int slot);
 
+// Extra actions with a button and a key of their own (settings.h spin_pad...): bind_capture_begin(BIND_DEV_ACT_PAD or
+// BIND_DEV_ACT_KEY, BIND_ACT_*) takes the next press for one of them (Esc cancels, Delete / Backspace clears it). A
+// button or key given to an action is taken from the others, and stops pressing the game button it is bound to.
+enum { BIND_ACT_SHAKE, BIND_ACT_SPIN, BIND_ACT_SHOT, BIND_ACT_COUNT };
+enum { BIND_DEV_ACT_PAD = 2, BIND_DEV_ACT_KEY = 3 };
+int *bind_action_pad(int act);   // PADB value, -1 none
+int *bind_action_key(int act);   // scancode or BIND_MOUSE_*, 0 none
+const char *bind_action_name(int act);
+bool bind_action_owns_pad(int host);  // the controller button is an action's: not a game button
+bool bind_action_owns_key(int code);
+
 #ifdef __cplusplus
 }
 #endif

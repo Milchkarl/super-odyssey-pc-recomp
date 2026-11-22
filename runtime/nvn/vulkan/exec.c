@@ -7834,10 +7834,11 @@ static float bloom_high(void) {
         env = getenv("ODYSSEY_BLOOM_QUALITY") ? atoi(getenv("ODYSSEY_BLOOM_QUALITY")) : -1;
         flip_at = getenv("ODYSSEY_BLOOM_FLIP_AT") ? atol(getenv("ODYSSEY_BLOOM_FLIP_AT")) : 0;
     }
-    bool on = env >= 0 ? env > 0 : g_settings.bloom_quality;
+    // (settings: 0 Switch, 1 High, 2 Off - the glow left out of the picture, #123)
+    int q = env >= 0 ? env : g_settings.bloom_quality;
     extern uint64_t renderer_present_count(void);
-    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) on = !on;
-    return on ? (env == 2 ? 2.0f : 1.0f) : 0.0f;
+    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) q = q ? 0 : 1;
+    return q >= 2 ? 2.0f : q == 1 ? 1.0f : 0.0f;
 }
 
 // The distant view's smooth enlargement (maxwell/translate.c farSample) follows Bloom quality High;
@@ -7861,7 +7862,7 @@ static float farview_mode(float bq) {
         uint64_t f = renderer_present_count();
         if (f >= (uint64_t)seq_at) return (float)seq[((f - (uint64_t)seq_at) / 2) % (uint64_t)nseq];
     }
-    return env >= 0 ? (float)env : bq > 0 ? 1.0f : 0.0f;
+    return env >= 0 ? (float)env : bq > 0.5f && bq < 1.5f ? 1.0f : 0.0f;  // (High only: Off leaves the far view as the Switch)
 }
 
 // HUD quality High (settings hud_quality; ODYSSEY_HUD_QUALITY=0/1 overrides, for tests): the layouts' draws use the

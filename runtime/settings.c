@@ -70,6 +70,8 @@ Settings g_settings = {
     .motion = true,
     .motion_shake_pad = -1,
     .motion_shake_key = 514,  // (BIND_MOUSE_MIDDLE: the middle mouse button - nothing else uses it by default)
+    .spin_pad = -1, .spin_key = 21,   // (SDL_SCANCODE_R: free in the default keyboard layout)
+    .shot_pad = -1, .shot_key = 69,   // (SDL_SCANCODE_F12)
     .mouse_camera = true,
     .mouse_menus = true,
     // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
@@ -328,6 +330,11 @@ void settings_load(void) {
         else if (!strcmp(key, "stick_range_left")) g_settings.stick_range_l = atoi(val) < 50 ? 50 : atoi(val) > 150 ? 150 : atoi(val);
         else if (!strcmp(key, "stick_range_right")) g_settings.stick_range_r = atoi(val) < 50 ? 50 : atoi(val) > 150 ? 150 : atoi(val);
         else if (!strcmp(key, "motion_gyro_sensitivity")) g_settings.motion_gyro_sens = atoi(val) < 25 ? 25 : atoi(val) > 400 ? 400 : atoi(val);
+        else if (!strcmp(key, "spin_pad")) { int v = atoi(val); g_settings.spin_pad = v >= -1 && v < 64 ? v : -1; }
+        else if (!strcmp(key, "spin_key")) { int v = atoi(val); g_settings.spin_key = v >= 0 && v < 1024 ? v : 0; }
+        else if (!strcmp(key, "shot_pad")) { int v = atoi(val); g_settings.shot_pad = v >= -1 && v < 64 ? v : -1; }
+        else if (!strcmp(key, "shot_key")) { int v = atoi(val); g_settings.shot_key = v >= 0 && v < 1024 ? v : 0; }
+        else if (!strcmp(key, "mouse_smoothing")) g_settings.mouse_smoothing = atoi(val) < 0 ? 0 : atoi(val) > 90 ? 90 : atoi(val);
         else if (!strcmp(key, "motion_shake_threshold")) g_settings.motion_shake_threshold = atoi(val) < 0 ? 0 : atoi(val) > 20 ? 20 : atoi(val);
         else if (!strcmp(key, "resolution")) {
             int n = atoi(val);
@@ -395,8 +402,10 @@ void settings_load(void) {
         else if (!strcmp(key, "shader_preload")) g_settings.shader_preload = atoi(val) != 0;
         else if (!strcmp(key, "shader_known_only")) g_settings.shader_known_only = atoi(val) != 0;
         else if (!strcmp(key, "shadow_quality")) g_settings.shadow_quality = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
-        else if (!strcmp(key, "bloom_quality")) g_settings.bloom_quality = !strcmp(val, "high") || atoi(val) > 0;
-        else if (!strcmp(key, "ambient_occlusion")) g_settings.ambient_occlusion = !strcmp(val, "on") || atoi(val) > 0;
+        else if (!strcmp(key, "bloom_quality"))  // (switch / high / off)
+            g_settings.bloom_quality = !strcmp(val, "off") ? 2 : !strcmp(val, "high") || atoi(val) == 1 ? 1 : 0;
+        else if (!strcmp(key, "ambient_occlusion"))  // (off / medium / high; 0.7.0's "on" was today's High)
+            g_settings.ambient_occlusion = !strcmp(val, "medium") ? 1 : !strcmp(val, "high") || !strcmp(val, "on") ? 2 : 0;
         else if (!strcmp(key, "draw_distance")) g_settings.draw_distance = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         // (on / off; "auto" and the older 0 / 1 were the earlier defaults - now on, as the default is)
         else if (!strcmp(key, "early_fences")) g_settings.early_fences = strcmp(val, "off") != 0;
@@ -503,6 +512,9 @@ void settings_save(void) {
             g_settings.motion_gyro_bias[2]);
     fprintf(f, "motion_shake_pad = %d\n", g_settings.motion_shake_pad);
     fprintf(f, "motion_shake_key = %d\n", g_settings.motion_shake_key);
+    fprintf(f, "spin_pad = %d\nspin_key = %d\nshot_pad = %d\nshot_key = %d\n", g_settings.spin_pad, g_settings.spin_key,
+            g_settings.shot_pad, g_settings.shot_key);
+    fprintf(f, "mouse_smoothing = %d\n", g_settings.mouse_smoothing);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);
     fprintf(f, "stick_deadzone_right = %d\n", g_settings.stick_deadzone_r);
     fprintf(f, "stick_range_left = %d\n", g_settings.stick_range_l);
@@ -543,8 +555,8 @@ void settings_save(void) {
     fprintf(f, "shader_preload = %d\n", g_settings.shader_preload);
     fprintf(f, "shader_known_only = %d\n", g_settings.shader_known_only);
     fprintf(f, "shadow_quality = %d\n", g_settings.shadow_quality);
-    fprintf(f, "bloom_quality = %s\n", g_settings.bloom_quality ? "high" : "switch");
-    fprintf(f, "ambient_occlusion = %s\n", g_settings.ambient_occlusion ? "on" : "off");
+    fprintf(f, "bloom_quality = %s\n", g_settings.bloom_quality == 2 ? "off" : g_settings.bloom_quality ? "high" : "switch");
+    fprintf(f, "ambient_occlusion = %s\n", g_settings.ambient_occlusion == 2 ? "high" : g_settings.ambient_occlusion ? "medium" : "off");
     fprintf(f, "draw_distance = %d\n", g_settings.draw_distance);
     fprintf(f, "texture_detail = %d\n", g_settings.texture_detail);
     fprintf(f, "early_fences = %s\n", g_settings.early_fences ? "on" : "off");

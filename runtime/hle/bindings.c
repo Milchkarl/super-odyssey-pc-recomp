@@ -7,6 +7,7 @@
 
 #include "../hle.h"
 #include "../input_bind.h"
+#include "../settings.h"
 
 _Static_assert(PADB_LTRIGGER == SDL_GAMEPAD_BUTTON_COUNT, "trigger pseudo-buttons follow SDL's buttons");
 
@@ -127,8 +128,38 @@ static void result(int kind, int dev, int slot, int other) {
     res_serial++;
 }
 
+// ------------------------------------------------------------------ extra actions (shake, spin throw, screenshot)
+int *bind_action_pad(int act) {
+    return act == BIND_ACT_SHAKE ? &g_settings.motion_shake_pad : act == BIND_ACT_SPIN ? &g_settings.spin_pad
+         : act == BIND_ACT_SHOT ? &g_settings.shot_pad : NULL;
+}
+int *bind_action_key(int act) {
+    return act == BIND_ACT_SHAKE ? &g_settings.motion_shake_key : act == BIND_ACT_SPIN ? &g_settings.spin_key
+         : act == BIND_ACT_SHOT ? &g_settings.shot_key : NULL;
+}
+const char *bind_action_name(int act) {
+    return act == BIND_ACT_SHAKE ? "Shake" : act == BIND_ACT_SPIN ? "Spin throw" : act == BIND_ACT_SHOT ? "Screenshot" : "?";
+}
+bool bind_action_owns_pad(int host) {
+    for (int a = 0; a < BIND_ACT_COUNT; a++) if (host >= 0 && *bind_action_pad(a) == host) return true;
+    return false;
+}
+bool bind_action_owns_key(int code) {
+    for (int a = 0; a < BIND_ACT_COUNT; a++) if (code > 0 && *bind_action_key(a) == code) return true;
+    return false;
+}
+static void assign_action(bool pad, int act, int host) {
+    for (int a = 0; a < BIND_ACT_COUNT; a++)  // (one action per button / key)
+        if (a != act && host > (pad ? -1 : 0) && *(pad ? bind_action_pad(a) : bind_action_key(a)) == host)
+            *(pad ? bind_action_pad(a) : bind_action_key(a)) = pad ? -1 : 0;
+    *(pad ? bind_action_pad(act) : bind_action_key(act)) = host;
+    LOG("[input] %s %s -> %s\n", bind_action_name(act), pad ? "button" : "key",
+        pad ? (host >= 0 && host < PADB_HOST_COUNT ? k_pad_ini[host] : "none") : bind_key_label(host));
+    result(1, pad ? BIND_DEV_ACT_PAD : BIND_DEV_ACT_KEY, act, -1);
+}
+
 void bind_capture_begin(int dev, int slot) {
-    if (slot < 0 || slot >= (dev == BIND_DEV_PAD ? BIND_PAD_COUNT : BIND_KEY_COUNT)) return;
+    if (slot < 0 || slot >= (dev >= BIND_DEV_ACT_PAD ? BIND_ACT_COUNT : dev == BIND_DEV_PAD ? BIND_PAD_COUNT : BIND_KEY_COUNT)) return;
     cap_deadline = SDL_GetTicks() + BIND_CAPTURE_MS;
     cap_slot = slot;
     cap_dev = dev;
@@ -174,6 +205,44 @@ static void assign(int dev, int slot, int host) {
 bool bind_capture_event(const SDL_Event *e) {
     int dev = cap_dev;
     if (dev < 0) return false;
+    if (dev >= BIND_DEV_ACT_PAD) {  // an extra action: a controller button or a key / mouse button, whichever comes
+        int act = cap_slot;
+        switch (e->type) {
+        case SDL_EVENT_KEY_DOWN:
+            if (e->key.repeat) return true;
+            if (e->key.scancode == SDL_SCANCODE_ESCAPE) { bind_capture_cancel(); return true; }
+            if (e->key.scancode == SDL_SCANCODE_DELETE || e->key.scancode == SDL_SCANCODE_BACKSPACE) {  // (clear it)
+                cap_dev = -1;
+                assign_action(dev == BIND_DEV_ACT_PAD, act, dev == BIND_DEV_ACT_PAD ? -1 : 0);
+                return true;
+            }
+            if (e->key.scancode == SDL_SCANCODE_F1 || e->key.scancode >= SDL_SCANCODE_COUNT) return true;
+            cap_dev = -1;
+            assign_action(false, act, e->key.scancode);
+            return true;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (e->button.button < SDL_BUTTON_LEFT || e->button.button > SDL_BUTTON_X2) return true;
+            cap_dev = -1;
+            assign_action(false, act, BIND_MOUSE_LEFT + e->button.button - SDL_BUTTON_LEFT);
+            return true;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            if (e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE || e->gbutton.button >= SDL_GAMEPAD_BUTTON_COUNT) return true;
+            cap_dev = -1;
+            assign_action(true, act, e->gbutton.button);
+            return true;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (e->gaxis.value > 16000 && (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e->gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+                cap_dev = -1;
+                assign_action(true, act, e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? PADB_LTRIGGER : PADB_RTRIGGER);
+            }
+            return true;
+        case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT: case SDL_EVENT_MOUSE_BUTTON_UP: case SDL_EVENT_MOUSE_WHEEL:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            return true;
+        default:
+            return false;
+        }
+    }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
         if (e->key.repeat) return true;

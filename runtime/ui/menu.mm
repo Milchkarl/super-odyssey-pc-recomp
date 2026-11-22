@@ -30,6 +30,7 @@
 #include "imgui_impl_vulkan.h"
 extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.cpp
 #endif
+extern "C" void controls_actions_draw(void);   // runtime/ui/controls_ui.mm: shake, spin throw, screenshot bindings
 
 extern "C" {
 #include "../hle.h"
@@ -1318,22 +1319,23 @@ static void tab_graphics(void) {
                    "Switch. Applies from the next area loaded.", false);
     }
     {
-        static const char *bq[] = {"Switch", "High"};
-        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 2, 0,
+        static const char *bq[] = {"Switch", "High", "Off"};
+        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 3, 0,
                    "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
                    "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
                    "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
                    "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
                    "stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon "
                    "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
-                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as "
-                   "on the Switch. Changes at once.", false);
-        static const char *ao[] = {"Off", "On"};
-        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 2, 0,
+                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Off: no glow "
+                   "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false);
+        static const char *ao[] = {"Off", "Medium", "High"};
+        opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 0,
                    "Darkens the places light reaches less: the corners between steps and walls, the ground under "
                    "Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch "
-                   "version: an addition (GTAO, worked out from the scene's depth each frame). Costs GPU time: about "
-                   "1 ms a frame at 1440p and 2.5 ms at 4K on a fast graphics card, less with an Upscale method. "
+                   "version: an addition (GTAO, worked out from the scene's depth each frame). High: at full "
+                   "resolution, about 1 ms a frame at 1440p on a fast graphics card. Medium: worked out at half the "
+                   "resolution each way, a little softer, about a quarter of the cost. Less with an Upscale method. "
                    "Off: as on the Switch. Changes at once.", false);
         static const char *dd[] = {"Switch", "High", "Very high"};
         opt_choice("Draw distance", &g_settings.draw_distance, dd, 3, 0,
@@ -1977,24 +1979,12 @@ static void tab_about(void) {
              "Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) "
              "and saved. Use it if the game sees motion while the controller lies still.");
     }
-    {   // the shake button / key (runtime/hle/input.c hid_sixaxis_states)
-        static const int pads[] = {-1, 7, 8, 16, 17, 18, 19, 20, 15};  // (PADB values: none, L3, R3, paddles, touchpad, misc)
-        static const char *const pnames[] = {"None", "Left stick press", "Right stick press", "Right paddle 1",
-                                             "Left paddle 1", "Right paddle 2", "Left paddle 2", "Touchpad", "Share / Capture"};
-        int pi = 0;
-        for (int k = 0; k < 9; k++) if (pads[k] == g_settings.motion_shake_pad) pi = k;
-        if (choice("Shake button", &pi, pnames, 9)) g_settings.motion_shake_pad = pads[pi];
-        static const int keys[] = {0, BIND_MOUSE_MIDDLE, BIND_MOUSE_X1, BIND_MOUSE_X2, SDL_SCANCODE_LCTRL, SDL_SCANCODE_LSHIFT,
-                                   SDL_SCANCODE_R, SDL_SCANCODE_TAB, SDL_SCANCODE_V};
-        static const char *const knames[] = {"None", "Middle mouse button", "Mouse button 4", "Mouse button 5",
-                                             "Left Ctrl", "Left Shift", "R", "Tab", "V"};
-        int ki = 0;
-        for (int k = 0; k < 9; k++) if (keys[k] == g_settings.motion_shake_key) ki = k;
-        if (choice("Shake key", &ki, knames, 9)) g_settings.motion_shake_key = keys[ki];
-    }
-    hint("Shake without moving the controller: while this button or key is held, the game sees the controller shaken - "
-         "the motion cap throw (homing at a target), spins and shake moves. Works with Motion controls off and on "
-         "controllers or keyboards without motion sensors. If a key is also bound to a game button, it does both.");
+    controls_actions_draw();  // shake, spin throw, screenshot: any button and any key (controls_ui.mm, hle/bindings.c)
+    hint("Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins "
+         "and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. "
+         "Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then "
+         "press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was "
+         "bound to.");
     toggle("Vibration", &g_settings.rumble);
     {
         static const int pct[] = {25, 50, 75, 100};
@@ -2041,6 +2031,9 @@ static void tab_about(void) {
     camera_speed("Mouse vertical speed", &g_settings.mouse_sensitivity_y);
     hint("Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a "
          "stick (the usual follow camera; the other camera kinds take the mouse as a stick).");
+    slider("Mouse smoothing", &g_settings.mouse_smoothing, 0, 90, 10, "%d%%");
+    hint("Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still "
+         "turns as far in total, slightly later. 0%: raw, as the mouse moves.");
     toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
     toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
     hint("Moving the mouse up turns the camera down instead.");

@@ -10,6 +10,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "../hle.h"
 #include "../nvn/nvn.h"
@@ -36,6 +37,8 @@ static _Thread_local bool tick_input_active;
 static _Atomic int32_t key_lx, key_ly, key_rx, key_ry, pad_lx, pad_ly, pad_rx, pad_ry;
 static uint8_t keys_down[BIND_KEY_CODE_COUNT];  // (keys, then the mouse buttons: input_bind.h)
 static _Atomic bool shake_pad_down;  // (the shake button: event thread -> hid_sixaxis_states)
+static _Atomic bool spin_pad_pressed, shot_pad_pressed;  // (the spin throw's / screenshot's button pressed: -> fill_state)
+static _Atomic bool spin_key_pressed, shot_key_pressed;  // (their keys / mouse buttons)
 static SDL_Gamepad *pad;
 // ---- The Steam Deck's gyro with Steam Input on (#68, #89, #100). Steam gives the game its virtual controller
 // (0x28de/0x11ff: buttons and sticks as the player set them up in Steam) and hides the Deck's own controller
@@ -150,17 +153,25 @@ static void latch_presses(uint64_t buttons) {
 static uint64_t menu_mouse_bits(void);  // (the mouse in the game's menus: below)
 static bool menu_mouse_owns(int sc);    // a mouse button held as a menu button (its own binding then sleeps)
 static int bound_key(int sc) { return held_key(sc) && !menu_mouse_owns(sc); }
+// (a key given to an extra action - shake, spin throw, screenshot - doesn't also press the game input it is bound to)
+static int game_key(int sc) { return bound_key(sc) && !bind_action_owns_key(sc); }
 
 // Through the bindings (runtime/hle/bindings.c: g_bind_key), read on every key event, so a rebind applies at once.
 static void recompute_keyboard(void) {
     uint64_t b = menu_mouse_bits();
     for (int i = 0; i < BIND_PAD_COUNT; i++)
-        if (bound_key(g_bind_key[i])) b |= 1ull << i;
+        if (game_key(g_bind_key[i])) b |= 1ull << i;
     latch_presses(b & ~atomic_exchange(&key_buttons, b));
-    key_lx = (bound_key(g_bind_key[BIND_LS_RIGHT]) - bound_key(g_bind_key[BIND_LS_LEFT])) * 32767;
-    key_ly = (bound_key(g_bind_key[BIND_LS_UP]) - bound_key(g_bind_key[BIND_LS_DOWN])) * 32767;
-    key_rx = (bound_key(g_bind_key[BIND_RS_RIGHT]) - bound_key(g_bind_key[BIND_RS_LEFT])) * 32767;
-    key_ry = (bound_key(g_bind_key[BIND_RS_UP]) - bound_key(g_bind_key[BIND_RS_DOWN])) * 32767;
+    key_lx = (game_key(g_bind_key[BIND_LS_RIGHT]) - game_key(g_bind_key[BIND_LS_LEFT])) * 32767;
+    key_ly = (game_key(g_bind_key[BIND_LS_UP]) - game_key(g_bind_key[BIND_LS_DOWN])) * 32767;
+    key_rx = (game_key(g_bind_key[BIND_RS_RIGHT]) - game_key(g_bind_key[BIND_RS_LEFT])) * 32767;
+    key_ry = (game_key(g_bind_key[BIND_RS_UP]) - game_key(g_bind_key[BIND_RS_DOWN])) * 32767;
+    // the spin throw's and screenshot's keys: their presses (taken by fill_state)
+    static bool spin_was, shot_was;
+    bool spin = bound_key(g_settings.spin_key), shot = bound_key(g_settings.shot_key);
+    if (spin && !spin_was) atomic_store(&spin_key_pressed, true);
+    if (shot && !shot_was) atomic_store(&shot_key_pressed, true);
+    spin_was = spin, shot_was = shot;
 }
 
 // The Controls tab's stick deadzone and range (percent, each stick: input_bind.h stick_shape). The SDL gamepad is read
@@ -195,7 +206,8 @@ static void recompute_pad(void) {
     }
     uint64_t b = 0;
     for (int i = 0; i < BIND_PAD_COUNT; i++)
-        if (g_bind_pad[i] >= 0 && g_bind_pad[i] < PADB_HOST_COUNT && (host >> g_bind_pad[i] & 1)) b |= 1ull << i;
+        if (g_bind_pad[i] >= 0 && g_bind_pad[i] < PADB_HOST_COUNT && (host >> g_bind_pad[i] & 1) &&
+            !bind_action_owns_pad(g_bind_pad[i])) b |= 1ull << i;  // (an extra action's button isn't a game button)
     latch_presses(b & ~atomic_exchange(&pad_buttons, b));
     if (!pad || host_test) { pad_lx = test_lx, pad_ly = test_ly, pad_rx = pad_ry = 0; return; }
     int32_t x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX), y = -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
@@ -248,7 +260,7 @@ static _Atomic uint64_t window_focus_ns;     // when the window last came to the
 static bool mouse_code_bound(int code) {
     for (int i = 0; i < BIND_KEY_COUNT; i++)
         if (g_bind_key[i] == code) return true;
-    return g_settings.motion_shake_key == code;
+    return bind_action_owns_key(code);
 }
 static bool in_game_menu(void) {
     extern bool menu_input_captured(void);
@@ -428,7 +440,15 @@ bool input_mouse_direct(float *dh, float *dv) {
     last = now;
     float cx = atomic_exchange(&mouse_acc_x, 0) / 16.0f, cy = atomic_exchange(&mouse_acc_y, 0) / 16.0f;
     atomic_store(&g_mouse_direct_ns, now);
-    if (stale) return true;
+    // Mouse smoothing (Controls, #123): each update's movement blended with the ones before (an exponential average:
+    // the camera still turns as far in total, the steps between updates are evened out, later by a few updates)
+    static float sx, sy;
+    if (stale) { sx = sy = 0; return true; }
+    float sm = g_settings.mouse_smoothing / 100.0f;
+    if (sm > 0) {
+        sx = sx * sm + cx * (1 - sm), sy = sy * sm + cy * (1 - sm);
+        cx = sx, cy = sy;
+    } else sx = sy = 0;
     float k = MOUSE_DEG_PER_COUNT * g_settings.mouse_sensitivity / 100.0f;
     *dh = -cx * k * (g_settings.mouse_invert_x ? -1 : 1);  // (the game's angle grows to the left)
     *dv = cy * MOUSE_DEG_PER_COUNT * g_settings.mouse_sensitivity_y / 100.0f * (g_settings.mouse_invert_y ? -1 : 1);
@@ -1084,8 +1104,11 @@ void input_handle_event(const SDL_Event *e) {
         if (pad && SDL_GetGamepadID(pad) == e->gbutton.which) {
             uint64_t buttons = 0;
             for (int i = 0; i < BIND_PAD_COUNT; i++)
-                if (g_bind_pad[i] == e->gbutton.button) buttons |= 1ull << i;
+                if (g_bind_pad[i] == e->gbutton.button && !bind_action_owns_pad(e->gbutton.button)) buttons |= 1ull << i;
             latch_presses(buttons);
+            // (an extra action's button: its press, caught even if released before the game's next read)
+            if (e->gbutton.button == g_settings.spin_pad) atomic_store(&spin_pad_pressed, true);
+            if (e->gbutton.button == g_settings.shot_pad) atomic_store(&shot_pad_pressed, true);
         }
         // Fall through to refresh the live state and sticks.
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: case SDL_EVENT_GAMEPAD_BUTTON_UP:
@@ -1505,6 +1528,29 @@ static void ride_io(uint64_t *b, int32_t ax[4]) {
     memcpy(ax, recs[i].ax, sizeof recs[i].ax);
 }
 
+// Screenshot (Controls: "Screenshot"): the window's next picture (game, HUD and anything over it) saved as
+// screenshots/Super Odyssey <date> <time>.png in the game's folder. The present saves it (nvn/vulkan/device.c).
+void input_screenshot(void) {
+    extern char g_window_shot_request[256];
+    if (g_window_shot_request[0]) return;  // (one waiting already)
+    SDL_CreateDirectory("screenshots");
+    time_t t = time(NULL);
+    struct tm tm;
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char path[256];
+    snprintf(path, sizeof path, "screenshots/Super Odyssey %04d-%02d-%02d %02d-%02d-%02d.png", tm.tm_year + 1900,
+             tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    for (int n = 2; n < 100 && SDL_GetPathInfo(path, NULL); n++)  // (two in one second)
+        snprintf(path, sizeof path, "screenshots/Super Odyssey %04d-%02d-%02d %02d-%02d-%02d (%d).png", tm.tm_year + 1900,
+                 tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, n);
+    snprintf(g_window_shot_request, sizeof g_window_shot_request, "%s", path);
+    LOG("[input] screenshot: %s\n", path);
+}
+
 // NpadFullKeyState / NpadHandheldState / NpadJoy*State share this layout (0x28 bytes):
 // {int64 sampling, u64 buttons, AnalogStick L {x,y}, AnalogStick R {x,y}, u32 attributes}
 static void fill_state(Cpu *c) {
@@ -1533,7 +1579,28 @@ static void fill_state(Cpu *c) {
         if (g_inject_plus > 0) { until = renderer_present_count() + 10; g_inject_plus = 0; }
         if (renderer_present_count() < until) b |= 1ull << BTN_PLUS;
     }
+    // The spin throw (Controls: "Spin throw", #73): the left stick turned two full circles in 0.3 s and the throw (Y)
+    // pressed for its last part - the game's spin throw, for a keyboard, or a controller whose stick can't turn that fast.
+    // The screenshot (Controls: "Screenshot", #123): the window's next picture as a PNG.
+    // Counted in the game's own updates (odyssey_stage_ticks), not time: a slow frame rate must not skip steps.
+    bool spin_now = false;
+    float spin_angle = 0;
+    {
+        extern uint64_t odyssey_stage_ticks(void);
+        static uint64_t spin_at;  // (the update it started at, + 1)
+        uint64_t tick = odyssey_stage_ticks();
+        bool spin_press = atomic_exchange(&spin_pad_pressed, false) | atomic_exchange(&spin_key_pressed, false);
+        if (spin_press && !menu && (!spin_at || tick + 1 - spin_at > 24)) spin_at = tick + 1;
+        uint64_t dt = spin_at ? tick + 1 - spin_at : UINT64_MAX;
+        if (dt < 18 && !menu) {  // two full turns, 45 degrees an update, then two updates more
+            spin_now = true;
+            spin_angle = (float)dt * 0.78539816f;
+            if (dt >= 10) b |= 1ull << BTN_Y;
+        }
+        if (atomic_exchange(&shot_pad_pressed, false) | atomic_exchange(&shot_key_pressed, false)) input_screenshot();
+    }
     int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx) + script_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly) + script_ly);
+    if (spin_now) lx = (int32_t)(sinf(spin_angle) * 32767), ly = (int32_t)(cosf(spin_angle) * 32767);
     int32_t mrx = 0, mry = 0;
     mouse_stick(&mrx, &mry);  // (sampled even under a menu: its movement there is dropped, not saved up)
     {   // ODYSSEY_LOG_MOUSE=1: the mouse's right stick as the game reads it

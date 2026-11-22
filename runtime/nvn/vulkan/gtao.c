@@ -43,18 +43,22 @@ static float envf(const char *name, float def) {
     return e && *e ? (float)atof(e) : def;
 }
 
-bool vk_gtao_enabled(void) {
+// 0 off, 1 Medium (step 1 at half the size each way: about a quarter of the cost), 2 High (full size).
+// ODYSSEY_GTAO=0/1/2 overrides the setting; ODYSSEY_GTAO_FLIP_AT=<frame>: off <-> High from that frame on.
+static int gtao_level(void) {
     static int env = -2;
     static long flip_at = -1;
     if (env == -2) {
         env = getenv("ODYSSEY_GTAO") ? atoi(getenv("ODYSSEY_GTAO")) : -1;
         flip_at = getenv("ODYSSEY_GTAO_FLIP_AT") ? atol(getenv("ODYSSEY_GTAO_FLIP_AT")) : 0;
     }
-    bool on = env >= 0 ? env > 0 : g_settings.ambient_occlusion > 0;
+    int q = env >= 0 ? env : g_settings.ambient_occlusion;
     extern uint64_t renderer_present_count(void);
-    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) on = !on;
-    return on && !ao.failed;
+    if (flip_at > 0 && renderer_present_count() >= (uint64_t)flip_at) q = q ? 0 : 2;
+    return q < 0 ? 0 : q > 2 ? 2 : q;
 }
+
+bool vk_gtao_enabled(void) { return gtao_level() > 0 && !ao.failed; }
 
 void vk_gtao_set_projection(const float projection[16]) {
     memcpy(ao.proj, projection, sizeof ao.proj);
@@ -91,10 +95,12 @@ static const char gtao_cs[] =
     "    return x >= 0.0 ? r : PI - r;\n"
     "}\n"
     "void main() {\n"
-    "    ivec2 p = ivec2(gl_GlobalInvocationID.xy), size = imageSize(aoOut);\n"
-    "    if (any(greaterThanEqual(p, size))) return;\n"
+    "    ivec2 o = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (any(greaterThanEqual(o, imageSize(aoOut)))) return;\n"
+    // (Medium: one result per 2 x 2 depth pixels - opt.y the step)
+    "    ivec2 size = textureSize(depthTex, 0), p = min(o * int(pc.opt.y), size - 1);\n"
     "    float d = texelFetch(depthTex, p, 0).r;\n"
-    "    if (d >= 0.999999) { imageStore(aoOut, p, vec4(1, 0, 0, 0)); return; }\n"  // (the sky: g 0)
+    "    if (d >= 0.999999) { imageStore(aoOut, o, vec4(1, 0, 0, 0)); return; }\n"  // (the sky: g 0)
     "    vec2 px = 1.0 / vec2(size), uv = (vec2(p) + 0.5) * px;\n"
     "    vec3 P = viewPos(uv, dist(d));\n"
     // the normal from the nearer neighbours (no G-buffer: its encoding differs between the game's shaders)
@@ -106,7 +112,7 @@ static const char gtao_cs[] =
     "    if (dot(N, V) < 0.0) N = -N;\n"
     "    float radius = pc.zp.z;\n"
     "    float screenR = radius * abs(pc.proj.y) * 0.5 * float(size.y) / P.z;\n"  // (pixels)
-    "    if (screenR < 1.0) { imageStore(aoOut, p, vec4(1, P.z, 0, 0)); return; }\n"
+    "    if (screenR < 1.0) { imageStore(aoOut, o, vec4(1, P.z, 0, 0)); return; }\n"
     "    screenR = min(screenR, pc.misc.z);\n"
     "    float falloffRange = pc.zp.w * radius, falloffFrom = radius - falloffRange;\n"
     "    float falloffMul = -1.0 / falloffRange, falloffAdd = falloffFrom / falloffRange + 1.0;\n"
@@ -150,7 +156,7 @@ static const char gtao_cs[] =
     "        vis += projLen * (a0 + a1);\n"
     "    }\n"
     "    vis = clamp(pow(vis / float(SLICES), pc.misc.w), 0.03, 1.0);\n"
-    "    imageStore(aoOut, p, vec4(vis, P.z, 0, 0));\n"
+    "    imageStore(aoOut, o, vec4(vis, P.z, 0, 0));\n"
     "}\n";
 
 static const char apply_vs[] =
@@ -160,24 +166,31 @@ static const char apply_vs[] =
     "    gl_Position = vec4(q * 2.0 - 1.0, 0.0, 1.0);\n"
     "}\n";
 
-// Step 2. strength / fade: push constants (x strength, y fade start, z fade end, w debug).
+// Step 2. Push constants a: x strength, y fade start, z fade end, w debug; b: p10 p11 (this pixel's distance from the
+// depth), the step of step 1's image (1 High, 2 Medium: then sized up here), the depth convention. Each pixel averages
+// the results around it whose distance is close to its own (High: 5 x 5, Medium: 3 x 3 of the half-size image).
 static const char apply_fs[] =
     "#version 450\n"
     "layout(binding=0) uniform sampler2D aoTex;\n"
-    "layout(push_constant) uniform P { vec4 a; } pc;\n"
+    "layout(binding=1) uniform sampler2D depthTex;\n"
+    "layout(push_constant) uniform P { vec4 a; vec4 b; } pc;\n"
     "layout(location=0) out vec4 o;\n"
     "void main() {\n"
     "    ivec2 p = ivec2(gl_FragCoord.xy), s = textureSize(aoTex, 0) - 1;\n"
-    "    vec2 c = texelFetch(aoTex, p, 0).rg;\n"
-    "    if (c.g <= 0.0) { o = vec4(1); return; }\n"
+    "    float d = texelFetch(depthTex, p, 0).r;\n"
+    "    if (d >= 0.999999) { o = vec4(1); return; }\n"
+    "    float z = abs(pc.b.y / ((pc.b.w > 0.5 ? d : d * 2.0 - 1.0) + pc.b.x));\n"
+    "    int st = int(pc.b.z), r = st > 1 ? 1 : 2;\n"
+    "    ivec2 c = p / st;\n"
     "    float sum = 0.0, wsum = 0.0;\n"
-    "    for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) {\n"
-    "        vec2 t = texelFetch(aoTex, clamp(p + ivec2(x, y), ivec2(0), s), 0).rg;\n"
-    "        float w = t.g > 0.0 ? max(0.0, 1.0 - abs(t.g - c.g) / (c.g * 0.04 + 1.0)) : 0.0;\n"
+    "    for (int y = -r; y <= r; y++) for (int x = -r; x <= r; x++) {\n"
+    "        vec2 t = texelFetch(aoTex, clamp(c + ivec2(x, y), ivec2(0), s), 0).rg;\n"
+    "        float w = t.g > 0.0 ? max(0.0, 1.0 - abs(t.g - z) / (z * 0.04 + 1.0)) : 0.0;\n"
     "        sum += t.r * w; wsum += w;\n"
     "    }\n"
-    "    float vis = wsum > 0.0 ? sum / wsum : c.r;\n"
-    "    float fade = 1.0 - smoothstep(pc.a.y, pc.a.z, c.g);\n"
+    "    if (wsum <= 0.0) { o = vec4(1); return; }\n"
+    "    float vis = sum / wsum;\n"
+    "    float fade = 1.0 - smoothstep(pc.a.y, pc.a.z, z);\n"
     "    float k = mix(1.0, vis, clamp(pc.a.x * fade, 0.0, 1.0));\n"
     "    o = vec4(k, k, k, 1);\n"
     "}\n";
@@ -202,10 +215,12 @@ static bool make_pipelines(void) {
     if (r == VK_SUCCESS) r = vkCreateComputePipelines(g_vk.dev, VK_NULL_HANDLE, 1, &pi, NULL, &ao.cpipe);
     vkDestroyShaderModule(g_vk.dev, m, NULL);
     if (r != VK_SUCCESS) { ao.cpipe = VK_NULL_HANDLE; fail("compute pipeline", r); return false; }
-    VkDescriptorSetLayoutBinding gb = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
-    ci.bindingCount = 1, ci.pBindings = &gb;
+    VkDescriptorSetLayoutBinding gb[] = {
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
+    ci.bindingCount = 2, ci.pBindings = gb;
     r = vkCreateDescriptorSetLayout(g_vk.dev, &ci, NULL, &ao.gset);
-    VkPushConstantRange gpush = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
+    VkPushConstantRange gpush = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};
     li.pSetLayouts = &ao.gset, li.pPushConstantRanges = &gpush;
     if (r == VK_SUCCESS) r = vkCreatePipelineLayout(g_vk.dev, &li, NULL, &ao.glayout);
     if (r != VK_SUCCESS) { fail("draw layout", r); return false; }
@@ -319,7 +334,9 @@ void vk_gtao_apply(NvnTexture *color_t, NvnTexture *depth_t, uint64_t key) {
     ao.done_frame = key + 1;
     vk_end_pass();
     VkCommandBuffer cb = vk_cmd();
-    if (!make_pipelines() || !make_image(cb, depth->width, depth->height)) return;
+    int step = gtao_level() == 1 ? 2 : 1;
+    uint32_t aw = (depth->width + step - 1) / step, ah = (depth->height + step - 1) / step;
+    if (!make_pipelines() || !make_image(cb, aw, ah)) return;
     static int debug = -1;
     static float radius, strength, power, fade, zmode;
     if (debug < 0) {
@@ -352,17 +369,20 @@ void vk_gtao_apply(NvnTexture *color_t, NvnTexture *depth_t, uint64_t key) {
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, ao.clayout, 0, 1, &set, 0, NULL);
     float maxr = 0.12f * (float)depth->height;  // (pixels: wide reaches cost cache misses and add little)
     float c[16] = {pj[0], pj[5], pj[2], pj[6], pj[10], pj[11], radius, 0.6f,
-                   (float)depth->width, (float)depth->height, maxr, power, zmode};
+                   (float)depth->width, (float)depth->height, maxr, power, zmode, (float)step};
     vkCmdPushConstants(cb, ao.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof c, c);
-    vkCmdDispatch(cb, (depth->width + 7) / 8, (depth->height + 7) / 8, 1);
+    vkCmdDispatch(cb, (aw + 7) / 8, (ah + 7) / 8, 1);
     vk_full_barrier(cb);
 
     // step 2
     VkDescriptorSet gset = vk_alloc_set(ao.gset);
     VkDescriptorImageInfo ai = {vk_default_sampler(false), ao.ao_view, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet gw = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = gset, .dstBinding = 0,
-        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ai};
-    vkUpdateDescriptorSets(g_vk.dev, 1, &gw, 0, NULL);
+    VkWriteDescriptorSet gw[] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = gset, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ai},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = gset, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &zi}};
+    vkUpdateDescriptorSets(g_vk.dev, 2, gw, 0, NULL);
     VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = cview,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, {color->width, color->height}},
@@ -374,7 +394,7 @@ void vk_gtao_apply(NvnTexture *color_t, NvnTexture *depth_t, uint64_t key) {
     vkCmdSetScissor(cb, 0, 1, &sc);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ao.glayout, 0, 1, &gset, 0, NULL);
-    float a[4] = {strength, fade, fade * 2.0f, (float)debug};
+    float a[8] = {strength, fade, fade * 2.0f, (float)debug, pj[10], pj[11], (float)step, zmode};
     vkCmdPushConstants(cb, ao.glayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof a, a);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRendering(cb);
