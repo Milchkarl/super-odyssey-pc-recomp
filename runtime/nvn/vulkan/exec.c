@@ -6240,7 +6240,7 @@ static bool is_attachment(NvnTexture *t) {
     return false;
 }
 
-static TexBackend *snapshot_image(NvnTexture *t, TexBackend *src) {
+static TexBackend *snapshot_image(NvnTexture *t, TexBackend *src, uint32_t levels) {
     Snap *s = NULL;
     for (int i = 0; i < nsnaps; i++) if (snaps[i].key == t) s = &snaps[i];
     if (!s) {
@@ -6248,7 +6248,7 @@ static TexBackend *snapshot_image(NvnTexture *t, TexBackend *src) {
         s->key = t;
     }
     TexBackend *d = &s->copy;
-    if (d->image && (d->width != src->width || d->height != src->height || d->format != src->format)) {
+    if (d->image && (d->width != src->width || d->height != src->height || d->format != src->format || d->levels != levels)) {
         vk_views_forget(d);  // (resolution change)
         vk_defer_image(d->image, d->mem);
         d->image = VK_NULL_HANDLE;
@@ -6256,12 +6256,12 @@ static TexBackend *snapshot_image(NvnTexture *t, TexBackend *src) {
     }
     if (!d->image) {
         VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = src->format,
-                                .extent = {src->width, src->height, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                .extent = {src->width, src->height, 1}, .mipLevels = levels, .arrayLayers = 1,
                                 .samples = (VkSampleCountFlagBits)src->samples, .tiling = VK_IMAGE_TILING_OPTIMAL,
                                 .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
         VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
         VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &d->image, &d->mem, NULL));
-        d->format = src->format; d->width = src->width; d->height = src->height; d->depth = 1; d->layers = 1; d->levels = 1;
+        d->format = src->format; d->width = src->width; d->height = src->height; d->depth = 1; d->layers = 1; d->levels = levels;
         d->samples = src->samples; d->aspect = src->aspect; d->base_type = VK_IMAGE_VIEW_TYPE_2D;
         vk_image_init_layout(vk_cmd(), d->image, d->aspect);
     }
@@ -6567,7 +6567,23 @@ static void resolve_feedback(Prog *pr) {
                     NvnTextureView v;
                     if (en->has_view) v = en->view; else memset(&v, 0, sizeof v);
                     uint32_t lv0 = (v.setmask & 1) ? v.base_level : 0;
-                    if (lv0 < rl) {
+                    // (the way up a chain: level N written, the sampler clamped to levels past it - agl's glare adds
+                    // level N + 1 into level N. Levels 0 .. N - 1 would clamp that read to level N - 1, a larger and
+                    // sharper level: the glow's widest levels never reached it, and its edges showed as steps around
+                    // the sun, clouds and bright objects. Such a draw gets the copy below, every level in its place.)
+                    bool reads_past = false;
+                    {
+                        int slot = ((int)infos[sg]->tex[i].handle_offset - 0x20) / 8;
+                        uint64_t h = slot >= 0 && slot < 32 ? st.tex[sg][slot] : 0;
+                        uint32_t tsc = (uint32_t)(h >> 20) & 0xFFF;
+                        if (h && st.spool && tsc < (uint32_t)st.spool->count) {
+                            const NvnSamplerDesc *sd = &((const NvnSamplerDesc *)st.spool->entries)[tsc];
+                            static int past = -1;
+                            if (past < 0) { const char *e = getenv("ODYSSEY_FEEDBACK_ALL_LEVELS"); past = !e || atoi(e) != 0; }
+                            reads_past = past && !(v.setmask & 1) && sd->lod_min > (float)rl - 0.5f;
+                        }
+                    }
+                    if (lv0 < rl && !reads_past) {
                         // (arrival_barriers) the levels read were made visible by the chain's barrier and only passes
                         // into this level came after: none now, and none at the pass's start
                         bool plain = !pr->vi->uses_gmem_store && !pr->fi->uses_gmem_store && !pr->fi->nimages && !pr->vi->nimages;
@@ -6625,10 +6641,20 @@ static void resolve_feedback(Prog *pr) {
             for (int k = 0; k < nsnaps; k++) if (snaps[k].key == t && snaps[k].copy.image) existing = &snaps[k];
             VkImageAspectFlags sa = src->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : src->aspect;
             static const VkComponentMapping id = {0};
-            if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
+            // Every level of a 2D colour mip chain, each at its own level number: the game's glare chain (agl's 100x56
+            // target with 5 levels) adds level N + 1 into level N on the way up - written level N, sampled with the
+            // sampler clamped to level N + 1. A copy of level 0 alone made each step add the unblurred 100x56 image
+            // instead (the sampler's level clamped to the copy's one level): the glow around the sun, clouds and bright
+            // objects came out as stacked blocks instead of a smooth falloff. ODYSSEY_FEEDBACK_ALL_LEVELS=0: level 0 only.
+            static int all_levels = -1;
+            if (all_levels < 0) { const char *e = getenv("ODYSSEY_FEEDBACK_ALL_LEVELS"); all_levels = !e || atoi(e) != 0; }
+            uint32_t snap_levels = all_levels && src->levels > 1 && src->layers == 1 && src->samples <= 1 &&
+                                   src->base_type == VK_IMAGE_VIEW_TYPE_2D && !(src->aspect & ~VK_IMAGE_ASPECT_COLOR_BIT) &&
+                                   infos[sg]->tex[i].type == TEXTYPE_2D ? src->levels : 1;
+            if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing && existing->copy.levels == snap_levels) {
                 feedback_type[nfeedback] = TEXTYPE_2D;
                 feedback_tex[nfeedback] = t;
-                feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
+                feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, snap_levels, 0, 1, id, sa);
                 continue;
             }
             // (a snapshot is a 2D image: a draw that samples the texture as 3D or cube never binds it - see the texture
@@ -6658,13 +6684,18 @@ static void resolve_feedback(Prog *pr) {
             }
             if (ct_on()) LOG("[ct] snapshot %p %ux%u (was %s, si %d)\n", (void *)t, src->width, src->height, si >= 0 ? snap_why[si] : "new", si);
             vk_end_pass();
-            TexBackend *dst = snapshot_image(t, src);
+            TexBackend *dst = snapshot_image(t, src, snap_levels);
             VkCommandBuffer cb = vk_cmd();
             vk_full_barrier(cb);
             gp_mark(cb, "feedback snapshot %ux%u fmt %d", src->width, src->height, src->format);
-            VkImageCopy rg = {.srcSubresource = {src->aspect, 0, 0, 1}, .dstSubresource = {src->aspect, 0, 0, 1},
-                              .extent = {src->width, src->height, 1}};
-            vkCmdCopyImage(cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rg);
+            VkImageCopy rg[16];
+            uint32_t nrg = snap_levels < 16 ? snap_levels : 16;
+            for (uint32_t l = 0; l < nrg; l++) {
+                uint32_t w = src->width >> l, h = src->height >> l;
+                rg[l] = (VkImageCopy){.srcSubresource = {src->aspect, l, 0, 1}, .dstSubresource = {src->aspect, l, 0, 1},
+                                      .extent = {w ? w : 1, h ? h : 1, 1}};
+            }
+            vkCmdCopyImage(cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, nrg, rg);
             if (g_debug_frame && (src->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) {
                 static int nd;
                 char path[128];
@@ -6676,7 +6707,7 @@ static void resolve_feedback(Prog *pr) {
             }
             feedback_type[nfeedback] = TEXTYPE_2D;
             feedback_tex[nfeedback] = t;
-            feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
+            feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, nrg, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
             st.rt_dirty = true;
