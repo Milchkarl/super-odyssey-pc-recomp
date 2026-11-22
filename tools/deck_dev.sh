@@ -44,13 +44,14 @@ $SSH "$DECK" 'cd ~/sopr && bash tools/linux/dev_quick.sh > build/dev_quick.log 2
 if [ "$MODE" = bench ]; then
     NAME=${2:?bench name}
     ENVS=""
-    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE LAUNCH GS_SHOT SHOTS DATA; do
+    for v in FULL USER_INI HANDHELD EARLY NOGMEM HITCH_MS GATE_MS WARP INPUT SAMPLE_AT SAMPLE_FRAMES SHOT EXTRA_INI PRESENT IMAGES GAME_ENV SAVE LAUNCH GS_SHOT SHOTS DATA TMO; do
         [ -n "${!v:-}" ] && ENVS="$ENVS --setenv=$v=${!v}"
     done
+    WAITS=$(( (${TMO:-900} + 60) / 10 ))  # (TMO=<seconds>: the run's time limit, 900 by default; a game code rebuild needs ~2400)
     $SSH "$DECK" "systemctl --user reset-failed sopr-bench 2>/dev/null; systemd-run --user --collect --unit=sopr-bench \
         --setenv=OUT=/home/deck/sopr/bench/$NAME --setenv=APP=/home/deck/sopr/build/linux/x86_64/AppDir/AppRun $ENVS \
         /home/deck/sopr/tools/linux/deck/deck-bench.sh >/dev/null && echo started"
-    for i in $(seq 1 90); do
+    for i in $(seq 1 $WAITS); do
         sleep 10
         [ "$($SSH "$DECK" "grep -c DONE ~/sopr/bench/$NAME/run.log 2>/dev/null" || true)" = 1 ] && break
     done

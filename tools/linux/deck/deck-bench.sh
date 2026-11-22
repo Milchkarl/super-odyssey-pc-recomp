@@ -31,6 +31,7 @@ if [ -d "$SAVE" ]; then cp -a "$SAVE/." "$OUT/save/"; else tar -xf "$SAVE" -C "$
 [ -n "$USER_INI" ] && cp $USER_INI $OUT/set.ini || printf "frame_rate = 60
 %b" "${EXTRA_INI:-}" > "$OUT/set.ini"
 # (scripted runs never vibrate the Deck: their scripted inputs set off the rumble - owner 2026-11-16)
+[ -n "$(tail -c1 "$OUT/set.ini")" ] && echo >> "$OUT/set.ini"  # (an EXTRA_INI without a final newline: vibration's line on its own)
 sed -i "/^vibration *=/d" "$OUT/set.ini"; echo "vibration = 0" >> "$OUT/set.ini"
 rm -f "$F/build/samples.txt" "$F/build/stacks.txt" "$F"/build/shot_*.png
 D=$(dirname "$(readlink -f "$0")")
@@ -51,13 +52,14 @@ PY
     rm -f "$OUT/game-exited" "$OUT/run.log"
     { echo "OUT=$OUT"; export -p | sed -n 's/^declare -x \(ODYSSEY_[A-Z0-9_]*=\)/export \1/p' | grep -v '^export ODYSSEY_WINDOW='; } > /home/deck/sopr/bench/next-run.env
     [ "$FULL" = 1 ] || echo "export ODYSSEY_WINDOW=1280x800" >> /home/deck/sopr/bench/next-run.env
+    [ -n "${TMO:-}" ] && echo "TMO=$TMO" >> /home/deck/sopr/bench/next-run.env  # (the run's time limit, play-dev.sh)
     steam -ifrunning "steam://rungameid/$ID" > /dev/null 2>&1 &
     # GS_SHOT=<seconds>: also what gamescope shows (the composited screen, as the owner sees it) that long after start
     if [ -n "${GS_SHOT:-}" ]; then
         ( for i in $(seq 1 120); do [ -f "$OUT/run.log" ] && break; sleep 1; done; sleep "$GS_SHOT"
           gamescopectl screenshot "$OUT/gamescope.png" > /dev/null 2>&1 ) &
     fi
-    for i in $(seq 1 960); do [ -f "$OUT/game-exited" ] && break; sleep 1; done
+    for i in $(seq 1 $(( ${TMO:-900} + 60 ))); do [ -f "$OUT/game-exited" ] && break; sleep 1; done
     [ -f "$OUT/game-exited" ] || echo "the game did not finish (or never started) through Steam" >> "$OUT/run.log"
 else
     ("$D/deck-threads.sh" $OUT/threads.log &) ; ("$D/deck-gpu.sh" $OUT/gpu.log &) ; timeout ${TMO:-900} "$APP" > "$OUT/run.log" 2>&1
