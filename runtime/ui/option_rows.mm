@@ -33,6 +33,7 @@ static bool g_held;  // the last row's left / right has been held a while (stepp
 void opt_indent(int step) { g_indent = g_indent + step < 0 ? 0 : g_indent + step; }
 
 static int g_lr_block_until = -1;  // (frame count) left / right don't change a row until then
+static bool g_last_row_focused;  // (row) the row drawn last has the cursor: after a page's rows, its last one
 void opt_begin(const char *id, float scale) {
     g_scale = scale;
     g_take_first = g_focus_req;
@@ -107,6 +108,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     bool off = g_next_disabled;  // (greyed out: still selectable, so its description shows, but it can't change)
     g_next_disabled = false;
     bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
+    g_last_row_focused = ImGui::IsItemFocused();  // (opt_end: the page's last row - Down stops there)
     bool blocked = ImGui::GetFrameCount() <= g_lr_block_until;
     int step = clicked && !off && !blocked ? 2 : 0;
     g_held = false;
@@ -346,6 +348,14 @@ bool opt_text(const char *label, char *buf, size_t cap, const char *hint, const 
 }
 
 void opt_end(void) {
+    // Down on a page's last row stays there. With nothing below it, ImGui's navigation took the nearest item in any
+    // direction - the first category tab - and held Down at the end of Performance switched to Display (owner's
+    // recording, 2026-11-22)
+    if (g_last_row_focused && ImGui::GetCurrentContext()->NavCursorVisible &&
+        (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown) ||
+         ImGui::IsKeyPressed(ImGuiKey_DownArrow)))
+        ImGui::NavMoveRequestCancel();
+    g_last_row_focused = false;
     ImGui::PopStyleVar();
     if (const char *t = getenv("ODYSSEY_OPT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(t));  // (test)
     ImGui::EndChild();
