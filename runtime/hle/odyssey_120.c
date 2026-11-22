@@ -264,6 +264,7 @@ static void subjective_start(Cpu *c) {
 static GuestFn original_follow_update;
 static uint32_t follow_speed_off, follow_angle_off, follow_vholder_off;  // (1.0.0: 0x1e4 / 0x1b8 / 0x150; 1.4.1: +8)
 extern bool input_mouse_direct(float *dh, float *dv);
+static float follow_mouse_dh, follow_mouse_dv;  // what the mouse turned since follow_movement last looked
 static void follow_update(Cpu *c) {
     uint64_t self = c->x[0];
     float dh = 0, dv = 0;
@@ -277,8 +278,10 @@ static void follow_update(Cpu *c) {
             if (dv < 0 && t < lo) t = *target < lo ? *target : lo;  // (never further out than it already is)
             if (dv > 0 && t > hi) t = *target > hi ? *target : hi;
             *angle += t - *target;
+            follow_mouse_dv += t - *target;
             *target = t;
         }
+        follow_mouse_dh += dh;
     }
     static int lg = -1;
     if (lg < 0) lg = getenv("ODYSSEY_LOG_FOLLOW") != NULL;
@@ -290,7 +293,44 @@ static void follow_update(Cpu *c) {
                 *(float *)(uintptr_t)(self + follow_angle_off), *(float *)(uintptr_t)(self + follow_speed_off),
                 *(float *)(uintptr_t)(holder + 0xc0), *(float *)(uintptr_t)(holder + 0xc4), dh, dv);
     }
+    // No auto-centring with the mouse (Controls: "Mouse camera stays where you put it", #88): while the mouse has the
+    // camera and the right stick is at rest, the follow camera turns only as far as the mouse moved - its own turning
+    // behind Mario as he walks (updateInputOrSubTargetTurnH) and its return to a level view are undone each update.
+    extern bool input_mouse_has_camera(void);
+    bool hold = g_settings.mouse_no_recenter && input_mouse_has_camera();
+    uint64_t holder = hold ? *(uint64_t *)(uintptr_t)(self + follow_vholder_off) : 0;
+    float h0 = 0, v0 = 0, vt0 = 0;
+    if (hold) {
+        h0 = *(float *)(uintptr_t)(self + follow_angle_off);
+        if (holder > 0x7000000000ull) v0 = *(float *)(uintptr_t)(holder + 0xc0), vt0 = *(float *)(uintptr_t)(holder + 0xc4);
+    }
     original_follow_update(c);
+    if (hold) {
+        *(float *)(uintptr_t)(self + follow_angle_off) = h0 + dh;
+        *(float *)(uintptr_t)(self + follow_speed_off) = 0;
+        if (holder > 0x7000000000ull) *(float *)(uintptr_t)(holder + 0xc0) = v0, *(float *)(uintptr_t)(holder + 0xc4) = vt0;
+    }
+}
+// ... and around the poser's whole movement (its nerves turn and level the camera outside update: exeFollow's turn behind
+// Mario, exeResetAngle): the angles are put back to where they were, plus what the mouse turned meanwhile
+static GuestFn original_follow_movement;
+static void follow_movement(Cpu *c) {
+    extern bool input_mouse_has_camera(void);
+    uint64_t self = c->x[0];
+    bool hold = g_settings.mouse_no_recenter && input_mouse_has_camera();
+    uint64_t holder = hold ? *(uint64_t *)(uintptr_t)(self + follow_vholder_off) : 0;
+    float h0 = 0, v0 = 0, vt0 = 0;
+    if (hold) {
+        h0 = *(float *)(uintptr_t)(self + follow_angle_off);
+        if (holder > 0x7000000000ull) v0 = *(float *)(uintptr_t)(holder + 0xc0), vt0 = *(float *)(uintptr_t)(holder + 0xc4);
+    }
+    follow_mouse_dh = follow_mouse_dv = 0;
+    original_follow_movement(c);
+    if (hold) {
+        *(float *)(uintptr_t)(self + follow_angle_off) = h0 + follow_mouse_dh;
+        if (holder > 0x7000000000ull)
+            *(float *)(uintptr_t)(holder + 0xc0) = v0 + follow_mouse_dv, *(float *)(uintptr_t)(holder + 0xc4) = vt0 + follow_mouse_dv;
+    }
 }
 // The HUD at the output resolution (nvn/vulkan/exec.c "HUD layer"): nn::ui2d::Layout::Draw(DrawInfo&, gfx::CommandBuffer&)
 // draws one layout - the HUD, menus, wipes - into the command buffer (the gfx one holds its NVNcommandBuffer* at +0xb8,
@@ -969,6 +1009,9 @@ void odyssey_native_120_boot(void) {
         const char *e = getenv("ODYSSEY_MOUSE_DIRECT");
         if ((!e || atoi(e) != 0) && (original_follow_update = dispatch_lookup(upd)))
             hle_override(upd, follow_update, "Odyssey follow camera: mouse turns it directly");
+        uint64_t mov = main->base + (v141 ? 0xbb740 : 0xc8e08);
+        if ((!e || atoi(e) != 0) && (original_follow_movement = dispatch_lookup(mov)))
+            hle_override(mov, follow_movement, "Odyssey follow camera: no turning by itself under the mouse (option)");
     }
     {   // Dynamic resolution off (setting game_dynres; ODYSSEY_GAME_DYNRES=0/1): al::GraphicsQualityController - the game's
         // own load-driven quality, a nerve machine Wait -> Reduce -> Recover - lowers the resolution when frames run

@@ -126,6 +126,7 @@ typedef struct {
     int amiibo;              // the virtual amiibo figure (runtime/hle/nfp.c k_figures; 0: none - no NFC reader)
     bool motion_blur;        // the game's blur while the camera turns (on: as the Switch; off: translate.c camBlurSample)
     bool first_person_mario; // the first-person view starts the way Mario faces, not the camera (hle/odyssey_120.c, #118)
+    bool mouse_no_recenter;  // the follow camera doesn't turn by itself while the mouse has it (hle/odyssey_120.c, #88)
     int mouse_smoothing;     // percent, 0..90: the mouse camera's movement averaged over recent samples (0: raw)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is

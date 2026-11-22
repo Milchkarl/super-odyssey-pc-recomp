@@ -454,6 +454,12 @@ bool input_mouse_direct(float *dh, float *dv) {
     *dv = cy * MOUSE_DEG_PER_COUNT * g_settings.mouse_sensitivity_y / 100.0f * (g_settings.mouse_invert_y ? -1 : 1);
     return true;
 }
+// The mouse is turning the camera (held in the window, playing) and nothing else is: the right stick and its keys rest
+bool input_mouse_has_camera(void) {
+    extern bool menu_input_captured(void);
+    if (!(atomic_load(&mouse_held) || (host_test && g_settings.mouse_camera)) || menu_input_captured()) return false;
+    return abs(pad_rx) < 2000 && abs(pad_ry) < 2000 && !key_rx && !key_ry;
+}
 static void mouse_camera_frame(float *ox, float *oy) {
     static uint64_t last;
     static float fx, fy, cx, cy;  // this update's tilt; the counts not given yet

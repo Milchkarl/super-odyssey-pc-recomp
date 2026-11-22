@@ -2051,6 +2051,9 @@ static void tab_about(void) {
     camera_speed("Mouse vertical speed", &g_settings.mouse_sensitivity_y);
     hint("Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a "
          "stick (the usual follow camera; the other camera kinds take the mouse as a stick).");
+    toggle("Mouse camera stays where you put it", &g_settings.mouse_no_recenter);
+    hint("The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, "
+         "it only turns when you move the mouse. Off: as on the Switch.");
     slider("Mouse smoothing", &g_settings.mouse_smoothing, 0, 90, 10, "%d%%");
     hint("Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still "
          "turns as far in total, slightly later. 0%: raw, as the mouse moves.");
