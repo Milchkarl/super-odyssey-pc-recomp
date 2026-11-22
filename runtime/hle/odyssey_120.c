@@ -226,6 +226,41 @@ static GuestFn original_quality_reduce;
 // target the angle eases to (the holder at +0x150 / 1.4.1 +0x158: angle +0xc0, target +0xc4); the mouse moves both,
 // within the stick's own limits (-35..85 degrees, measured: the game clamps only what the stick does).
 // (input.c input_mouse_direct; ODYSSEY_MOUSE_DIRECT=0: through the stick as before; ODYSSEY_LOG_FOLLOW=1: the angles)
+// The first-person view facing the way Mario looks (Controls: "First-person view starts", #118). The game starts
+// al::CameraPoserSubjective looking the way the camera did (start: the last camera's look direction as its angle),
+// unless a start angle was set for it (al::setSubjectiveCameraStartAngleH: a flag and the angle in degrees, 1.0.0
+// +0x180 / +0x184, 1.4.1 +0x188 / +0x18c). Here that angle is Mario's own facing - his pose keeper's rotation
+// (player_movement keeps the actor) - for the posers nothing else set one for.
+static GuestFn original_subjective_start;
+static uint32_t subjective_flag_off;  // (the angle: 4 bytes after)
+static _Atomic uint64_t g_player_actor;
+static void subjective_start(Cpu *c) {
+    uint64_t self = c->x[0], actor = atomic_load(&g_player_actor);
+    static uint64_t ours[8];
+    static int nours;
+    bool mine = false;
+    for (int i = 0; i < nours; i++) mine |= ours[i] == self;
+    uint8_t *flag = (uint8_t *)(uintptr_t)(self + subjective_flag_off);
+    if (g_settings.first_person_mario && actor >= GUEST_LO && actor < GUEST_HI - 0x58 && (mine || !*flag)) {
+        uint64_t keeper = *(uint64_t *)(uintptr_t)(actor + 0x50);
+        if (keeper >= GUEST_LO && keeper < GUEST_HI - 0x40) {
+            const float *q = (const float *)(uintptr_t)(keeper + 0x14);  // (sead::Quatf x y z w)
+            float n = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+            if (n > 0.9f && n < 1.1f) {
+                // his front: the rotation's +Z
+                float fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1]);
+                float deg = atan2f(fx, fz) * 57.29578f;
+                *flag = 1;
+                memcpy(flag + 4, &deg, 4);
+                if (!mine && nours < 8) ours[nours++] = self;
+                static int nlog;
+                if (nlog++ < 8) LOG("[camera] first-person view starts at Mario's facing: %.1f degrees\n", deg);
+            }
+        }
+    } else if (mine && !g_settings.first_person_mario) *flag = 0;  // (the option turned off: as the game)
+    original_subjective_start(c);
+}
+
 static GuestFn original_follow_update;
 static uint32_t follow_speed_off, follow_angle_off, follow_vholder_off;  // (1.0.0: 0x1e4 / 0x1b8 / 0x150; 1.4.1: +8)
 extern bool input_mouse_direct(float *dh, float *dv);
@@ -559,6 +594,7 @@ static void player_movement(Cpu *c) {
     static uint64_t updates;
     uint64_t actor = c->x[0];
     odyssey_pose_player(actor);
+    atomic_store(&g_player_actor, actor);
     {   // ODYSSEY_TEST_PLACE=<frame>:<x>:<y>:<z>[;...] (tests, any build): from that frame Mario's translation is set
         // there for three ticks, in order - a test's way to a spot far from a stage's start
         static int n = -1, cur, left;
@@ -920,6 +956,12 @@ void odyssey_native_120_boot(void) {
         const char *e = getenv("ODYSSEY_HUD_MARKS");
         if ((!e || atoi(e) != 0) && (original_layout_draw = dispatch_lookup(ld)))
             hle_override(ld, layout_draw, "Odyssey layouts: their draws marked (the HUD at the output resolution)");
+    }
+    {   // the first-person view at Mario's facing (subjective_start)
+        uint64_t st = main->base + (v141 ? 0x6e95b0 : 0x97be9c);
+        subjective_flag_off = v141 ? 0x188 : 0x180;
+        if ((original_subjective_start = dispatch_lookup(st)))
+            hle_override(st, subjective_start, "Odyssey first-person view: can start at Mario's facing");
     }
     {   // the mouse camera, direct (follow_update)
         uint64_t upd = main->base + (v141 ? 0xbd2b0 : 0xca8b0);

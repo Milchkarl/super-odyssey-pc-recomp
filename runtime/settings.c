@@ -389,6 +389,7 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
         else if (!strcmp(key, "motion_blur")) g_settings.motion_blur = atoi(val) != 0;
+        else if (!strcmp(key, "first_person_mario")) g_settings.first_person_mario = atoi(val) != 0;
         else if (!strcmp(key, "hud_quality")) g_settings.hud_quality = !strcmp(val, "high") || atoi(val) > 0;
         else if (!strcmp(key, "hud_sharpen")) {}  // (0.4.4 - 0.5.4: the sharpening HUD quality replaced; not carried over)
         else if (!strcmp(key, "aspect")) {
@@ -520,6 +521,7 @@ void settings_save(void) {
     fprintf(f, "mouse_smoothing = %d\n", g_settings.mouse_smoothing);
     fprintf(f, "amiibo = %d\n", g_settings.amiibo);
     fprintf(f, "motion_blur = %d\n", g_settings.motion_blur);
+    fprintf(f, "first_person_mario = %d\n", g_settings.first_person_mario);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);
     fprintf(f, "stick_deadzone_right = %d\n", g_settings.stick_deadzone_r);
     fprintf(f, "stick_range_left = %d\n", g_settings.stick_range_l);

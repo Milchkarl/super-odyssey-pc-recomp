@@ -2039,6 +2039,9 @@ static void tab_about(void) {
     toggle("Invert stick vertical", &g_settings.stick_camera_invert_y);
     hint("The main gameplay camera only. Mario's movement and menu navigation keep their normal controls. "
          "The game's own camera inversion options also apply.");
+    toggle("First-person view faces Mario's way", &g_settings.first_person_mario);
+    hint("The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera "
+         "was looking, as on the Switch.");
     ImGui::Spacing();
     header("Mouse");
     toggle("Mouse camera", &g_settings.mouse_camera);
