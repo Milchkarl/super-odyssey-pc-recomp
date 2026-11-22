@@ -2014,6 +2014,15 @@ static void tab_about(void) {
          "Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then "
          "press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was "
          "bound to.");
+    {
+        static const char *const names[] = {"Shake", "Homing throw"};
+        int i = g_settings.shake_homing ? 1 : 0;
+        if (choice("Shake button and key", &i, names, 2)) g_settings.shake_homing = i;
+    }
+    hint("What the shake button and key do. Shake: the controller shaken while held, as on the Switch - with Cappy on "
+         "Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake moves (shaking a pole, "
+         "rolling faster). Homing throw: one press throws Cappy and sends it homing at the nearest target (with Cappy "
+         "already out: the homing attack alone) - never a spin; the Spin throw button does that (#137).");
     toggle("Vibration", &g_settings.rumble);
     {
         static const int pct[] = {25, 50, 75, 100};

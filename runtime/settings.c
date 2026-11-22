@@ -319,6 +319,7 @@ void settings_load(void) {
                 memcpy(g_settings.motion_gyro_bias, b, sizeof b);
         }
         else if (!strcmp(key, "motion_shake_pad")) { int v = atoi(val); g_settings.motion_shake_pad = v >= -1 && v < 64 ? v : -1; }
+        else if (!strcmp(key, "shake_homing")) g_settings.shake_homing = atoi(val) != 0;
         else if (!strcmp(key, "motion_shake_key")) { int v = atoi(val); g_settings.motion_shake_key = v >= 0 && v < 1024 ? v : 0; }
         else if (!strcmp(key, "stick_deadzone")) {  // (before 0.4.11: one for both sticks. 0 and 10 were the defaults
             // written by older versions - 0 is what let the map pointer drift (#106) - so they become the new default)
@@ -519,6 +520,7 @@ void settings_save(void) {
             g_settings.motion_gyro_bias[2]);
     fprintf(f, "motion_shake_pad = %d\n", g_settings.motion_shake_pad);
     fprintf(f, "motion_shake_key = %d\n", g_settings.motion_shake_key);
+    fprintf(f, "shake_homing = %d\n", g_settings.shake_homing);
     fprintf(f, "spin_pad = %d\nspin_key = %d\nshot_pad = %d\nshot_key = %d\n", g_settings.spin_pad, g_settings.spin_key,
             g_settings.shot_pad, g_settings.shot_key);
     fprintf(f, "mouse_smoothing = %d\n", g_settings.mouse_smoothing);

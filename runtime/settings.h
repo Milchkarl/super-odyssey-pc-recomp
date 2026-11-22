@@ -138,6 +138,7 @@ typedef struct {
     int stick_deadzone_l, stick_deadzone_r;
     int stick_range_l, stick_range_r;
     int motion_gyro_sens;      // percent, 25..400: the gyro's turn rates as the game gets them (aiming with motion)
+    int shake_homing;    // the shake key / button: 0 shakes while held (as the Switch), 1 a homing throw (#137)
     int motion_shake_threshold;  // tenths of a G, 0..20: smaller jolts than this are not passed on (rumble, #107)
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
     bool mouse_menus;    // in the game's menus, the mouse buttons are A / B (bound or not) and an unbound wheel the D-pad (hle/input.c, #64)

@@ -37,6 +37,7 @@ static _Thread_local bool tick_input_active;
 static _Atomic int32_t key_lx, key_ly, key_rx, key_ry, pad_lx, pad_ly, pad_rx, pad_ry;
 static uint8_t keys_down[BIND_KEY_CODE_COUNT];  // (keys, then the mouse buttons: input_bind.h)
 static _Atomic bool shake_pad_down;  // (the shake button: event thread -> hid_sixaxis_states)
+static _Atomic uint64_t shake_inject_until_ns;  // (Homing throw: fill_state -> the motion history, a short shake)
 static _Atomic bool spin_pad_pressed, shot_pad_pressed;  // (the spin throw's / screenshot's button pressed: -> fill_state)
 static _Atomic bool spin_key_pressed, shot_key_pressed;  // (their keys / mouse buttons)
 static SDL_Gamepad *pad;
@@ -748,7 +749,10 @@ static void motion_push(uint64_t now) {
     // The shake button / key (Controls: Shake button, Shake key - #39, #27): while held, the controller is shaken hard
     // up and down (+-3.5 G, the direction flipping every 15 ms) - the game's motion cap throw, spin and shake moves -
     // with or without a gyro, and with Motion controls off.
-    bool held = atomic_load(&shake_pad_down) || bound_key(g_settings.motion_shake_key);
+    // (Homing throw - Controls, shake_homing, #137: the button and key don't shake by themselves; fill_state throws
+    // Cappy and then asks for a short shake here, which with Cappy out is the homing attack)
+    bool held = (!g_settings.shake_homing && (atomic_load(&shake_pad_down) || bound_key(g_settings.motion_shake_key))) ||
+                now < atomic_load(&shake_inject_until_ns);
     if (held && !menu_input_captured()) {
         bool flip = (mot.shake_ticks++ / 3) & 1;
         f[0] = 0, f[1] = flip ? 3.5f : -3.5f, f[2] = -1;
@@ -1609,6 +1613,19 @@ static void fill_state(Cpu *c) {
             if (dt >= 10) b |= 1ull << BTN_Y;
         }
         if (atomic_exchange(&shot_pad_pressed, false) | atomic_exchange(&shot_key_pressed, false)) input_screenshot();
+        // Homing throw (Controls "Shake button and key", #137): a press throws Cappy (Y for 5 updates) and, 16 updates
+        // later with Cappy out, shakes the controller for 250 ms - the homing attack. A shake while Cappy sits on
+        // Mario's head is the game's spin throw, which the key gave whenever pressed before (tested: any axis, with or
+        // without a turn). Tested in Cap Kingdom: 16 updates / 250 ms sent the hovering Cappy off and back; 12 / 150
+        // left it hovering. With Cappy already out, the throw does nothing and the shake homes.
+        static uint64_t homing_at;
+        static bool homing_was;
+        bool homing_down = g_settings.shake_homing && (atomic_load(&shake_pad_down) || bound_key(g_settings.motion_shake_key));
+        if (homing_down && !homing_was && !menu && (!homing_at || tick + 1 - homing_at > 20)) homing_at = tick + 1;
+        homing_was = homing_down;
+        uint64_t ht = homing_at ? tick + 1 - homing_at : UINT64_MAX;
+        if (ht < 5 && !menu) b |= 1ull << BTN_Y;
+        if (ht == 16 && !menu) atomic_store(&shake_inject_until_ns, plat_now_ns() + 250000000ull);
     }
     int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx) + script_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly) + script_ly);
     if (spin_now) lx = (int32_t)(sinf(spin_angle) * 32767), ly = (int32_t)(cosf(spin_angle) * 32767);
