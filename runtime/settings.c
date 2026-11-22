@@ -334,6 +334,7 @@ void settings_load(void) {
         else if (!strcmp(key, "spin_key")) { int v = atoi(val); g_settings.spin_key = v >= 0 && v < 1024 ? v : 0; }
         else if (!strcmp(key, "shot_pad")) { int v = atoi(val); g_settings.shot_pad = v >= -1 && v < 64 ? v : -1; }
         else if (!strcmp(key, "shot_key")) { int v = atoi(val); g_settings.shot_key = v >= 0 && v < 1024 ? v : 0; }
+        else if (!strcmp(key, "amiibo")) g_settings.amiibo = atoi(val) < 0 ? 0 : atoi(val);
         else if (!strcmp(key, "mouse_smoothing")) g_settings.mouse_smoothing = atoi(val) < 0 ? 0 : atoi(val) > 90 ? 90 : atoi(val);
         else if (!strcmp(key, "motion_shake_threshold")) g_settings.motion_shake_threshold = atoi(val) < 0 ? 0 : atoi(val) > 20 ? 20 : atoi(val);
         else if (!strcmp(key, "resolution")) {
@@ -515,6 +516,7 @@ void settings_save(void) {
     fprintf(f, "spin_pad = %d\nspin_key = %d\nshot_pad = %d\nshot_key = %d\n", g_settings.spin_pad, g_settings.spin_key,
             g_settings.shot_pad, g_settings.shot_key);
     fprintf(f, "mouse_smoothing = %d\n", g_settings.mouse_smoothing);
+    fprintf(f, "amiibo = %d\n", g_settings.amiibo);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);
     fprintf(f, "stick_deadzone_right = %d\n", g_settings.stick_deadzone_r);
     fprintf(f, "stick_range_left = %d\n", g_settings.stick_range_l);

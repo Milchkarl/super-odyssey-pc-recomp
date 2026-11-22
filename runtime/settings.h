@@ -123,6 +123,7 @@ typedef struct {
     // also presses the game button it is bound to.
     int spin_pad, spin_key;  // the spin throw: the left stick turned a full circle and the throw pressed (hle/input.c)
     int shot_pad, shot_key;  // a screenshot of the window, saved as a PNG in the screenshots folder (platform)
+    int amiibo;              // the virtual amiibo figure (runtime/hle/nfp.c k_figures; 0: none - no NFC reader)
     int mouse_smoothing;     // percent, 0..90: the mouse camera's movement averaged over recent samples (0: raw)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is

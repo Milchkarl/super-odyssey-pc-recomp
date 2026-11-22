@@ -31,6 +31,8 @@
 extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.cpp
 #endif
 extern "C" void controls_actions_draw(void);   // runtime/ui/controls_ui.mm: shake, spin throw, screenshot bindings
+extern "C" int nfp_figure_count(void);         // runtime/hle/nfp.c: the virtual amiibo's figures
+extern "C" const char *nfp_figure_name(int i);
 
 extern "C" {
 #include "../hle.h"
@@ -1978,6 +1980,18 @@ static void tab_about(void) {
              st == 2 ? "Done: the offset is saved and used from now on." :
              "Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) "
              "and saved. Use it if the game sees motion while the controller lies still.");
+    }
+    {   // the virtual amiibo (runtime/hle/nfp.c, #48)
+        static const char *names[32];
+        int n = nfp_figure_count() < 32 ? nfp_figure_count() : 32;
+        for (int i = 0; i < n; i++) names[i] = nfp_figure_name(i);
+        int i = g_settings.amiibo >= 0 && g_settings.amiibo < n ? g_settings.amiibo : 0;
+        if (choice("amiibo", &i, names, n)) g_settings.amiibo = i;
+        hint("The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle "
+             "amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a "
+             "short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the "
+             "wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next "
+             "start of the game.");
     }
     controls_actions_draw();  // shake, spin throw, screenshot: any button and any key (controls_ui.mm, hle/bindings.c)
     hint("Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins "
