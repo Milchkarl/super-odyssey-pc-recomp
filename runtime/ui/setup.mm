@@ -967,6 +967,25 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGui::SameLine(0, 14 * scale);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8 * scale);
     ImGui::TextColored(kTextDimV, "%s %s", tr("Version"), APP_VERSION);
+    {   // which game is installed - the base game or with its update (#110): its main's build id (as runtime/loader.c)
+        static int ver = -1;  // 0 unknown, 1: 1.0.0, 2: 1.4.1
+        if (ver < 0) {
+            ver = 0;
+            uint8_t id[8];
+            FILE *f = fopen("extracted/exefs/main", "rb");
+            if (f && !fseek(f, 0x40, SEEK_SET) && fread(id, 1, 8, f) == 8) {
+                static const uint8_t v100[8] = {0x3c, 0xa1, 0x2d, 0xfa, 0xaf, 0x9c, 0x82, 0xda};
+                static const uint8_t v141[8] = {0xb4, 0x24, 0xbe, 0x15, 0x0a, 0x8e, 0x7d, 0x78};
+                ver = !memcmp(id, v141, 8) ? 2 : !memcmp(id, v100, 8) ? 1 : 0;
+            }
+            if (f) fclose(f);
+        }
+        if (ver) {
+            ImGui::SameLine(0, 18 * scale);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8 * scale);  // (on the version's line)
+            ImGui::TextColored(kTextDimV, "%s %s", tr("Game"), ver == 2 ? "1.4.1" : "1.0.0");
+        }
+    }
     ImGui::EndGroup();
 #ifndef __APPLE__
     if (g_prep.load() == PREP_ASK || g_prep.load() == PREP_RUN) {  // (the shader preparation: this card only)
