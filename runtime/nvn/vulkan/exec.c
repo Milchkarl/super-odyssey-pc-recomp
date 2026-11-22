@@ -6272,6 +6272,22 @@ static const char *snap_reason = "?";
 static void snapshots_invalidate(NvnTexture *t) {
     for (int i = 0; i < 8; i++) if ((!t || snap_tex[i] == t) && snap_ok[i]) { snap_ok[i] = false; snap_why[i] = snap_reason; }
 }
+// A draw that samples a colour target and writes it too (read-modify-write in one pass) leaves its snapshot in use
+// until the game's next barrier or render target change: on the Switch a draw sees earlier draws' writes to a texture
+// only after nvnCommandBufferBarrier, so a run of such draws with no barrier between them reads the target as it was
+// before the run - one snapshot. The Secret Flower Field after Torkdrift (#136): ~230 effect draws a frame (one
+// program, fs 0x727530c500 in 1.4.1) sample colour target 2 of the 4-target scene pass and write it, with no barrier
+// between them; each made a new full-size snapshot, with a pass split and a full barrier - 236 copies and 314 passes
+// a frame (now 4 and 82), a 2060 SUPER at 98% and ~40 FPS. Any other write still ends the snapshot at once.
+// ODYSSEY_SNAP_PER_DRAW=1: a new snapshot for every such draw, as before.
+static bool snap_stale[8];
+static void snapshots_mark_stale(NvnTexture *t) {
+    for (int i = 0; i < 8; i++) if (snap_tex[i] == t && snap_ok[i]) snap_stale[i] = true;
+}
+static void snapshots_settle(const char *why) {
+    for (int i = 0; i < 8; i++)
+        if (snap_stale[i]) { snap_stale[i] = false; if (snap_ok[i]) { snap_ok[i] = false; snap_why[i] = why; } }
+}
 
 typedef struct { NvnTexture *key; TexBackend copy; } Snap;
 static Snap snaps[16];
@@ -6802,6 +6818,7 @@ static void resolve_feedback(Prog *pr) {
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, nrg, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
+            snap_stale[si] = false;
             st.rt_dirty = true;
         }
 }
@@ -8742,8 +8759,15 @@ static void draw_(CmdRec *r, bool indexed) {
     snap_reason = "draw-depthwrite";
     if (st.rt.depth && st.ds[0] && st.ds[1]) snapshots_invalidate(st.rt.depth);
     snap_reason = "draw-colorwrite";
+    static int per_draw = -1;
+    if (per_draw < 0) { const char *e = getenv("ODYSSEY_SNAP_PER_DRAW"); per_draw = e && atoi(e) != 0; }
     for (int i = 0; i < st.rt.ncolor; i++)
-        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
+        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) {
+            bool sampled = false;  // (this draw read it through a snapshot: snapshots_mark_stale)
+            for (int k = 0; k < nfeedback && !per_draw; k++) sampled |= feedback_tex[k] == st.rt.color[i];
+            if (sampled) snapshots_mark_stale(st.rt.color[i]);
+            else snapshots_invalidate(st.rt.color[i]);
+        }
     begin_pass();
     if (pass_depth_written_next) pass_depth_written = true, pass_depth_written_next = false;
     // (the recording thread: from here this draw's calls are queued - not with frame interpolation's replays)
@@ -11002,7 +11026,9 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         case CMD_SET_TEXTURE_POOL: st.tpool = (NvnDescPool *)(uintptr_t)r->x[0]; break;
         case CMD_SET_SAMPLER_POOL: st.spool = (NvnDescPool *)(uintptr_t)r->x[0]; break;
+        case CMD_BARRIER: snapshots_settle("barrier"); break;
         case CMD_SET_RENDER_TARGETS: {
+            snapshots_settle("render targets");
             const struct { uint64_t tex[8]; NvnTextureView views[8]; uint8_t has_view[8]; uint64_t depth;
                            NvnTextureView dview; uint8_t has_dview; } *rt = x;
             RtState prev = st.rt;  // the same targets again: keep the pass (a restart = full barrier + reload)

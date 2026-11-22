@@ -511,7 +511,41 @@ static void trace_calls_boot(void) {
     }
 }
 
+// ---- ODYSSEY_TEST_BOSS_END=<frames> (tests, #136): Torkdrift (BossForest, the Wooded Kingdom's boss) goes straight to
+// its defeat scene that many frames after its first update - al::setNerve(boss, its DemoBattleEnd nerve), what the game does when its last life
+// is gone - so the scene after the fight (the Power Moon, the slow frames of #136) can be reached from a save before
+// it without fighting. Hooked on BossForest::control (vtable slot 26: called through the vtable).
+static GuestFn g_boss_control;
+static uint64_t g_boss_end_frame, g_boss_nerve, g_boss_set_nerve;
+static void boss_control(Cpu *c) {
+    static bool done;
+    static uint64_t first;
+    if (!first) first = renderer_present_count() + 1;
+    if (!done && renderer_present_count() + 1 >= first + g_boss_end_frame) {
+        done = true;
+        uint64_t boss = c->x[0], save[2] = {c->x[0], c->x[1]}, lr = c->x[30];
+        GuestFn set_nerve = dispatch_lookup(g_boss_set_nerve);
+        LOG("[test] boss %llx: its defeat scene at frame %llu\n", (unsigned long long)boss, (unsigned long long)renderer_present_count());
+        if (set_nerve) { c->x[0] = boss, c->x[1] = g_boss_nerve; set_nerve(c); }
+        c->x[0] = save[0], c->x[1] = save[1], c->x[30] = lr;
+    }
+    g_boss_control(c);
+}
+static void boss_end_boot(void) {
+    const char *e = getenv("ODYSSEY_TEST_BOSS_END");
+    if (!e) return;
+    bool v141 = loader_main_is_v141();
+    uint64_t control = v141 ? 0x7000016020ull : 0x7000017bccull;
+    g_boss_nerve = v141 ? 0x700119f950ull : 0x7001c54038ull;
+    g_boss_set_nerve = v141 ? 0x70006c7b20ull : 0x7000959af4ull;
+    g_boss_end_frame = strtoull(e, NULL, 10);
+    if (!(g_boss_control = dispatch_lookup(control))) { LOG("[test] boss end: no BossForest::control\n"); return; }
+    hle_override(control, boss_control, "test boss end");
+    LOG("[test] Torkdrift's defeat scene %llu frames into the fight\n", (unsigned long long)g_boss_end_frame);
+}
+
 void odyssey_boot(void) {
+    boss_end_boot();
     discord_start();  // (the game's own process: not the one that re-executes itself for its address layout)
     linread_boot();
     { extern void odyssey_pointer_boot(void); odyssey_pointer_boot(); }
