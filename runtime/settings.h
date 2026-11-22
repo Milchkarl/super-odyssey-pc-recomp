@@ -168,8 +168,8 @@ typedef struct {
     int shadow_quality;  // 0 as the Switch, 1 high (2x), 2 ultra (4x): shadow map size (nvn/vulkan/textures.c shadow_factor)
     int bloom_quality;   // 0 as the Switch, 1 high: the glow images enlarged with a smooth (B-spline) filter instead of
                          // bilinear (maxwell/translate.c bloomUp, set per draw in exec.c stage_set; ODYSSEY_BLOOM_QUALITY)
-    int ambient_occlusion;  // 0 off (as the Switch: its levels have none), 1 on: GTAO from the scene's depth, darkening
-                            // corners and contact (nvn/vulkan/gtao.c; ODYSSEY_GTAO=0/1)
+    int ambient_occlusion;  // 0 off (as the Switch: its levels have none), 1 medium (half resolution; the default),
+                            // 2 high: GTAO from the scene's depth, darkening corners and contact (nvn/vulkan/gtao.c)
     int draw_distance;   // 0 as the Switch, 1 high (2x), 2 very high (4x): actors, their detail models and fades
                          // reach farther (runtime/hle/odyssey_draw.c; ODYSSEY_DRAW_DISTANCE=<factor> for tests)
     bool shader_known_only; // shaders set up ahead only when drawn before (any run): less CPU after a stage loads,
