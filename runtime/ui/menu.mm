@@ -1204,6 +1204,10 @@ static void tab_display(void) {
                    "height, a little cut off at the left and right. Full width: everything the 16:9 view shows, and more "
                    "above and below.");
     }
+    opt_int_slider("Field of view", &g_settings.fov, 100, 150, 5, 100, "%d%%",
+                   "How much of the world the camera shows. 100%: as on the Switch. Higher: a wider view (the camera "
+                   "itself stays where it is), which can help on large or ultrawide screens and with motion sickness. "
+                   "Every camera - play, cutscenes, Snapshot Mode. Changes at once.");
     {
         static const char *pos[] = {"Centered (16:9)", "Edges"};
         opt_choice("HUD position (wide)", &g_settings.hud_edges, pos, 2, 1,

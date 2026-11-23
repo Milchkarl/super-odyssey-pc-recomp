@@ -119,6 +119,25 @@ for _a in SHADOW_SITES:
     PATCHES[_a] = _shadow_distance(SHADOW_SITES)
 
 
+# Field of view (runtime/hle/odyssey_draw.c odyssey_fov): al::CameraPoseUpdater::update turns the camera's vertical
+# field of view into radians (fmul s2, s1, s2) for al::Projection::setProj - the scene's projection, every camera.
+FOV_SITES = {0x7000837a50: 0x1e220822}
+
+
+def _fov(sites):
+    def patch(gen, a):
+        w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+        assert w == sites[a], f'{a:#x}: {w:#x}'
+        code = ' '.join(gen.render_single(gen.lift(a), a, None, set()))
+        return (f'{code} {{ extern float odyssey_fov(float); FP_SETS(2, odyssey_fov(VSF32(2))); }}  '
+                f'/* {a:#x}: field of view */')
+    return patch
+
+
+for _a in FOV_SITES:
+    PATCHES[_a] = _fov(FOV_SITES)
+
+
 # Debug hooks (make gen with ODYSSEY_HOOKS=<addr>[,<addr>...], hex): each listed instruction first calls the runtime's
 # odyssey_debug_hook(c, addr) (runtime/hle/odyssey_debug.c, ODYSSEY_HOOK_LOG says what it logs), then runs as usual.
 # Only instructions that fall through or return (no branches).
@@ -202,6 +221,9 @@ SHADOW_SITES_141 = {0x700079e6a4: (0x1e210800, 0),  # al::ShadowDirector::getCur
                     0x700079e190: (0x4ea81d03, 3)}  # al::ShadowDirector::update: the far for setNearFar
 for _a in SHADOW_SITES_141:
     PATCHES_141[_a] = _shadow_distance(SHADOW_SITES_141)
+FOV_SITES_141 = {0x70005ae090: 0x1e220822}  # al::CameraPoseUpdater::update (the same code)
+for _a in FOV_SITES_141:
+    PATCHES_141[_a] = _fov(FOV_SITES_141)
 DRAW_SITES_141 = {SITES_141[a]: v for a, v in DRAW_SITES.items()}
 for _a in DRAW_SITES_141:
     PATCHES_141[_a] = _draw_distance(DRAW_SITES_141)

@@ -63,3 +63,16 @@ void odyssey_shadow_far(Cpu *c) {
     v[3] *= f;
     memcpy(&c->v[3], &v[3], 4);  // (s3: an argument; its upper lanes aren't read)
 }
+
+// Field of view (Display: "Field of view", 100-150%): al::CameraPoseUpdater::update, the scene projection's vertical
+// field of view in radians (tools/odyssey_patches.py FOV_SITES), widened in tan space - the picture's height at a
+// given distance times the setting, as a wider lens. Every camera; read each frame. ODYSSEY_FOV=<percent> for tests.
+#include <math.h>
+float odyssey_fov(float fovy) {
+    static int env = -1;
+    if (env < 0) { const char *e = getenv("ODYSSEY_FOV"); env = e && *e ? atoi(e) : 0; }
+    int pct = env >= 50 && env <= 200 ? env : g_settings.fov;
+    if (pct == 100 || pct < 50 || pct > 200 || !(fovy > 0.0f && fovy < 3.0f)) return fovy;
+    float w = 2.0f * atanf(tanf(fovy * 0.5f) * (float)pct / 100.0f);
+    return w < 3.0f ? w : 3.0f;  // (under 172 degrees)
+}
