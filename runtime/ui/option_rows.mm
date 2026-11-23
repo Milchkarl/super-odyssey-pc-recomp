@@ -44,7 +44,11 @@ static bool g_held;  // the last row's left / right has been held a while (stepp
 void opt_indent(int step) { g_indent = g_indent + step < 0 ? 0 : g_indent + step; }
 
 static int g_lr_block_until = -1;  // (frame count) left / right don't change a row until then
-static bool g_last_row_focused;  // (row) the row drawn last has the cursor: after a page's rows, its last one
+static ImGuiID g_down_from;      // (opt_end) Down pressed on this item of the page, in this window, at this frame:
+static ImGuiWindow *g_down_win;   // opt_begin puts the cursor back on it if the move left the page
+static int g_down_frame = -10;
+static bool g_last_row_focused;
+static ImGuiID g_row_focus_id;    // (row) the row with the cursor  // (row) the row drawn last has the cursor: after a page's rows, its last one
 void opt_begin(const char *id, float scale) {
     g_scale = scale;
     g_take_first = g_focus_req;
@@ -54,6 +58,19 @@ void opt_begin(const char *id, float scale) {
         // (the Right / A that came into the page from the sidebar isn't also the first row's change - it flipped
         // "Early frame hand-off" when entering Performance)
         g_lr_block_until = ImGui::GetFrameCount() + 1;
+    }
+    {   // (opt_end) a Down that took the cursor out of the page (to the tab bar): back to where it was
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        int age = ImGui::GetFrameCount() - g_down_frame;
+        bool inside = false;  // (the new place in the page or a child of it: an ordinary move)
+        for (ImGuiWindow *w = g->NavWindow; w; w = w->ParentWindow) if (w == g_down_win) inside = true;
+        if (age >= 1 && age <= 3 && g_down_win && g->NavWindow && !inside &&
+            g->NavWindow->RootWindow == g_down_win->RootWindow && g->NavId != g_down_from) {
+            ImGui::SetFocusID(g_down_from, g_down_win);
+            ImGui::SetNavCursorVisible(true);
+            g_down_frame = -10;
+            menu_rec("Down at the page's end: the cursor stays");
+        }
     }
     g_indent = 0;
     g_desc_hover.clear(), g_desc_focus.clear(), g_title_hover.clear(), g_title_focus.clear();
@@ -125,7 +142,8 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     bool off = g_next_disabled;  // (greyed out: still selectable, so its description shows, but it can't change)
     g_next_disabled = false;
     bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
-    g_last_row_focused = ImGui::IsItemFocused();  // (opt_end: the page's last row - Down stops there)
+    g_last_row_focused = ImGui::IsItemFocused();
+    if (g_last_row_focused) g_row_focus_id = ImGui::GetItemID();  // (opt_end's recorder: a row logs itself)
     bool blocked = ImGui::GetFrameCount() <= g_lr_block_until;
     int step = clicked && !off && !blocked ? 2 : 0;
     g_held = false;
@@ -534,13 +552,27 @@ bool opt_text(const char *label, char *buf, size_t cap, const char *hint, const 
 }
 
 void opt_end(void) {
-    // Down on a page's last row stays there. With nothing below it, ImGui's navigation took the nearest item in any
+    // Down never leaves the page. With nothing below the cursor, ImGui's navigation took the nearest item in any
     // direction - the first category tab - and held Down at the end of Performance switched to Display (owner's
-    // recording, 2026-11-22)
-    if (g_last_row_focused && ImGui::GetCurrentContext()->NavCursorVisible &&
-        (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown) ||
-         ImGui::IsKeyPressed(ImGuiKey_DownArrow)))
-        ImGui::NavMoveRequestCancel();
+    // recording, 2026-11-22). That was stopped on the page's last row, which on Controls (rows, then the binding grids)
+    // trapped the cursor above the grids (owner 2026-11-24). Now Down goes wherever ImGui finds, and opt_begin puts the
+    // cursor back if that was outside the page.
+    {
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        if (g->NavCursorVisible && g->NavWindow == ImGui::GetCurrentWindow() &&
+            (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown) ||
+             ImGui::IsKeyPressed(ImGuiKey_DownArrow)))
+            g_down_from = g->NavId, g_down_win = g->NavWindow, g_down_frame = ImGui::GetFrameCount();
+    }
+    {   // (the recorder) the cursor on something that isn't a row - a binding cell, a button: its id and place
+        static ImGuiID last;
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        if (g->NavId != last) {
+            last = g->NavId;
+            if (g->NavId && g->NavWindow == ImGui::GetCurrentWindow() && g->NavId != g_row_focus_id)
+                menu_rec("cursor on item %08x at y %.0f", (unsigned)g->NavId, g->NavWindow->NavRectRel[0].Min.y);
+        }
+    }
     g_last_row_focused = false;
     ImGui::PopStyleVar();
     if (const char *t = getenv("ODYSSEY_OPT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(t));  // (test)

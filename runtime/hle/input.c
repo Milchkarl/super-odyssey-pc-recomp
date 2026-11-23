@@ -1297,12 +1297,16 @@ static void host_test_frame(uint64_t frame) {
     static const char *hspec, *bspec;
     static int init;
     if (!init) { init = 1; hspec = getenv("ODYSSEY_HOST_INPUT"); bspec = getenv("ODYSSEY_BIND_TEST"); host_test = hspec; }
-    char buf[2048];
+    static char *buf;  // (the whole list: a 2 KB copy dropped every entry after about the hundredth)
+    static size_t cap;
     if (hspec) {
         uint8_t keys[BIND_KEY_CODE_COUNT] = {0};
         uint32_t padm = 0;
         int32_t sx = 0, sy = 0;
-        snprintf(buf, sizeof buf, "%s", hspec);
+        size_t need = strlen(hspec) + 1;
+        if (need > cap) { free(buf); buf = malloc(need); cap = buf ? need : 0; }
+        if (!buf) return;
+        memcpy(buf, hspec, need);
         char *save = NULL;
         for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             unsigned long start = 0, len = 10;
@@ -1342,9 +1346,10 @@ static void host_test_frame(uint64_t frame) {
         if (pch) recompute_pad();
     }
     if (bspec) {
-        snprintf(buf, sizeof buf, "%s", bspec);
+        char bbuf[2048];
+        snprintf(bbuf, sizeof bbuf, "%s", bspec);
         char *save = NULL;
-        for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        for (char *tok = strtok_r(bbuf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             unsigned long start = 0;
             char dev[8] = "", in[16] = "", host[40] = "";
             if (sscanf(tok, "%lu:%7[a-z]:%15[a-z_]:%39[^:]", &start, dev, in, host) < 3) continue;

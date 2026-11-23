@@ -2669,10 +2669,21 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
             else g_focus_tab = t.id;
         }
         bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
-        if (ImGui::IsItemFocused()) focused_tab = t.id;
+        if (ImGui::IsItemFocused()) {
+            static int rec_tab = -1000;
+            if ((rec_tab != t.id || !g_sidebar_was) && foc) menu_rec("cursor on tab \"%s\"", t.name), rec_tab = t.id;
+            focused_tab = t.id;
+        }
         else if (focused_tab == t.id) focused_tab = -99;
         // the cursor arriving on a category shows its page (not the mouse passing over: that only lights it)
-        if (foc && t.on && t.id != show && g_focus_tab == -99) g_tab_request = show = t.id;
+        // (Up from a page's first row lands on whichever tab ImGui finds nearest - often another one, whose page then
+        // showed; owner 2026-11-24: "going up and down" jumped tabs. Arriving from the page: the page's own tab.)
+        if (foc && !g_sidebar_was && t.id != show && g_focus_tab == -99) g_focus_tab = show, g_focus_frames = 0;
+        else if (foc && t.on && t.id != show && g_focus_tab == -99) g_tab_request = show = t.id;
+        // (Up on the tab bar: nothing above it - ImGui took the nearest item anywhere, the page's last rows)
+        if (foc && !any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp) ||
+                                  ImGui::IsKeyPressed(ImGuiKey_UpArrow)))
+            ImGui::NavMoveRequestCancel();
         if (clicked && t.on) {
             g_tab_request = show = t.id;
             if (ImGui::GetCurrentContext()->NavCursorVisible) enter_page = true;  // (A / Enter: into the page)
