@@ -2282,6 +2282,15 @@ static void tab_about(void) {
     }
     hint("The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Turn it off "
          "for no rumble at all; DualSense and Switch Pro controllers use their own motors through it.");
+#ifdef _WIN32
+    {   // runtime/switch2*.c (settings.ini `switch2`; 2 also logs every Bluetooth device, kept as it is here)
+        bool on = g_settings.switch2 != 0;
+        if (toggle("Switch 2 controllers (Bluetooth)", &on)) g_settings.switch2 = on;
+    }
+    hint("The Switch 2 Pro Controller and Joy-Con 2 over Bluetooth, with their gyro and the game's HD rumble - no other "
+         "program needed. Applies at the next start. Then hold the small Sync button on the controller until its lights "
+         "sweep; after that any button reconnects it. Don't pair it in Windows' Bluetooth settings: the game connects it.");
+#endif
     ImGui::Spacing();
     header("Sticks");
     slider("Left stick deadzone", &g_settings.stick_deadzone_l, 0, 50, 1, "%d%%");

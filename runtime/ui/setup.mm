@@ -51,6 +51,7 @@ extern "C" {
 #include "../platform.h"
 #include "../romfs_build.h"
 #include "../rt.h"
+#include "../switch2.h"
 #include "../settings.h"
 #include "../version.h"
 #ifdef __APPLE__
@@ -1128,6 +1129,7 @@ bool config_run(void) {
     {   // controllers: SDL sends their buttons only for opened ones - the game's input (input.c) opens them later, so the
         // page answered only mouse and keyboard (owner 2026-11-16). input.c finds them open and takes them over.
         SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+        switch2_start();  // (Switch 2 controllers over Bluetooth: runtime/switch2.h)
         int n = 0;
         SDL_JoystickID *ids = SDL_GetGamepads(&n);
         for (int i = 0; ids && i < n; i++) SDL_OpenGamepad(ids[i]);

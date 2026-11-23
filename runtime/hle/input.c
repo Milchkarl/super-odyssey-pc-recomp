@@ -22,6 +22,7 @@
 #include "../kernel.h"
 #include "../nvn/kbprompts.h"
 #include "motion_gate.h"
+#include "../switch2.h"
 
 enum {
     BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
@@ -994,7 +995,11 @@ HLE_FUNC("_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19
     mot.last_read_ns = now;
     // No sensor sending (no gyro, the motion setting off, a still controller's quiet sensor): the 5 ms states at the
     // game's own clock since the last one (at most the 16 it reads)
-    bool sensor_live = live && mot.has_gyro && mot.last_push_ns && now - mot.last_push_ns < 20000000ull;
+    // (A Switch 2 controller over Bluetooth sends a report every 8-30 ms, by the link Windows gives it, often a few
+    // in one burst: within 20 ms these states were filled at the game's clock between its reports, a repeat of the
+    // last reading, and aiming with it stuttered. Its reports carry their own times, so it gets 60 ms.)
+    uint64_t live_ns = motion_src_id && switch2_owns(motion_src_id) ? 60000000ull : 20000000ull;
+    bool sensor_live = live && mot.has_gyro && mot.last_push_ns && now - mot.last_push_ns < live_ns;
     if (!sensor_live) {
         uint64_t due = mot.last_push_ns && now > mot.last_push_ns ? (now - mot.last_push_ns) / MOTION_TICK_NS : 1;
         if (due > 16) due = 16;
@@ -1067,6 +1072,7 @@ void input_handle_event(const SDL_Event *e) {
     static bool scanned;  // pads present at startup: their ADDED event may have gone to the start screen's loop
     if (!scanned) {
         scanned = true;
+        switch2_start();  // Switch 2 controllers over Bluetooth (settings.ini `switch2`): virtual gamepads, from their own thread
         int n = 0;
         SDL_JoystickID *ids = SDL_GetGamepads(&n);
         for (int i = 0; i < n; i++) {
@@ -1745,8 +1751,13 @@ HLE_FUNC("_ZN2nn3hid27BindNpadStyleSetUpdateEventERKjPNS_2os15SystemEventTypeENS
 // through the hid service (services/hid_set.c: SendVibrationValue(s)) to here: onto the gamepad's two motors, the
 // stronger side per band (low band: the low-frequency motor). Sent again while it lasts, so a value runs 250 ms at most:
 // a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in settings.ini).
-void input_vibration(uint32_t handle, float amp_low, float amp_high) {
+// A Switch 2 controller over Bluetooth (runtime/switch2.c, settings.ini `switch2`) takes the value itself instead: both
+// bands' amplitude and frequency for each side, every value as the game sets it, played on its actuators at their 5 ms
+// sample rate - the HD rumble as on the console. value: the VibrationValue (low amplitude, low frequency, high
+// amplitude, high frequency).
+void input_vibration(uint32_t handle, const float value[4]) {
     static float lo[2][2], hi[2][2];
+    static float hd[2][2][4] = {{{0, 160, 0, 320}, {0, 160, 0, 320}}, {{0, 160, 0, 320}, {0, 160, 0, 320}}};
     static uint16_t last_l[2], last_h[2];
     static uint64_t last_ns[2];
     static int log = -1;  // ODYSSEY_LOG_RUMBLE=1: each change sent to the gamepad
@@ -1754,7 +1765,25 @@ void input_vibration(uint32_t handle, float amp_low, float amp_high) {
     int side = handle & 1;
     unsigned player = (handle >> 8) & 0xff;
     if (player > 1) return;
+    float amp_low = value[0], amp_high = value[2];
     lo[player][side] = isfinite(amp_low) ? amp_low : 0, hi[player][side] = isfinite(amp_high) ? amp_high : 0;
+    {   // (a Switch 2 controller over Bluetooth: the game's own values, both sides, as they come)
+        uint32_t id = player == 1 ? input_cappy_id() : input_primary_id();
+        if (id && switch2_owns(id)) {
+            float *o = hd[player][side];
+            float strength = g_settings.rumble_strength > 0 && g_settings.rumble_strength <= 100 ? g_settings.rumble_strength / 100.0f : 1.0f;
+            if (!g_settings.rumble) strength = 0;
+            for (int b = 0; b < 2; b++) {
+                float a = value[2 * b], f = value[2 * b + 1];
+                o[2 * b] = isfinite(a) ? fminf(fmaxf(a, 0), 1) * strength : 0;
+                o[2 * b + 1] = isfinite(f) && f > 0 ? f : b ? 320 : 160;  // (the bands' neutral frequencies)
+            }
+            if (log) LOG("[input] rumble player %u side %d: %.2f @ %.0f Hz, %.2f @ %.0f Hz (Switch 2 controller)\n", player + 1,
+                         side, o[0], o[1], o[2], o[3]);
+            switch2_rumble_hd(id, (const float (*)[4])hd[player]);
+            return;
+        }
+    }
     float l = fmaxf(lo[player][0], lo[player][1]), h = fmaxf(hi[player][0], hi[player][1]);
     if (!g_settings.rumble) l = h = 0;
     // (the Joy-Cons' actuators are strong: the game's amplitudes are mostly 0.02-0.2, which an Xbox-style gamepad's

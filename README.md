@@ -238,6 +238,17 @@ Deck's own. On the Deck it works with Steam Input on; leave the gyro unmapped in
 doesn't also move the camera with it. Menu > Controls has the gyro's sensitivity, inversion and calibration, a
 **Shake button** (throw Cappy with a button instead of shaking) and *Motion controls* to turn them off.
 
+**Switch 2 controllers** (Pro Controller 2, Joy-Con 2) over Bluetooth, on Windows: turn on menu > Controls >
+*Switch 2 controllers (Bluetooth)* (`switch2 = 1` in settings.ini) and start the game again. Then hold the small Sync
+button on the controller until its lights sweep: the log says `Pro Controller 2 ... paired with this PC`, and from then
+on any button reconnects it. Don't pair it in Windows' Bluetooth settings - the game connects it itself, no other
+program needed (close bridge programs such as DS4Windows or Steam if it isn't found). Buttons, sticks with the
+controller's own calibration, the gyro and accelerometer, player lights and the game's **HD rumble** (both bands'
+amplitude and frequency, each side to its own grip) work. A left and a right Joy-Con 2 connected together are one
+controller. `switch2 = 2` also logs every Bluetooth LE device it sees, for a report when one isn't found;
+`ODYSSEY_SWITCH2_MAP` overrides the motion axes (see `runtime/switch2_proto.h`). Over USB SDL drives them only when it
+is built with libusb, which the MSYS2 and upstream Windows builds aren't.
+
 ## Files
 
 The program folder holds the program; the install folder (the same one unless you chose another) holds:
@@ -316,6 +327,10 @@ Bug reports are read and worked on the same way: the maintainer tests, and Claud
   MIT) used for checking
 - **[Savage Wind Recomp](https://github.com/Revivedx/SavageWindRecomp)** by Revivedx and its contributors - how the
   motion sensor's orientation is handed to the game, which fixed gyro aiming through binoculars (#53) (MIT license).
+- **[mkw-recomp](https://github.com/adriadam10/mkw-recomp)** by Adrià - the Switch 2 controller support over
+  Bluetooth LE (`runtime/switch2*.c`, `switch2*.h`; its protocol header from seedds/mkw-neo), as carried over and given
+  the game's HD rumble in dkb-pc-recomp (MIT license). The Pro Controller 2's motion axes follow SDL's Switch 2 driver
+  (`SDL_hidapi_switch2.c`, zlib).
 - **Rekarina** - the settings menu's layout (tabs along the top, a live picture beside the options) was inspired by
   its menu; no code or artwork from it is used.
 - [OdysseyDecomp](https://github.com/MonsterDruide1/OdysseyDecomp) - names and structure of the game's code, used for

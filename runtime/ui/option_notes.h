@@ -111,6 +111,7 @@ static const OptionNote k_option_notes[] = {
     {"Shake key", "", "As you like."},
     {"Vibration", "", "On (the default)."},
     {"Vibration strength", "", "100% (the default)."},
+    {"Switch 2 controllers (Bluetooth)", "", "Off (the default). On to play with a Switch 2 Pro Controller or Joy-Con 2."},
     {"Left stick deadzone", "", "5% (the default). Higher if Mario moves on his own."},
     {"Right stick deadzone", "", "5% (the default). Higher if the camera or the map pointer drifts on its own."},
     {"Stick horizontal speed", "", "100% (the default), then to taste."},
