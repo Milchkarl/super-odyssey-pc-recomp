@@ -167,7 +167,7 @@ echo ok
 say "6/7  publishing v$VERSION"
 git push -q origin "$SHA:refs/heads/main"
 gh release create "v$VERSION" "$ZIP" "$APP" --repo "$REPO" --target "$SHA" \
-    --title "Super Odyssey PC Recomp $VERSION (preview)" --notes-file "$NOTES"
+    --title "$VERSION" --notes-file "$NOTES"
 
 say "7/7  the catalog's test on the published file"
 if probe "https://github.com/$REPO/releases/download/v$VERSION/$(basename "$APP" | tr ' ' '.')"; then

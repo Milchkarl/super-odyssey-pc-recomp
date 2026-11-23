@@ -144,7 +144,7 @@ You can also download the new zip from [Releases](../../releases) and extract it
 
 ## Known issues
 
-This is a preview. Known problems and things not done yet:
+Known problems and things not done yet:
 
 - **Being worked on** (from the [issues](../../issues)):
   - "Out of graphics memory" a few seconds in on 8 GB laptops with integrated graphics (#120, #99): a fix is being
