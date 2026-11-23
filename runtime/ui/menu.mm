@@ -1116,6 +1116,68 @@ static void tab_display(void) {
                "On: as on the Switch - the game lowers its resolution when frames take long. Off: always its full "
                "resolution (sharper; needs a fast enough GPU or a higher power limit). Applies at the next start.");
 #endif
+#ifndef __APPLE__
+    // HDR (nvn/vulkan/device.c: an HDR10 window; maxwell/translate.c comp_main: the game's highlights kept above its
+    // white, native - not an expansion of the finished picture) and the scene's colour grading (the same pass: the 3D
+    // picture only, the HUD after it; SDR too). Settings as RenoDX names them.
+    opt_section("HDR");
+    {
+        int st = vk_hdr_state();  // (0: no HDR10 from this display, 1: offered, 2: the window is HDR10)
+        char d[700];
+        snprintf(d, sizeof d, "Shows the game in HDR on an HDR display: the sun, lava, glowing coins and lit clouds go "
+                              "brighter than the game's white, as the game's own lighting has them, instead of being "
+                              "flattened into it. Below the highlights the picture stays the game's. Changes at once.%s",
+                 st == 0 ? "\n\nThis display offers no HDR right now: turn HDR on in the system's display settings "
+                           "(Windows: Settings > Display > Use HDR), then here." : "");
+        if (opt_toggle("HDR", &g_settings.hdr, false, d)) vk_request_swapchain_remake();
+    }
+    {
+        static const char *tm[] = {"Vanilla", "HDR"};
+        opt_choice("Tone mapper", &g_settings.hdr_tonemap, tm, 2, 1,
+                   "HDR: the game's tone curve up to its highlights, then on up to Peak brightness - the highlights "
+                   "the Switch flattens into white keep their detail and colour. Vanilla: the game's own curve, nothing "
+                   "above its white (the SDR picture shown on an HDR display).", false);
+    }
+    opt_int_slider("Peak brightness", &g_settings.hdr_peak, 400, 10000, 50, 1000, "%d nits",
+            "Your display's brightest, in nits (its HDR peak; Windows' HDR Calibration app measures it). The "
+            "brightest highlights roll off to it instead of clipping.");
+    opt_int_slider("Game brightness", &g_settings.hdr_game_white, 80, 500, 1, 203, "%d nits",
+            "How bright the game's white is in the 3D picture (\"paper white\"). 203: the HDR reference; higher for a "
+            "bright room.");
+    opt_int_slider("UI brightness", &g_settings.hdr_ui_white, 80, 500, 1, 203, "%d nits",
+            "How bright the HUD, the game's menus and this menu are. Lower it if they glare next to the scene.");
+    opt_toggle("SDR gamma emulation", &g_settings.hdr_eotf22, true,
+               "On: the game's colours as an SDR display shows them (gamma 2.2) - its intended contrast, deeper "
+               "shadows. Off: the sRGB curve - lifted, greyer shadows.");
+    opt_section("Colour grading");
+    opt_int_slider("Exposure", &g_settings.grade_exposure, 0, 200, 5, 100, "%d%%",
+            "The scene's light before the game's tone curve, as a camera's exposure. 100%: as the game. Changes the "
+            "3D picture only (the HUD stays), in SDR and HDR.");
+    opt_int_slider("Highlights", &g_settings.grade_highlights, 0, 100, 1, 50, "%d",
+            "Brighter (higher) or softer (lower) bright parts. 50: as the game.");
+    opt_int_slider("Shadows", &g_settings.grade_shadows, 0, 100, 1, 50, "%d",
+            "Lifts (higher) or deepens (lower) the dark parts. 50: as the game.");
+    opt_int_slider("Contrast", &g_settings.grade_contrast, 0, 100, 1, 50, "%d",
+            "Steeper (higher) or flatter (lower) around mid grey. 50: as the game.");
+    opt_int_slider("Saturation", &g_settings.grade_saturation, 0, 100, 1, 50, "%d",
+            "How colourful the scene is: 0 black and white, 100 twice as vivid. 50: as the game.");
+    opt_int_slider("Highlight saturation", &g_settings.grade_highlight_sat, 0, 100, 1, 50, "%d",
+            "HDR: the colour of the restored highlights - higher keeps more of the light's own colour, lower turns "
+            "them toward white. 50: as the game's curve has them.");
+    opt_int_slider("Blowout", &g_settings.grade_blowout, 0, 100, 1, 0, "%d",
+            "HDR: the brightest colours fade to white, as overexposed film. 0: off.");
+    opt_int_slider("Flare", &g_settings.grade_flare, 0, 100, 1, 0, "%d",
+            "Deepens the darkest shades toward black, against a washed-out look. 0: off.");
+    opt_int_slider("Bloom", &g_settings.grade_bloom, 0, 100, 1, 50, "%d",
+            "The game's glow around bright things: 0 none, 100 twice as strong. 50: as the game.");
+    if (opt_button("Reset colour grading", "Every colour grading setting back to the game's own picture.")) {
+        g_settings.grade_exposure = 100;
+        g_settings.grade_highlights = g_settings.grade_shadows = g_settings.grade_contrast = 50;
+        g_settings.grade_saturation = g_settings.grade_highlight_sat = g_settings.grade_bloom = 50;
+        g_settings.grade_blowout = g_settings.grade_flare = 0;
+        settings_save();
+    }
+#endif
     opt_end();
 }
 
@@ -1413,68 +1475,6 @@ static void tab_graphics(void) {
                    "bigger the screen; a Steam Deck's own screen is too close to the Switch's to change. The "
                    "pictures keep their detail (nothing is redrawn). Costs a little GPU time while a menu covers the "
                    "screen. Switch: as the game draws them. Changes at once (the HUD may blink the first time).", false);
-    }
-#endif
-#ifndef __APPLE__
-    // HDR (nvn/vulkan/device.c: an HDR10 window; maxwell/translate.c comp_main: the game's highlights kept above its
-    // white, native - not an expansion of the finished picture) and the scene's colour grading (the same pass: the 3D
-    // picture only, the HUD after it; SDR too). Settings as RenoDX names them.
-    opt_section("HDR");
-    {
-        int st = vk_hdr_state();  // (0: no HDR10 from this display, 1: offered, 2: the window is HDR10)
-        char d[700];
-        snprintf(d, sizeof d, "Shows the game in HDR on an HDR display: the sun, lava, glowing coins and lit clouds go "
-                              "brighter than the game's white, as the game's own lighting has them, instead of being "
-                              "flattened into it. Below the highlights the picture stays the game's. Changes at once.%s",
-                 st == 0 ? "\n\nThis display offers no HDR right now: turn HDR on in the system's display settings "
-                           "(Windows: Settings > Display > Use HDR), then here." : "");
-        if (opt_toggle("HDR", &g_settings.hdr, false, d)) vk_request_swapchain_remake();
-    }
-    {
-        static const char *tm[] = {"Vanilla", "HDR"};
-        opt_choice("Tone mapper", &g_settings.hdr_tonemap, tm, 2, 1,
-                   "HDR: the game's tone curve up to its highlights, then on up to Peak brightness - the highlights "
-                   "the Switch flattens into white keep their detail and colour. Vanilla: the game's own curve, nothing "
-                   "above its white (the SDR picture shown on an HDR display).", false);
-    }
-    opt_int("Peak brightness", &g_settings.hdr_peak, 400, 10000, 50, 1000, "%d nits",
-            "Your display's brightest, in nits (its HDR peak; Windows' HDR Calibration app measures it). The "
-            "brightest highlights roll off to it instead of clipping.");
-    opt_int("Game brightness", &g_settings.hdr_game_white, 80, 500, 1, 203, "%d nits",
-            "How bright the game's white is in the 3D picture (\"paper white\"). 203: the HDR reference; higher for a "
-            "bright room.");
-    opt_int("UI brightness", &g_settings.hdr_ui_white, 80, 500, 1, 203, "%d nits",
-            "How bright the HUD, the game's menus and this menu are. Lower it if they glare next to the scene.");
-    opt_toggle("SDR gamma emulation", &g_settings.hdr_eotf22, true,
-               "On: the game's colours as an SDR display shows them (gamma 2.2) - its intended contrast, deeper "
-               "shadows. Off: the sRGB curve - lifted, greyer shadows.");
-    opt_section("Colour grading");
-    opt_int("Exposure", &g_settings.grade_exposure, 0, 200, 5, 100, "%d%%",
-            "The scene's light before the game's tone curve, as a camera's exposure. 100%: as the game. Changes the "
-            "3D picture only (the HUD stays), in SDR and HDR.");
-    opt_int("Highlights", &g_settings.grade_highlights, 0, 100, 1, 50, "%d",
-            "Brighter (higher) or softer (lower) bright parts. 50: as the game.");
-    opt_int("Shadows", &g_settings.grade_shadows, 0, 100, 1, 50, "%d",
-            "Lifts (higher) or deepens (lower) the dark parts. 50: as the game.");
-    opt_int("Contrast", &g_settings.grade_contrast, 0, 100, 1, 50, "%d",
-            "Steeper (higher) or flatter (lower) around mid grey. 50: as the game.");
-    opt_int("Saturation", &g_settings.grade_saturation, 0, 100, 1, 50, "%d",
-            "How colourful the scene is: 0 black and white, 100 twice as vivid. 50: as the game.");
-    opt_int("Highlight saturation", &g_settings.grade_highlight_sat, 0, 100, 1, 50, "%d",
-            "HDR: the colour of the restored highlights - higher keeps more of the light's own colour, lower turns "
-            "them toward white. 50: as the game's curve has them.");
-    opt_int("Blowout", &g_settings.grade_blowout, 0, 100, 1, 0, "%d",
-            "HDR: the brightest colours fade to white, as overexposed film. 0: off.");
-    opt_int("Flare", &g_settings.grade_flare, 0, 100, 1, 0, "%d",
-            "Deepens the darkest shades toward black, against a washed-out look. 0: off.");
-    opt_int("Bloom", &g_settings.grade_bloom, 0, 100, 1, 50, "%d",
-            "The game's glow around bright things: 0 none, 100 twice as strong. 50: as the game.");
-    if (opt_button("Reset colour grading", "Every colour grading setting back to the game's own picture.")) {
-        g_settings.grade_exposure = 100;
-        g_settings.grade_highlights = g_settings.grade_shadows = g_settings.grade_contrast = 50;
-        g_settings.grade_saturation = g_settings.grade_highlight_sat = g_settings.grade_bloom = 50;
-        g_settings.grade_blowout = g_settings.grade_flare = 0;
-        settings_save();
     }
 #endif
     opt_end();

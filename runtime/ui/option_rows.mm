@@ -23,6 +23,8 @@ static std::string g_desc_hover, g_desc_focus, g_desc_shown;  // this frame's ho
 static std::string g_desc_first;  // the page's first row (shown until a row is selected or hovered)
 static std::string g_title_hover, g_title_focus, g_title_shown, g_title_first;  // their rows' labels (the card's title)
 static int g_row_toggle = -1;  // (opt_toggle -> row: the toggle's state)
+static float g_row_slider = -1;  // (opt_int_slider -> row: the value's place on its track, 0..1; -1 not a slider)
+static float g_slider_drag = -1;  // (row -> opt_int_slider: where the mouse holds the track, 0..1; -1 not dragged)
 static std::string g_page, g_page_shown;  // this page's id, and the page g_desc_shown belongs to
 static bool g_next_disabled;
 void opt_disable_next(void) { g_next_disabled = true; }
@@ -148,6 +150,9 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     // one band across.
     int tog = g_row_toggle;  // (opt_toggle: 1 On, 0 Off; -1 not a toggle)
     g_row_toggle = -1;
+    float sl = g_row_slider;  // (opt_int_slider: a track filled to the value, dragged with the mouse)
+    g_row_slider = -1;
+    g_slider_drag = -1;
     bool has_box = tog >= 0 || !value.empty();
     float r = 5 * g_scale, pad = 18 * g_scale, fs = ImGui::GetFontSize(), gapx = 6 * g_scale;
     float split = has_box ? floorf(w * 0.54f) : w;  // (the band's width; the box takes the rest)
@@ -197,6 +202,23 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
             float mx = ImGui::GetIO().MousePos.x;
             if (mx >= b0.x && ((mx < b0.x + hw) == (tog == 1))) step = 0;
         }
+    } else if (has_box && sl >= 0) {  // a slider: the box a track, filled up to the value, a handle there, the value on it
+        dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kBoxHotV : kBoxV), r);
+        float m = fs * 0.5f, x0 = b0.x + m, x1 = b1.x - m, f = fminf(fmaxf(sl, 0), 1), hx = x0 + (x1 - x0) * f;
+        float ty = p.y + h * 0.74f, th = fmaxf(3, 4 * g_scale);
+        dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(x1, ty + th * 0.5f), theme_u32(kSidebarV), th);
+        if (!off) dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(hx, ty + th * 0.5f), theme_u32(kAccentV, lit ? 1.0f : 0.85f), th);
+        dl->AddCircleFilled(ImVec2(hx, ty), fs * 0.32f, off ? kTextOff : kText);
+        ImVec2 vs = ImGui::CalcTextSize(value.c_str());
+        float vx = (b0.x + b1.x - vs.x) * 0.5f, vy = p.y + h * 0.08f;
+        dl->AddText(font, fs * 0.8f, ImVec2(vx + vs.x * 0.1f, vy), off ? kTextOff : kText, value.c_str());
+        dl->AddCircle(ImVec2(hx, ty), fs * 0.32f, theme_u32(kSidebarV), 0, fmaxf(1, 1.5f * g_scale));
+        // the mouse: held on the track, the value follows it (a press or a drag; the keys and the controller step)
+        if (!off && ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            float mx = ImGui::GetIO().MousePos.x, cx = ImGui::GetIO().MouseClickedPos[ImGuiMouseButton_Left].x;
+            if (cx >= b0.x) g_slider_drag = fminf(fmaxf((mx - x0) / fmaxf(x1 - x0, 1), 0), 1);
+        }
+        if (clicked && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) step = 0;  // (the mouse set it already)
     } else if (has_box) {
         dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kBoxHotV : kBoxV), r);  // (charcoal; red only for the arrows)
         float aw = fs * 0.36f, agap = fs * 0.5f, cy = p.y + h * 0.5f;
@@ -302,6 +324,25 @@ bool opt_int(const char *label, int *v, int lo, int hi, int step, int def, const
     int d = s == 2 ? step : s * step * (g_held && hi - lo > 40 * step ? 10 : 1);
     int n = *v + d;
     if (s == 2 && n > hi) n = lo;  // (A / click past the top wraps; left / right stop at the ends)
+    n = n < lo ? lo : n > hi ? hi : n;
+    if (n == *v) return false;
+    *v = n;
+    return true;
+}
+
+bool opt_int_slider(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc) {
+    char buf[48];
+    snprintf(buf, sizeof buf, fmt, *v);
+    g_row_slider = hi > lo ? (float)(*v - lo) / (float)(hi - lo) : 0;
+    int s = row(label, buf, *v != def, desc, false, false, true);
+    int n = *v;
+    if (g_slider_drag >= 0) {  // (the mouse on the track: the nearest step there)
+        n = lo + (int)lroundf(g_slider_drag * (hi - lo) / step) * step;
+    } else if (s == 1 || s == -1) {
+        n = *v + s * step * (g_held && hi - lo > 40 * step ? 10 : 1);
+    } else if (s == 2) {  // (A on a controller: back to the default)
+        n = def;
+    }
     n = n < lo ? lo : n > hi ? hi : n;
     if (n == *v) return false;
     *v = n;
