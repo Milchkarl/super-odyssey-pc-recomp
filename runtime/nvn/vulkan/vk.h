@@ -121,7 +121,9 @@ typedef struct TexBackend {
     VkFormat format;
     VkFormat guest_format;  // the format of the game's bytes when the image stores another (textures.c "Banding": half
                             // floats for its RGB10A2 screen targets): uploads and readbacks convert through a blit. 0: format
-    bool debandable;        // one of those targets: half floats while vk_deband()
+    bool debandable;        // one of those targets: half floats while vk_deband() (or the HDR picture: vk_hdr_picture)
+    bool hdr_able;          // the game's window texture, which can take half floats for HDR (textures.c create_image)
+    bool hdr_window;        // ... and has them: the highlights above white reach the window (translate.c rt_kind 4)
     VkImageViewType base_type;
     uint32_t width, height, depth, layers, levels, samples;
     VkImageAspectFlags aspect;
@@ -151,6 +153,7 @@ typedef struct TexBackend {
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 bool vk_deband(void);  // smooth gradients (textures.c "Banding"): the menu's setting, ODYSSEY_DEBAND=0|1 overrides it
+bool vk_hdr_picture(void);  // HDR output: the game's picture kept above white to the window (textures.c)
 VkFormat vk_format(uint32_t nvn_format);
 bool vk_format_alpha_one(uint32_t nvn_format);
 // View of t (optionally through an NVN texture view) for rendering or sampling.

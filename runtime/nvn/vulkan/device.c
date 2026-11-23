@@ -853,6 +853,10 @@ static VkPresentModeKHR present_mode(void) {
     return got;
 }
 
+// (the menu's HDR row: whether this display offers HDR10, and whether the window is)
+static bool g_hdr10_offered;
+int vk_hdr_state(void) { return g_vk.sc_hdr ? 2 : g_hdr10_offered ? 1 : 0; }
+
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
@@ -885,6 +889,8 @@ static void create_swapchain(void) {
         }
         bool want = g_settings.hdr && g_vk.colorspace_ext && !g_vk.headless;
         bool got = false;
+        g_hdr10_offered = false;
+        for (uint32_t i = 0; i < nf; i++) g_hdr10_offered |= fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
         for (uint32_t i = 0; want && i < nf; i++)
             if ((fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
                 fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) { sf = fmts[i]; got = true; break; }
@@ -1113,7 +1119,7 @@ static void save_window_image(VkCommandBuffer cb, VkSpan *out) {
 // A window image read back for a shot (4 bytes a pixel) into RGBA bytes. An HDR10 window (10-bit PQ, BT.2020) is
 // decoded to nits and shown as SDR at UI brightness (what is brighter clips white), and its highlights are logged:
 // the brightest pixel's nits and the share of the picture above the game's white - the tests' view of HDR.
-static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h) {
+static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h, const char *path) {
     uint64_t n = (uint64_t)w * h;
     if (!g_vk.sc_hdr) {
         bool bgr = g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB;
@@ -1133,6 +1139,9 @@ static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h) {
     bool argb = g_vk.sc_format == VK_FORMAT_A2R10G10B10_UNORM_PACK32;
     float ui = (float)g_settings.hdr_ui_white, game = (float)g_settings.hdr_game_white, top = 0;
     uint64_t above = 0;
+    // (a heat map beside it, <shot>.nits.png: grey below the game's white, then yellow -> red up to the peak)
+    uint8_t *map = path ? malloc(n * 4) : NULL;
+    float peak = (float)g_settings.hdr_peak;
     for (uint64_t i = 0; i < n; i++) {
         uint32_t v;
         memcpy(&v, px + i * 4, 4);
@@ -1143,6 +1152,14 @@ static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h) {
         float y = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
         if (y > top) top = y;
         if (y > game * 1.05f) above++;
+        if (map) {
+            float f = y <= game ? 0 : fminf((y - game) / fmaxf(peak - game, 1), 1);
+            uint8_t gr = (uint8_t)lrintf(fminf(y / game, 1) * 160);
+            map[i * 4 + 0] = f > 0 ? 255 : gr;
+            map[i * 4 + 1] = f > 0 ? (uint8_t)lrintf(255 * (1 - f)) : gr;
+            map[i * 4 + 2] = f > 0 ? 0 : gr;
+            map[i * 4 + 3] = 255;
+        }
         for (int k = 0; k < 3; k++) {
             float l = fminf(fmaxf(c[k] / ui, 0), 1);
             float e = l <= 0.0031308f ? l * 12.92f : 1.055f * powf(l, 1 / 2.4f) - 0.055f;
@@ -1152,6 +1169,12 @@ static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h) {
     }
     LOG("[hdr] shot: brightest %.0f nits, %.2f%% of the picture above the game's white (%.0f nits)\n", top,
         n ? 100.0 * above / n : 0, game);
+    if (map) {
+        char mp[1100];
+        snprintf(mp, sizeof mp, "%s.nits.png", path);
+        vk_save_png(mp, map, w, h);
+        free(map);
+    }
 }
 
 // End rendering into the window image and present it. shot_path: also save the window image as PNG.
@@ -1185,7 +1208,7 @@ void vk_frame_end(const char *shot_path) {
         vk_wait_seq(seq);
         uint32_t w = g_vk.sc_extent.width, h = g_vk.sc_extent.height;
         uint8_t *px = shot.ptr;
-        shot_to_rgba(px, w, h);
+        shot_to_rgba(px, w, h, shot_path);
         vk_save_png(shot_path, px, w, h);
     }
     present_unlock();  // (vk_frame_begin's)
@@ -1518,7 +1541,7 @@ static bool present_fast(TexBackend *w) {
     if (sbuf) {
         vkWaitForFences(g_vk.dev, 1, &fast_fence[k], VK_TRUE, UINT64_MAX);
         uint8_t *px = sinfo.pMappedData;
-        shot_to_rgba(px, e.width, e.height);
+        shot_to_rgba(px, e.width, e.height, NULL);
         char path[1024];
         if (req[0]) snprintf(path, sizeof path, "%s", req);
         else if (ws_n > 1) snprintf(path, sizeof path, "build/window_%02d.png", ws_i);

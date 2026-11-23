@@ -2210,6 +2210,35 @@ static float vp_sx = 1, vp_sy = 1, vp_ox = 0, vp_oy = 0;
 static float tex_sc[2][64][2];
 static uint32_t tex_wh[2][64][2];
 static uint64_t g_glow_inputs;  // (draw_) the HDR composite's glow inputs, a bit per fragment texture: stage_set
+static uint64_t g_light_inputs;  // (draw_) its inputs of scene light (the R11G11B10F ones: scene, blurred copy, glow)
+
+// The HDR composite's settings (translate.c comp_main, HDRC_BUFFER_INDEX): native HDR highlights and the scene grading.
+// Off (mode 0: the game's own result, one run of its code) in SDR with every grading slider where the game has it.
+static void comp_hdr_params(float k[20]) {
+    const Settings *s = &g_settings;
+    bool hdr = g_vk.sc_hdr && s->hdr_tonemap;
+    bool grade = s->grade_exposure != 100 || s->grade_highlights != 50 || s->grade_shadows != 50 || s->grade_contrast != 50 ||
+                 s->grade_saturation != 50 || s->grade_highlight_sat != 50 || s->grade_blowout || s->grade_flare ||
+                 s->grade_bloom != 50;
+    float game = (float)s->hdr_game_white, ui = (float)s->hdr_ui_white;
+    memset(k, 0, 20 * sizeof *k);
+    k[0] = hdr || grade ? 1.0f : 0.0f;
+    k[1] = hdr ? fmaxf((float)s->hdr_peak / game, 1.0f) : 1.0f;     // (P: the peak in units of the game's white)
+    k[2] = g_vk.sc_hdr ? game / ui : 1.0f;                          // (the scene against the HUD's white)
+    k[3] = s->grade_exposure / 100.0f;
+    for (int i = 0; i < 8; i++) {
+        float kind = (g_glow_inputs >> i) & 1 ? 2.0f : (g_light_inputs >> i) & 1 ? 1.0f : 0.0f;
+        k[i < 4 ? 4 + i : 16 + i - 4] = kind;
+    }
+    k[8] = 1.0f + (s->grade_highlights - 50) / 100.0f * 0.6f;       // (exponents around mid grey: 0.7 .. 1.3)
+    k[9] = 1.0f - (s->grade_shadows - 50) / 100.0f * 0.8f;          // (0.6: lifted .. 1.4: deeper)
+    k[10] = 1.0f + (s->grade_contrast - 50) / 100.0f;               // (0.5 .. 1.5)
+    k[11] = s->grade_saturation / 50.0f;                            // (0 .. 2)
+    k[12] = s->grade_highlight_sat / 100.0f;                        // (0.5: the game's)
+    k[13] = s->grade_blowout / 100.0f;
+    k[14] = s->grade_flare / 100.0f * 0.02f;
+    k[15] = s->grade_bloom / 50.0f;                                 // (0 .. 2)
+}
 
 // ---- HUD layer: the game's layouts at the output resolution
 // The game draws its HUD (nn::ui2d layouts: runtime/hle/odyssey_120.c layout_draw marks them, CMD_UI_MARK) into its
@@ -8073,7 +8102,7 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
         if (b->set != set || b->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
-            (b->binding != 18 && b->binding != 19 && b->binding != GMAP_BUFFER_INDEX)) continue;
+            (b->binding != 18 && b->binding != 19 && b->binding != HDRC_BUFFER_INDEX && b->binding != GMAP_BUFFER_INDEX)) continue;
         w[n] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = b->binding,
                                       .descriptorCount = 1, .descriptorType = b->type};
         if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
@@ -8090,6 +8119,13 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
                 rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = z; rs[1 + t][3] = fv;
             }
             bi[n] = ubo_span(copy_dedupe(sg ? DEDUPE_RSCALE_F : DEDUPE_RSCALE_V, rs, sizeof rs, 256), sizeof rs);
+        } else if (b->binding == HDRC_BUFFER_INDEX) {  // (the HDR composite: translate.c comp_main)
+            float k[20];
+            comp_hdr_params(k);
+            static int dbg_n;
+            if (getenv("ODYSSEY_HDR_DEBUG") && dbg_n++ < 3)
+                LOG("[hdr] composite: mode %g peak %g scale %g exposure %g kinds %g %g %g %g\n", k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+            bi[n] = ubo_span(vk_transient_copy(k, sizeof k, 256), sizeof k);
         } else {
             float zero[8] = {0};
             bi[n] = ubo_span(copy_dedupe(DEDUPE_TINT, tint ? tint : zero, 32, 256), 32);
@@ -8630,7 +8666,12 @@ static void draw_(CmdRec *r, bool indexed) {
             vkey.glow_comp = fkey.glow_comp = 1;
     }
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
-        // rt_kind 3; the picture before it has half floats: textures.c "Banding")
+        // rt_kind 3; the picture before it has half floats: textures.c "Banding"). HDR: the window texture has half
+        // floats itself (textures.c hdr_window) - sRGB-encoded there without the clamp, highlights above 1 (rt_kind 4).
+        for (int i = 0; i < st.rt.ncolor; i++) {
+            NvnTexture *t = st.rt.color[i];
+            if (t && t->window && t->backend && ((TexBackend *)t->backend)->hdr_window && fkey.rt_kind[i] == 0) fkey.rt_kind[i] = 4;
+        }
         bool deband = vk_deband();
         for (int i = 0; deband && i < st.rt.ncolor; i++) {
             NvnTexture *t = st.rt.color[i];
@@ -9000,7 +9041,7 @@ static void draw_(CmdRec *r, bool indexed) {
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
         tex_sc[1][i][0] = sc[0]; tex_sc[1][i][1] = sc[1]; tex_wh[1][i][0] = wh[0]; tex_wh[1][i][1] = wh[1];
     }
-    g_glow_inputs = 0;
+    g_glow_inputs = g_light_inputs = 0;
     if (pr->fkey.glow_comp && st.rt.color[0]) {
         // The composite's inputs by their size against the picture's (all R11G11B10F, NVN 0x3f): a quarter is the glow
         // (Bloom quality steers it: stage_set), a half the blurred copy it mixes in while the camera turns, the
@@ -9010,6 +9051,7 @@ static void draw_(CmdRec *r, bool indexed) {
         for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
             NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
             if (!t || t->format != 0x3f || pr->fi->tex[i].type != TEXTYPE_2D) continue;
+            g_light_inputs |= 1ull << i;
             if (t->width * 4 == w && t->height * 4 == h) g_glow_inputs |= 1ull << i;
             else if (t->width * 2 == w && t->height * 2 == h) blurred = i;
             else if (t->width == w && t->height == h) sharp = i;
@@ -10515,8 +10557,13 @@ static VkPipeline post_pipeline_fmt(const char *fs, VkFormat fmt, bool flush) {
     for (int i = 0; i < 16; i++) if (!cache[i].p) { cache[i].fs = fs; cache[i].fmt = fmt; cache[i].p = p; break; }
     return p;
 }
+// (HDR output: the anti-aliased / upscaled picture in half floats too - its highlights above 1 stay: post_image 2..4)
+static bool post_colour_hdr(const char *fs) {
+    return vk_hdr_picture() && (!strcmp(fs, "smaa_blend.frag") || !strcmp(fs, "fxaa.frag") || !strcmp(fs, "easu.frag") ||
+                                !strcmp(fs, "rcas.frag"));
+}
 static VkPipeline post_pipeline(const char *fs) {
-    VkFormat fmt = !strcmp(fs, "cas.frag") || !strcmp(fs, "dlss_rcas.frag") || !strcmp(fs, "hud_over.frag")
+    VkFormat fmt = !strcmp(fs, "cas.frag") || !strcmp(fs, "dlss_rcas.frag") || !strcmp(fs, "hud_over.frag") || post_colour_hdr(fs)
                  ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
     return post_pipeline_fmt(fs, fmt, false);
 }
@@ -10573,14 +10620,14 @@ static void prewarm_post_pipelines(void) {
 static TexBackend *post_image(int i, uint32_t w, uint32_t h) {
     static TexBackend img[9];
     TexBackend *d = &img[i];
-    if (d->image && (d->width != w || d->height != h)) {
+    VkFormat format = i >= 5 || (i >= 2 && i <= 4 && vk_hdr_picture()) ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+    if (d->image && (d->width != w || d->height != h || d->format != format)) {
         vk_views_forget(d);
         vk_defer_image(d->image, d->mem);
         d->image = VK_NULL_HANDLE;
         d->mem = VK_NULL_HANDLE;
     }
     if (!d->image) {
-        VkFormat format = i >= 5 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
         VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                                 .format = format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
                                 .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -10840,17 +10887,12 @@ void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, flo
 // source as it is (a window image already presented, drawn again)
 int g_present_out;
 
-// present.frag's constants (shaders.c): c.x the Colour settings on, c.y the output (g_present_out), c.w gamma 2.2
-// decoding (HDR: SDR gamma emulation), d = gain, contrast, saturation, gamma, e.x UI brightness (nits). All at their
-// defaults in SDR: the picture's bytes as before.
+// present.frag's constants (shaders.c): c.y the output (g_present_out), c.w gamma 2.2 decoding (HDR: SDR gamma
+// emulation), e.x UI brightness (nits). (The scene's colour grading is in the game's HDR composite: translate.c
+// comp_main - the HUD and menus keep their colours.) SDR: the picture's bytes as before.
 static void present_colour(float out[16]) {
     const Settings *s = &g_settings;
-    bool on = s->brightness || s->contrast || s->saturation != 100 || s->gamma != 100;
-    float k[16] = {on && g_present_out != 2 ? 1.0f : 0.0f, (float)g_present_out, 0, s->hdr_eotf22 ? 1.0f : 0.0f,
-                   exp2f(s->brightness / 50.0f),        // (+50: x2, -50: x0.5 - an exposure step either way)
-                   1.0f + s->contrast / 100.0f,         // (+50: 1.5x steeper around mid grey, -50: half)
-                   s->saturation / 100.0f,
-                   s->gamma / 100.0f,
+    float k[16] = {0, (float)g_present_out, 0, s->hdr_eotf22 ? 1.0f : 0.0f, 0, 0, 0, 0,
                    (float)s->hdr_ui_white, 0, 0, 0, 0, 0, 0, 0};
     memcpy(out, k, sizeof k);
 }

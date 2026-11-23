@@ -82,8 +82,6 @@ Settings g_settings = {
     .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
     .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
     .low_gpu_memory = false,  // (owner 2026-11-20: opt-in, not chosen by the GPU memory's size)
-    .saturation = 100,
-    .gamma = 100,
     .hdr_peak = 1000,
     .hdr_game_white = 203,
     .hdr_ui_white = 203,
@@ -437,10 +435,6 @@ void settings_load(void) {
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "low_gpu_memory")) g_settings.low_gpu_memory = atoi(val) != 0;
         else if (!strcmp(key, "gpu")) snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", strcmp(val, "auto") ? val : "");
-        else if (!strcmp(key, "brightness")) g_settings.brightness = clampi(atoi(val), -50, 50);
-        else if (!strcmp(key, "contrast")) g_settings.contrast = clampi(atoi(val), -50, 50);
-        else if (!strcmp(key, "saturation")) g_settings.saturation = clampi(atoi(val), 0, 200);
-        else if (!strcmp(key, "gamma")) g_settings.gamma = clampi(atoi(val), 50, 150);
         else if (!strcmp(key, "hdr")) g_settings.hdr = atoi(val) != 0;
         else if (!strcmp(key, "hdr_peak")) g_settings.hdr_peak = clampi(atoi(val), 400, 10000);
         else if (!strcmp(key, "hdr_game_white")) g_settings.hdr_game_white = clampi(atoi(val), 80, 500);
@@ -615,10 +609,6 @@ void settings_save(void) {
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "low_gpu_memory = %d\n", g_settings.low_gpu_memory);
     fprintf(f, "gpu = %s\n", g_settings.gpu[0] ? g_settings.gpu : "auto");
-    fprintf(f, "brightness = %d\n", g_settings.brightness);
-    fprintf(f, "contrast = %d\n", g_settings.contrast);
-    fprintf(f, "saturation = %d\n", g_settings.saturation);
-    fprintf(f, "gamma = %d\n", g_settings.gamma);
     fprintf(f, "hdr = %d\n", g_settings.hdr);
     fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
     fprintf(f, "hdr_game_white = %d\n", g_settings.hdr_game_white);

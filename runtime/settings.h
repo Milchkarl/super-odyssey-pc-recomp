@@ -190,11 +190,6 @@ typedef struct {
     bool check_updates;  // look for a newer release at start (runtime/updater.c)
     char gpu[128];       // the graphics card by its Vulkan name, "" = automatic (nvn/vulkan/device.c; read at start;
                          // ODYSSEY_GPU=<index> overrides)
-    // Colour (nvn/vulkan/exec.c present_view, the last pass into the window; the menu and overlay are not changed):
-    int brightness;      // -50..50, 0 = as the game: a gain on the linear picture (+50: x2, -50: x0.5)
-    int contrast;        // -50..50, 0 = as the game: steeper (+) or flatter (-) around mid grey, in the sRGB curve
-    int saturation;      // 0..200, 100 = as the game: 0 grey, 200 twice as colourful
-    int gamma;           // 50..150, 100 = as the game: the picture's mid tones darker (>100) or lighter (<100)
     // HDR (nvn/vulkan/device.c swapchain, exec.c present_view and the game's HDR composite, maxwell/translate.c
     // comp_hdr): an HDR10 window (PQ, BT.2020) where the display offers it, and the game's own highlights kept above
     // SDR white instead of its tone curve flattening them (native, not an expansion of the finished picture)

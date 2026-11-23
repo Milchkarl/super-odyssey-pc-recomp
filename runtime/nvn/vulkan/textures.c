@@ -352,7 +352,19 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         b->debandable = b->scalable && vf == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && type == VK_IMAGE_TYPE_2D && layers == 1 &&
                         levels == 1 && samples == 1 && format_supports(vf, blit) &&
                         format_supports(VK_FORMAT_R16G16B16A16_SFLOAT, need | blit | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        if (b->debandable && vk_deband()) {
+        if (b->debandable && (vk_deband() || vk_hdr_picture())) {
+            b->guest_format = vf;
+            vf = VK_FORMAT_R16G16B16A16_SFLOAT;
+        }
+        // HDR output: the window texture (the game's last copy of its picture, 8-bit sRGB) in half floats too, so the
+        // highlights its HDR composite keeps above white reach the window (translate.c rt_kind 4 writes them sRGB-
+        // encoded and unclamped; present.frag decodes them). Re-made when HDR switches (tex_backend).
+        b->hdr_able = t->window && type == VK_IMAGE_TYPE_2D && layers == 1 && levels == 1 && samples == 1 &&
+                      (vf == VK_FORMAT_R8G8B8A8_UNORM || vf == VK_FORMAT_R8G8B8A8_SRGB || vf == VK_FORMAT_B8G8R8A8_UNORM ||
+                       vf == VK_FORMAT_B8G8R8A8_SRGB) &&
+                      format_supports(VK_FORMAT_R16G16B16A16_SFLOAT, need | blit | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        b->hdr_window = b->hdr_able && vk_hdr_picture();
+        if (b->hdr_window) {
             b->guest_format = vf;
             vf = VK_FORMAT_R16G16B16A16_SFLOAT;
         }
@@ -476,6 +488,10 @@ static void live_remove(TexBackend *b) {
     b->reg = 0;
 }
 
+// HDR output with the game's highlights (the window is HDR10: device.c g_vk.sc_hdr): its picture kept in floats to the
+// window (create_image)
+bool vk_hdr_picture(void) { return g_vk.sc_hdr; }
+
 bool vk_deband(void) {
     static int env = -2;
     if (env == -2) env = getenv("ODYSSEY_DEBAND") ? atoi(getenv("ODYSSEY_DEBAND")) != 0 : -1;
@@ -486,7 +502,9 @@ static TexBackend *tex_backend(NvnTexture *t) {
     TexBackend *b = t->backend;
     if (b) {
         // output resolution changed, or smooth gradients switched on / off (create_image "Banding"): reallocate
-        if (b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) || (b->debandable && !b->guest_format == vk_deband()))) {
+        if ((b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) ||
+                             (b->debandable && !b->guest_format == (vk_deband() || vk_hdr_picture())))) ||
+            (b->hdr_able && b->hdr_window != vk_hdr_picture())) {
             // The old picture goes into the new image, scaled. Most of these targets are drawn anew every frame, but
             // not all: the HUD's "Menu / Map" guide has a 70x40 backdrop (16:9 enough to be scaled with the screen's
             // targets) that the game draws once and keeps. Re-created empty, it showed whatever the new memory held -

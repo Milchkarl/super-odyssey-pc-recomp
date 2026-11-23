@@ -629,9 +629,8 @@ static const char *builtin_src(const char *name, int *stage) {
         // as the game's 8-bit window, or above 1 for highlights when HDR keeps them (the window texture in half
         // floats, translate.c rt_kind 4). c.y: 0 = SDR bytes (as before), 1 = HDR10 (decoded, x UI brightness in nits,
         // BT.709 -> BT.2020, PQ), 2 = as it is (an already presented window image drawn again). c.w = 1: decoded with
-        // gamma 2.2 (what an SDR display does with the game's sRGB values) instead of the sRGB curve. c.x = 1: the
-        // Colour settings - brightness (a gain on linear light, d.x), contrast (around mid grey on the sRGB curve,
-        // d.y), saturation (against BT.709 luma, d.z), gamma (an exponent, d.w). e.x = UI brightness (nits).
+        // gamma 2.2 (what an SDR display does with the game's sRGB values) instead of the sRGB curve. e.x = UI
+        // brightness (nits).
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
                "layout(push_constant) uniform P { layout(offset = 32) vec4 c; vec4 d; vec4 e; vec4 f; } pc;\n"
@@ -647,14 +646,6 @@ static const char *builtin_src(const char *name, int *stage) {
                "  vec4 s4 = texture(t, uv);\n"
                "  if (pc.c.y > 1.5) { o = s4; return; }\n"
                "  vec3 s = max(s4.rgb, vec3(0.0));\n"
-               "  if (pc.c.x > 0.5) {\n"
-               "    vec3 l = dec(clamp(s, 0.0, 1.0)) * pc.d.x;\n"
-               "    vec3 e = clamp((enc(clamp(l, 0.0, 1.0)) - 0.5) * pc.d.y + 0.5, 0.0, 1.0);\n"
-               "    l = dec(e);\n"
-               "    float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
-               "    l = clamp(mix(vec3(y), l, pc.d.z), 0.0, 1.0);\n"
-               "    s = max(s, vec3(1.0)) - vec3(1.0) + enc(pow(l, vec3(pc.d.w)));\n"
-               "  }\n"
                "  if (pc.c.y < 0.5) { o = vec4(min(s, vec3(1.0)), 1.0); return; }\n"
                "  vec3 l = pc.c.w > 0.5 ? mix(pow(s, vec3(2.2)), dec(s), step(vec3(1.0), s)) : dec(s);\n"
                "  vec3 n = l * pc.e.x;\n"
@@ -836,8 +827,8 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() {\n"
                "  vec2 uv = gl_FragCoord.xy * pc.a.xy;\n"
                "  vec4 h = texture(hud, uv);\n"
-               "  vec3 s = dec(clamp(texture(src, uv).rgb, 0.0, 1.0));\n"
-               "  o = vec4(enc(clamp(s * clamp(h.a, 0.0, 1.0) + h.rgb, 0.0, 1.0)), 1.0);\n"
+               "  vec3 s = dec(max(texture(src, uv).rgb, vec3(0.0)));\n"  // (HDR: highlights above 1 stay)
+               "  o = vec4(enc(max(s * clamp(h.a, 0.0, 1.0) + h.rgb, vec3(0.0))), 1.0);\n"
                "}\n";
     }
     // AMD FidelityFX CAS (MIT), sharpening only. Soften the local extrema with the diagonals,
