@@ -57,6 +57,9 @@ typedef struct {
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     VkFormat sc_format;
+    VkFormat ui_format;   // the SDR window format (ImGui draws in it; = sc_format unless the window is HDR)
+    bool colorspace_ext;  // VK_EXT_swapchain_colorspace enabled: HDR10 windows can be asked for
+    bool sc_hdr;          // the window is HDR10 (PQ, BT.2020): settings hdr and the display offers it
     VkExtent2D sc_extent;
     uint32_t sc_count;
     VkImage sc_images[8];

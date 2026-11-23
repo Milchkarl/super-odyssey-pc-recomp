@@ -85,8 +85,17 @@ Settings g_settings = {
     .saturation = 100,
     .gamma = 100,
     .hdr_peak = 1000,
-    .hdr_paper_white = 200,
-    .hdr_highlights = 50,
+    .hdr_game_white = 203,
+    .hdr_ui_white = 203,
+    .hdr_eotf22 = true,
+    .hdr_tonemap = 1,
+    .grade_exposure = 100,
+    .grade_highlights = 50,
+    .grade_shadows = 50,
+    .grade_contrast = 50,
+    .grade_saturation = 50,
+    .grade_highlight_sat = 50,
+    .grade_bloom = 50,
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -434,8 +443,19 @@ void settings_load(void) {
         else if (!strcmp(key, "gamma")) g_settings.gamma = clampi(atoi(val), 50, 150);
         else if (!strcmp(key, "hdr")) g_settings.hdr = atoi(val) != 0;
         else if (!strcmp(key, "hdr_peak")) g_settings.hdr_peak = clampi(atoi(val), 400, 10000);
-        else if (!strcmp(key, "hdr_paper_white")) g_settings.hdr_paper_white = clampi(atoi(val), 80, 500);
-        else if (!strcmp(key, "hdr_highlights")) g_settings.hdr_highlights = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "hdr_game_white")) g_settings.hdr_game_white = clampi(atoi(val), 80, 500);
+        else if (!strcmp(key, "hdr_ui_white")) g_settings.hdr_ui_white = clampi(atoi(val), 80, 500);
+        else if (!strcmp(key, "hdr_eotf22")) g_settings.hdr_eotf22 = atoi(val) != 0;
+        else if (!strcmp(key, "hdr_tonemap")) g_settings.hdr_tonemap = !strcmp(val, "vanilla") ? 0 : 1;
+        else if (!strcmp(key, "grade_exposure")) g_settings.grade_exposure = clampi(atoi(val), 0, 200);
+        else if (!strcmp(key, "grade_highlights")) g_settings.grade_highlights = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_shadows")) g_settings.grade_shadows = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_contrast")) g_settings.grade_contrast = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_saturation")) g_settings.grade_saturation = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_highlight_saturation")) g_settings.grade_highlight_sat = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_blowout")) g_settings.grade_blowout = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_flare")) g_settings.grade_flare = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_bloom")) g_settings.grade_bloom = clampi(atoi(val), 0, 100);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -601,8 +621,19 @@ void settings_save(void) {
     fprintf(f, "gamma = %d\n", g_settings.gamma);
     fprintf(f, "hdr = %d\n", g_settings.hdr);
     fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
-    fprintf(f, "hdr_paper_white = %d\n", g_settings.hdr_paper_white);
-    fprintf(f, "hdr_highlights = %d\n", g_settings.hdr_highlights);
+    fprintf(f, "hdr_game_white = %d\n", g_settings.hdr_game_white);
+    fprintf(f, "hdr_ui_white = %d\n", g_settings.hdr_ui_white);
+    fprintf(f, "hdr_eotf22 = %d\n", g_settings.hdr_eotf22);
+    fprintf(f, "hdr_tonemap = %s\n", g_settings.hdr_tonemap ? "hdr" : "vanilla");
+    fprintf(f, "grade_exposure = %d\n", g_settings.grade_exposure);
+    fprintf(f, "grade_highlights = %d\n", g_settings.grade_highlights);
+    fprintf(f, "grade_shadows = %d\n", g_settings.grade_shadows);
+    fprintf(f, "grade_contrast = %d\n", g_settings.grade_contrast);
+    fprintf(f, "grade_saturation = %d\n", g_settings.grade_saturation);
+    fprintf(f, "grade_highlight_saturation = %d\n", g_settings.grade_highlight_sat);
+    fprintf(f, "grade_blowout = %d\n", g_settings.grade_blowout);
+    fprintf(f, "grade_flare = %d\n", g_settings.grade_flare);
+    fprintf(f, "grade_bloom = %d\n", g_settings.grade_bloom);
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
     fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);

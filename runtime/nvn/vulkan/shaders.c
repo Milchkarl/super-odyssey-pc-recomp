@@ -625,27 +625,60 @@ static const char *builtin_src(const char *name, int *stage) {
     }
     if (!strcmp(name, "present.frag")) {
         *stage = STAGE_FRAGMENT;
-        // The picture's sRGB bytes into the window. c.x = 1: the menu's Colour settings (exec.c present_colour):
-        // brightness (a gain on linear light, d.x), contrast (around mid grey on the sRGB curve, d.y), saturation
-        // (against BT.709 luma, d.z) and gamma (an exponent on linear light, d.w). c.x = 0: the bytes as they are.
+        // The picture into the window (exec.c present_colour fills the constants). Its values are sRGB-encoded: 0..1
+        // as the game's 8-bit window, or above 1 for highlights when HDR keeps them (the window texture in half
+        // floats, translate.c rt_kind 4). c.y: 0 = SDR bytes (as before), 1 = HDR10 (decoded, x UI brightness in nits,
+        // BT.709 -> BT.2020, PQ), 2 = as it is (an already presented window image drawn again). c.w = 1: decoded with
+        // gamma 2.2 (what an SDR display does with the game's sRGB values) instead of the sRGB curve. c.x = 1: the
+        // Colour settings - brightness (a gain on linear light, d.x), contrast (around mid grey on the sRGB curve,
+        // d.y), saturation (against BT.709 luma, d.z), gamma (an exponent, d.w). e.x = UI brightness (nits).
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
-               "layout(push_constant) uniform P { layout(offset = 32) vec4 c; vec4 d; } pc;\n"
+               "layout(push_constant) uniform P { layout(offset = 32) vec4 c; vec4 d; vec4 e; vec4 f; } pc;\n"
                "layout(location = 0) in vec2 uv;\n"
                "layout(location = 0) out vec4 o;\n"
                "vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }\n"
                "vec3 enc(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }\n"
+               "vec3 pq(vec3 nits) {\n"
+               "  vec3 y = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3(0.1593017578125));\n"
+               "  return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375));\n"
+               "}\n"
                "void main() {\n"
-               "  vec3 s = texture(t, uv).rgb;\n"
+               "  vec4 s4 = texture(t, uv);\n"
+               "  if (pc.c.y > 1.5) { o = s4; return; }\n"
+               "  vec3 s = max(s4.rgb, vec3(0.0));\n"
                "  if (pc.c.x > 0.5) {\n"
                "    vec3 l = dec(clamp(s, 0.0, 1.0)) * pc.d.x;\n"
                "    vec3 e = clamp((enc(clamp(l, 0.0, 1.0)) - 0.5) * pc.d.y + 0.5, 0.0, 1.0);\n"
                "    l = dec(e);\n"
                "    float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
                "    l = clamp(mix(vec3(y), l, pc.d.z), 0.0, 1.0);\n"
-               "    s = enc(pow(l, vec3(pc.d.w)));\n"
+               "    s = max(s, vec3(1.0)) - vec3(1.0) + enc(pow(l, vec3(pc.d.w)));\n"
                "  }\n"
-               "  o = vec4(s, 1.0);\n"
+               "  if (pc.c.y < 0.5) { o = vec4(min(s, vec3(1.0)), 1.0); return; }\n"
+               "  vec3 l = pc.c.w > 0.5 ? mix(pow(s, vec3(2.2)), dec(s), step(vec3(1.0), s)) : dec(s);\n"
+               "  vec3 n = l * pc.e.x;\n"
+               "  n = mat3(0.6274040, 0.0690970, 0.0163916, 0.3292820, 0.9195400, 0.0880132, 0.0433136, 0.0113612, 0.8955950) * n;\n"
+               "  o = vec4(pq(n), 1.0);\n"
+               "}\n";
+    }
+    // HDR output: the menu and overlays (ImGui, drawn into an SDR image of their own: premultiplied sRGB colour, alpha
+    // = coverage) over the HDR10 window, at UI brightness (a.x, nits; b.x = 1: gamma 2.2), blended in PQ (device.c
+    // overlay_draw; the "flush" blend: out = src + window x src.a, so src = (PQ x coverage, 1 - coverage)).
+    if (!strcmp(name, "ui_hdr.frag")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(binding=0) uniform sampler2D ui;\n"
+               "layout(push_constant) uniform P { vec4 a; vec4 b; } pc;\n"
+               "layout(location=0) out vec4 o;\n"
+               "vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }\n"
+               "void main() {\n"
+               "  vec4 u = texelFetch(ui, ivec2(gl_FragCoord.xy), 0);\n"
+               "  if (u.a <= 0.0) discard;\n"
+               "  vec3 n = (pc.b.x > 0.5 ? pow(clamp(u.rgb / u.a, 0.0, 1.0), vec3(2.2)) : dec(clamp(u.rgb / u.a, 0.0, 1.0))) * pc.a.x;\n"
+               "  n = mat3(0.6274040, 0.0690970, 0.0163916, 0.3292820, 0.9195400, 0.0880132, 0.0433136, 0.0113612, 0.8955950) * n;\n"
+               "  vec3 y = pow(clamp(n / 10000.0, 0.0, 1.0), vec3(0.1593017578125));\n"
+               "  o = vec4(pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375)) * u.a, 1.0 - u.a);\n"
                "}\n";
     }
     // ---- post passes before the present (Video tab "Anti-aliasing" / "Upscaler"): exec.c vk_present_draw.

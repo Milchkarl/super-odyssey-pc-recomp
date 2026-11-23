@@ -10414,7 +10414,7 @@ static VkPipeline present_pipeline(VkFormat fmt) {
         VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &present_set_layout));
         // (vertex: flip and crop; fragment: the Colour settings, present_colour)
-        VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32}};
+        VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, 64}};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                          .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_layout));
@@ -10809,22 +10809,49 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     present_view(cb, src, vx, vy, vw, vh, pv);
 }
 
+// HDR output: the menu and overlays, drawn into an SDR image of their own (device.c overlay_draw), over the HDR10
+// window inside its rendering (ui_hdr.frag). vk_ui_hdr_prepare first, outside any rendering (the pipeline is made there).
+void vk_ui_hdr_prepare(void) { (void)post_pipeline_fmt("ui_hdr.frag", g_vk.sc_format, true); }
+void vk_ui_hdr_draw(VkCommandBuffer cb, VkImageView ui, uint32_t w, uint32_t h) {
+    VkPipeline pipe = post_pipeline_fmt("ui_hdr.frag", g_vk.sc_format, true);
+    VkDescriptorSet ds = vk_alloc_set(post_set_layout);
+    VkDescriptorImageInfo ii = {vk_default_sampler(false), ui, VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
+                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
+    vkUpdateDescriptorSets(g_vk.dev, 1, &wr, 0, NULL);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, post_layout, 0, 1, &ds, 0, NULL);
+    VkViewport vp = {0, 0, (float)w, (float)h, 0, 1};
+    VkRect2D sc = {{0, 0}, {w, h}};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    float pc[8] = {(float)g_settings.hdr_ui_white, 0, 0, 0, g_settings.hdr_eotf22 ? 1.0f : 0.0f};
+    vkCmdPushConstants(cb, post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+}
+
 // The picture vk_present_draw just drew, again at another place and size - plainly scaled, without running the
 // post-processing (anti-aliasing, upscalers, their history) a second time: the settings menu's live picture.
 void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, float vh) {
     if (g_present_last) present_view(cb, g_present_last, vx, vy, vw, vh, g_present_last_pv);
 }
 
-// The menu's Colour settings for present.frag (shaders.c): c.x on, d = gain, contrast, saturation, gamma. All at their
-// defaults: off, the picture's bytes as before.
-static void present_colour(float out[8]) {
+// present.frag's output (device.c sets it per target): 0 SDR bytes, 1 HDR10 (the window is HDR: g_vk.sc_hdr), 2 the
+// source as it is (a window image already presented, drawn again)
+int g_present_out;
+
+// present.frag's constants (shaders.c): c.x the Colour settings on, c.y the output (g_present_out), c.w gamma 2.2
+// decoding (HDR: SDR gamma emulation), d = gain, contrast, saturation, gamma, e.x UI brightness (nits). All at their
+// defaults in SDR: the picture's bytes as before.
+static void present_colour(float out[16]) {
     const Settings *s = &g_settings;
     bool on = s->brightness || s->contrast || s->saturation != 100 || s->gamma != 100;
-    float k[8] = {on ? 1.0f : 0.0f, 0, 0, 0,
-                  exp2f(s->brightness / 50.0f),        // (+50: x2, -50: x0.5 - an exposure step either way)
-                  1.0f + s->contrast / 100.0f,         // (+50: 1.5x steeper around mid grey, -50: half)
-                  s->saturation / 100.0f,
-                  s->gamma / 100.0f};
+    float k[16] = {on && g_present_out != 2 ? 1.0f : 0.0f, (float)g_present_out, 0, s->hdr_eotf22 ? 1.0f : 0.0f,
+                   exp2f(s->brightness / 50.0f),        // (+50: x2, -50: x0.5 - an exposure step either way)
+                   1.0f + s->contrast / 100.0f,         // (+50: 1.5x steeper around mid grey, -50: half)
+                   s->saturation / 100.0f,
+                   s->gamma / 100.0f,
+                   (float)s->hdr_ui_white, 0, 0, 0, 0, 0, 0, 0};
     memcpy(out, k, sizeof k);
 }
 
@@ -10840,9 +10867,9 @@ static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy
     VkViewport vp = {vx, vy, vw, vh, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
-    float colour[8];
+    float colour[16];
     present_colour(colour);
-    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32, colour);
+    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 64, colour);
     vkCmdDraw(cb, 3, 1, 0, 0);
     VkViewport full = {0, 0, (float)g_vk.sc_extent.width, (float)g_vk.sc_extent.height, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &full);
@@ -10890,8 +10917,8 @@ void renderer_save_texture_tex(TexBackend *b, const char *path) {
     vkCmdSetScissor(cb, 0, 1, &sc);
     float pv[8] = {renderer_origin_lower_left() && !strstr(path, "window") ? 1.0f : 0.0f, 0, 0, 0, crop[0], crop[1], crop[2], crop[3]};
     vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
-    static const float neutral[8] = {0};  // (a game texture as it is: no Colour settings)
-    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32, neutral);
+    static const float neutral[16] = {0};  // (a game texture as SDR bytes: no Colour settings)
+    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 64, neutral);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRendering(cb);
     vk_full_barrier(cb);

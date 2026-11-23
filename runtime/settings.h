@@ -195,11 +195,22 @@ typedef struct {
     int contrast;        // -50..50, 0 = as the game: steeper (+) or flatter (-) around mid grey, in the sRGB curve
     int saturation;      // 0..200, 100 = as the game: 0 grey, 200 twice as colourful
     int gamma;           // 50..150, 100 = as the game: the picture's mid tones darker (>100) or lighter (<100)
-    // HDR output (nvn/vulkan/device.c swapchain, exec.c present_view): HDR10 (PQ, BT.2020) when the display offers it
-    bool hdr;            // on: an HDR10 window; off (the default): SDR as before (read when the window is made)
-    int hdr_peak;        // 400..10000 nits: the display's brightest; highlights are expanded up to it
-    int hdr_paper_white; // 80..500 nits: how bright the game's white (the HUD, the menus) is shown
-    int hdr_highlights;  // 0..100: how much of the picture's brightest part is expanded above paper white
+    // HDR (nvn/vulkan/device.c swapchain, exec.c present_view and the game's HDR composite, maxwell/translate.c
+    // comp_hdr): an HDR10 window (PQ, BT.2020) where the display offers it, and the game's own highlights kept above
+    // SDR white instead of its tone curve flattening them (native, not an expansion of the finished picture)
+    bool hdr;            // on: HDR10 output; off (the default): SDR as before
+    int hdr_peak;        // 400..10000 nits: the display's brightest (the highlights roll off to it)
+    int hdr_game_white;  // 80..500 nits: the game's SDR white in the scene ("paper white"; 203 = the BT.2408 reference)
+    int hdr_ui_white;    // 80..500 nits: the HUD's and the menus' white
+    bool hdr_eotf22;     // the game's sRGB values shown as an SDR display shows them (gamma 2.2): deeper shadows
+    int hdr_tonemap;     // 0 the game's own curve (vanilla, SDR range), 1 HDR: vanilla up to the highlights, then on
+    // Scene colour grading (the 3D picture only, before the HUD: translate.c comp_hdr; SDR and HDR). 50 = as the game.
+    int grade_exposure;  // 0..200 (%): 100 = as the game
+    int grade_highlights, grade_shadows, grade_contrast, grade_saturation;  // 0..100, 50 = as the game
+    int grade_highlight_sat;  // 0..100: the brightest parts' colour (50: as the game, lower: toward white)
+    int grade_blowout;   // 0..100: very bright colours fade to white (0: off)
+    int grade_flare;     // 0..100: the darkest shades deepened (0: off)
+    int grade_bloom;     // 0..100: the game's glow, 50 = as the game
 } Settings;
 // The pipeline warm-up at start: Auto picks Long on PCs with 16 GB of memory or more
 enum { WARMUP_AUTO = 0, WARMUP_NORMAL = 1, WARMUP_LONG = 2, WARMUP_COUNT };
