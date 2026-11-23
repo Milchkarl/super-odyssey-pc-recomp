@@ -7340,6 +7340,17 @@ static void linear_writeback(void) {
         VkBufferImageCopy c = {.bufferOffset = off, .bufferRowLength = (uint32_t)(t->stride / fi->bpb),
                                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {t->width, t->height, 1}};
         vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, gmem_buf, 1, &c);
+        {   // (ODYSSEY_LOG_LINEAR) each texture written back, once
+            static uint64_t seen[64];
+            static int nseen;
+            bool known = false;
+            for (int k = 0; k < nseen; k++) known |= seen[k] == t->addr;
+            if (!known && nseen < 64 && getenv("ODYSSEY_LOG_LINEAR")) {
+                seen[nseen++] = t->addr;
+                LOG("[linear] written back: %llx %ux%u f%#x (frame %llu)\n", (unsigned long long)t->addr, t->width, t->height,
+                    t->format, (unsigned long long)renderer_present_count());
+            }
+        }
         vk_note_guest_write_k(0);
         static int nlog;
         if (nlog++ < 12)
