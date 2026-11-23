@@ -1625,6 +1625,16 @@ static void fill_state(Cpu *c) {
         static uint64_t spin_at;  // (the update it started at, + 1)
         uint64_t tick = odyssey_stage_ticks();
         bool spin_press = atomic_exchange(&spin_pad_pressed, false) | atomic_exchange(&spin_key_pressed, false);
+        // (#154: turning the left stick moved and turned Mario - he drifted right - and the throw pressed near its end
+        // could come out as a plain throw before the spin. A shake with Cappy on Mario's head is the game's own spin
+        // throw, as the controller's motion gives it: the press shakes for 250 ms instead, the stick untouched.
+        // ODYSSEY_SPIN_STICK=1: the stick's two circles and the throw, as before.)
+        static int spin_stick = -1;
+        if (spin_stick < 0) spin_stick = getenv("ODYSSEY_SPIN_STICK") && atoi(getenv("ODYSSEY_SPIN_STICK"));
+        if (spin_press && !menu && !spin_stick) {
+            atomic_store(&shake_inject_until_ns, plat_now_ns() + 250000000ull);
+            spin_press = false;
+        }
         if (spin_press && !menu && (!spin_at || tick + 1 - spin_at > 24)) spin_at = tick + 1;
         uint64_t dt = spin_at ? tick + 1 - spin_at : UINT64_MAX;
         if (dt < 18 && !menu) {  // two full turns, 45 degrees an update, then two updates more
