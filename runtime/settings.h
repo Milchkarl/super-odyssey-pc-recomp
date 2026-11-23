@@ -132,6 +132,8 @@ typedef struct {
     int mouse_smoothing;     // percent, 0..90: the mouse camera's movement averaged over recent samples (0: raw)
     bool rumble;         // the controller's vibration (the game's HD rumble: runtime/hle/input.c input_vibration)
     int rumble_strength;  // 25..100 (%): how strong the vibration is
+    int switch2;          // Switch 2 controllers over Bluetooth LE (runtime/switch2*.c): 0 off, 1 on, 2 on and logs every
+                          // advertising device once; read at start (ODYSSEY_SWITCH2 overrides)
     // Each controller stick (runtime/hle/input.c stick_shape): the inner deadzone (percent of its travel that counts as
     // rest, 0..50) and its range (percent, 50..150: at 100 the stick's end is a full tilt; above, a full tilt comes
     // before the end; below, the end gives less). settings.ini's old stick_deadzone sets both deadzones.
