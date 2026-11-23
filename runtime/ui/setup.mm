@@ -362,6 +362,11 @@ static bool files_from_folder(const std::string &root, const std::string &src) {
     }
     uint64_t rbytes = romfs_dir_bytes(romfs.c_str());
     double need = (double)rbytes / 1e9 + 6, have = free_gb(rt_data_root());
+    if (!is_dir(romfs + "/MovieData")) {  // (#124: without them the game crashed where it plays one)
+        fail("Game files incomplete", "Its romfs has no MovieData folder (the game's videos). Extract the game files "
+                                      "again, with every folder.");
+        return false;
+    }
     if (rbytes < 4500000000ull) {
         char h[300];
         snprintf(h, sizeof h, "Its romfs holds %.1f GB, the base game's holds 5.5 GB: this is probably an update's romfs. "
@@ -381,7 +386,7 @@ static bool files_from_folder(const std::string &root, const std::string &src) {
     set_step("Copying the game code...");
     if (!romfs_copy_tree(exefs.c_str(), (root + "/exefs").c_str(), NULL)) { fail("Setup didn't finish", "Copying the game code failed."); return false; }
     mkdir((root + "/romfs").c_str(), 0755);
-    if (is_dir(romfs + "/MovieData") && !romfs_copy_tree((romfs + "/MovieData").c_str(), (root + "/romfs/MovieData").c_str(), NULL)) {
+    if (!romfs_copy_tree((romfs + "/MovieData").c_str(), (root + "/romfs/MovieData").c_str(), NULL)) {
         fail("Setup didn't finish", "Copying the videos failed.");
         return false;
     }
@@ -792,6 +797,7 @@ float menu_hint_bar_height(float scale);
 // for a bug report (on Linux / the Steam Deck the crash's own box can't have buttons, so this is where they are)
 static char g_crash_path[1200], g_crash_reason[256];
 static bool g_crash_notice;
+static bool g_videos_missing;  // this install has no game videos (#124): they show black; the Home view says so
 static int g_crash_action;  // 1 copied (see diagnostics_copy_status), 2 shown, 3 not shown
 static void crash_notice(float scale, float w) {
     if (!g_crash_notice) return;
@@ -849,6 +855,7 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
 #ifndef __APPLE__
     if (g_prep_due_home) stack += bh + 14 * scale + ImGui::GetFontSize() * 2.6f;
 #endif
+    if (g_videos_missing) stack += ImGui::GetFontSize() * 3.6f;
     float y0 = c0.y + fmaxf(pad * 3.2f, (cardh - stack) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(c0.x + pad * 1.6f, y0));
     ImGui::BeginGroup();
@@ -867,6 +874,13 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         ImGui::Dummy(ImVec2(0, 6 * scale));
     }
 #endif
+    if (g_videos_missing) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + bw);
+        ImGui::TextColored(kTextDimV, "%s", tr("This install has none of the game's videos: they show black. To get them "
+                                               "back, delete the extracted folder and start again with your game files."));
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, 6 * scale));
+    }
     if (plain_button("Settings", scale, ImVec2(bw, bh))) { g_cfg_settings = true; menu_focus_sidebar(); }
     if (g_cfg_focus == 2) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
     if (plain_button("Exit", scale, ImVec2(bw, bh))) g_config_result = 2;
@@ -1087,6 +1101,9 @@ bool config_run(void) {
             diagnostics_last_crash_seen();
         }
     }
+    // (an install set up from a game folder without MovieData, before setup asked for it - #124)
+    g_videos_missing = setup_ready("extracted") && !is_dir("extracted/romfs/MovieData");
+    if (g_videos_missing) LOG("[config] this install has no game videos (extracted/romfs/MovieData): they show black\n");
     if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) {
         LOG("[config] page not shown (%s)\n", force ? "ODYSSEY_CONFIG=0" : "turned off, nothing to ask");
         return true;
