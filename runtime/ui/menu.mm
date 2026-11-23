@@ -959,17 +959,111 @@ extern "C" bool vk_dlss_available(void);   // runtime/nvn/vulkan/dlss_probe.c
 extern "C" int vk_gpu_list(const char *names[8]);   // runtime/nvn/vulkan/device.c
 extern "C" const char *vk_gpu_in_use(void);
 extern "C" int vk_hdr_state(void);  // (device.c: 0 no HDR10 from the display, 1 offered, 2 the window is HDR10)
+extern "C" void vk_tex_memory(uint64_t out[3]);  // (textures.c: the game's textures' bytes by kind)
+#endif
+
+#ifndef __APPLE__
+// Memory at the top of the Display and Graphics pages: what the game uses of the graphics card's memory and of the
+// PC's, live (the performance overlay's numbers), green / yellow / red as it nears the limit - past it the game
+// stutters or stops ("out of memory"). Drawn, not a row: the cursor passes over it.
+static void memory_bars(float scale) {
+    VulkanOverlayStats s = vk_overlay_stats();
+    if (!s.vram_budget_mib && !s.ram_total_mib) return;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float w = ImGui::GetContentRegionAvail().x, fs = ImGui::GetFontSize(), h = fs * 1.15f, gap = fs * 0.35f;
+    struct { const char *label; float used, part, total; } bars[2] = {
+        {tr("Graphics memory"), (float)s.vram_mib, 0, (float)s.vram_budget_mib},
+        {tr("System memory"), (float)s.ram_used_mib, (float)s.game_ram_mib, (float)s.ram_total_mib},
+    };
+    bool warn = false;
+    for (int i = 0; i < 2; i++) {
+        if (bars[i].total <= 0) continue;
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float f = fminf(bars[i].used / bars[i].total, 1), lw = floorf(w * 0.30f);
+        ImU32 col = f < 0.75f ? IM_COL32(80, 190, 110, 255) : f < 0.9f ? IM_COL32(230, 190, 60, 255) : IM_COL32(225, 70, 60, 255);
+        warn |= f >= 0.9f;
+        char txt[96];
+        snprintf(txt, sizeof txt, "%.1f / %.1f GB", bars[i].used / 1024, bars[i].total / 1024);
+        dl->AddText(ImVec2(p.x + 8 * scale, p.y + (h - fs) * 0.5f), IM_COL32(230, 230, 235, 255), bars[i].label);
+        ImVec2 b0(p.x + lw, p.y + h * 0.2f), b1(p.x + w - 8 * scale, p.y + h * 0.8f);
+        dl->AddRectFilled(b0, b1, IM_COL32(45, 45, 55, 255), 4 * scale);
+        dl->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * f, b1.y), col, 4 * scale);
+        if (bars[i].part > 0)  // (the game's own share of the PC's memory, darker inside)
+            dl->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * fminf(bars[i].part / bars[i].total, f), b1.y),
+                              IM_COL32(0, 0, 0, 70), 4 * scale);
+        ImVec2 ts = ImGui::CalcTextSize(txt);
+        dl->AddText(ImVec2((b0.x + b1.x - ts.x) * 0.5f, p.y + (h - fs) * 0.5f), IM_COL32(255, 255, 255, 255), txt);
+        ImGui::Dummy(ImVec2(w, h + gap * 0.5f));
+    }
+    if (warn) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.4f, 1));
+        ImGui::TextWrapped("%s", tr("Near the limit: the game may stutter or stop. Lower Internal resolution, Shadow quality, "
+                                    "the upscaler or frame generation, or set Memory use to Low."));
+        ImGui::PopStyleColor();
+    }
+    ImGui::Dummy(ImVec2(w, gap));
+}
+
+// The memory a choice takes, worked out from what the game holds now (textures.c vk_tex_memory: its targets at the
+// internal resolution and its shadow maps) and, for what isn't the game's (the upscalers, frame generation), from the
+// pixels they work on. "About": drivers round and keep their own.
+static std::string mem_mb(double bytes) {
+    char b[32];
+    double mb = bytes / 1048576.0;
+    if (mb >= 1024) snprintf(b, sizeof b, "%.1f GB", mb / 1024);
+    else snprintf(b, sizeof b, "%.0f MB", mb < 1 ? 1 : mb);
+    return b;
+}
+static void mem_note_resolution(void) {
+    VulkanOverlayStats s = vk_overlay_stats();
+    uint64_t t[3];
+    vk_tex_memory(t);
+    double px = (double)s.render_w * s.render_h, out = (double)s.out_w * s.out_h;
+    if (px <= 0 || out <= 0 || !t[0]) return;
+    double per = t[0] / px;
+    std::string n = std::string(tr("Graphics memory for the picture:")) + " " + mem_mb(t[0]) + " " + tr("now") + " (" +
+                    std::to_string(s.render_w) + " x " + std::to_string(s.render_h) + "). 75%: ~" + mem_mb(per * out * 0.5625) +
+                    ", 100%: ~" + mem_mb(per * out) + ", 2x: ~" + mem_mb(per * out * 4) + ", 4x: ~" + mem_mb(per * out * 16) + ".";
+    opt_next_note(n.c_str());
+}
+static void mem_note_shadows(void) {
+    uint64_t t[3];
+    vk_tex_memory(t);
+    int q = g_settings.shadow_quality;
+    double f2 = q == 2 ? 16 : q == 1 ? 4 : 1;
+    double base = t[1] ? t[1] / f2 : 20.0 * 1048576;  // (Switch: not told apart from the other textures - about 20 MB)
+    std::string n = std::string(tr("Graphics memory for the shadow maps:")) + " Switch ~" + mem_mb(base) + ", High ~" +
+                    mem_mb(base * 4) + ", Ultra ~" + mem_mb(base * 16) + ".";
+    opt_next_note(n.c_str());
+}
+static void mem_note_pixels(const char *what, double bytes_per_px, bool output) {
+    VulkanOverlayStats s = vk_overlay_stats();
+    double px = output ? (double)s.out_w * s.out_h : (double)s.render_w * s.render_h;
+    if (px <= 0) return;
+    std::string n = std::string(tr(what)) + " ~" + mem_mb(px * bytes_per_px) + " " + tr("at this resolution") + ".";
+    opt_next_note(n.c_str());
+}
+static void mem_note_ram(void) {
+    VulkanOverlayStats s = vk_overlay_stats();
+    if (!s.game_ram_mib || !s.ram_total_mib) return;
+    char b[160];
+    snprintf(b, sizeof b, "%s %.1f GB %s %.1f GB.", tr("The game uses"), s.game_ram_mib / 1024.0, tr("of this PC's"),
+             s.ram_total_mib / 1024.0);
+    opt_next_note(b);
+}
 #endif
 
 static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
+    memory_bars(scale);
     opt_section("Display");
     pthread_mutex_lock(&g_displays_mutex);
     if (!g_displays.empty()) {
         std::vector<const char *> labels;
         for (const DisplayChoice &d : g_displays) labels.push_back(d.label);
         int selected = g_settings.monitor >= 0 && g_settings.monitor < (int)labels.size() ? g_settings.monitor : 0;
+        opt_next_dropdown();
         if (opt_choice("Monitor", &selected, labels.data(), (int)labels.size(), 0,
                        "Moves the game to the selected display. Works in windowed, borderless and exclusive fullscreen. "
                        "Current display leaves window placement to you. Display numbers follow the connected display list; "
@@ -1001,6 +1095,7 @@ static void tab_display(void) {
                                   "graphics. Choose another for a laptop that starts on the wrong one, or to compare. "
                                   "In use: %s.%s", in_use,
                      pending ? "\n\nApplies when the game starts again." : "");
+            opt_next_dropdown();
             if (opt_choice("Graphics card", &sel, gp, n, 0, d, false))
                 snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", sel ? gp[sel] : "");
         }
@@ -1031,6 +1126,7 @@ static void tab_display(void) {
         }
         bool borderless = g_settings.window_mode == BORDERLESS;
         if (borderless) opt_disable_next();
+        opt_next_dropdown();
         if (opt_choice("Display resolution", &sel, lp, n, 0,
                        "The window's size, or in exclusive fullscreen the monitor's mode - the sizes your monitor offers. "
                        "Desktop: the current window size, or the desktop's resolution in exclusive fullscreen. Borderless "
@@ -1052,6 +1148,7 @@ static void tab_display(void) {
             rp[rn] = rlabels[rn], rn++;
         }
         if (g_settings.window_mode != EXCLUSIVE_FULLSCREEN) opt_disable_next();
+        opt_next_dropdown();
         if (opt_choice("Refresh rate", &rsel, rp, rn, 0,
                        "The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change "
                        "it in your system's display settings). Auto: the highest rate your monitor offers that is a multiple "
@@ -1129,6 +1226,7 @@ static void tab_display(void) {
                               "flattened into it. Below the highlights the picture stays the game's. Changes at once.%s",
                  st == 0 ? "\n\nThis display offers no HDR right now: turn HDR on in the system's display settings "
                            "(Windows: Settings > Display > Use HDR), then here." : "");
+        mem_note_pixels("Graphics memory for HDR:", 16, false);
         if (opt_toggle("HDR", &g_settings.hdr, false, d)) vk_request_swapchain_remake();
     }
     {
@@ -1185,6 +1283,7 @@ static void tab_display(void) {
 static void tab_graphics(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##graphics", scale);
+    memory_bars(scale);
     opt_section("Resolution");
     // display order -> RES_* (the ini / enum order predates the menu order)
     // (up to 4x: 7680 x 4320, 8K - more only ran out of GPU memory, and sat next to 75% in the list)
@@ -1239,6 +1338,8 @@ static void tab_graphics(void) {
                      "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes."), at);
         }
 #endif
+        opt_next_dropdown();
+        mem_note_resolution();
         if (opt_choice("Internal resolution", &ri, res, NRES, RES_DISPLAY_AT, d, false)) g_settings.res_mode = res_mode[ri];
     }
 #ifdef __APPLE__
@@ -1253,6 +1354,7 @@ static void tab_graphics(void) {
             ud = udm;
             opt_disable_next();
         }
+        opt_next_dropdown();
         if (opt_choice("Spatial upscaler", &ui, ups, 2, 1, ud)) g_settings.upscaler = ui ? UPSCALE_SHARP : UPSCALE_BILINEAR;
     }
 #endif
@@ -1272,6 +1374,8 @@ static void tab_graphics(void) {
         static const char *methods[] = {"Off", "AMD FSR 1", "NVIDIA DLSS", "AMD FSR 3.1", "AMD FSR 4 (Beta)", "Intel XeSS (Beta)", "AMD FSR 2"};
         bool avail[] = {true, true, vk_dlss_available(), vk_fsr3_available(), vk_fsr4_available(), vk_xess_available(), vk_fsr2_available()};
         int m = !g_settings.temporal_off ? g_settings.temporal_backend + 2 : g_settings.upscaler == UPSCALE_FSR1 ? 1 : 0;
+        opt_next_dropdown();
+        mem_note_pixels("Graphics memory for a temporal upscaler (DLSS, FSR, XeSS):", 40, true);
         if (opt_choice_avail("Upscale method", &m, methods, TEMPORAL_BACKEND_COUNT + 2, 0,
                              "How the picture is upscaled to the window. Off: the game renders plainly at the internal "
                              "resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and "
@@ -1289,6 +1393,8 @@ static void tab_graphics(void) {
     if (!g_settings.temporal_off) {  // frame generation (fsr3_sdk.c: AMD FSR; sl_glue.cpp: NVIDIA DLSS), with any upscaler
         static const char *fgn[FG_COUNT] = {"Off", "AMD FSR", "NVIDIA DLSS (Beta)"};
         int was = g_settings.frame_gen;
+        opt_next_dropdown();
+        mem_note_pixels("Graphics memory for frame generation:", 32, true);
         if (opt_choice("Frame generation", &g_settings.frame_gen, fgn, FG_COUNT, FG_OFF,
                        "A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother "
                        "motion on a 120 Hz or faster display, a little more input delay (Performance > Low latency takes most of it "
@@ -1316,6 +1422,7 @@ static void tab_graphics(void) {
             "AMD temporal reconstruction. Native AA uses display resolution; other modes render at lower input resolutions. Changes during play.";
         if (backend == TEMPORAL_FSR4 && !vk_fsr4_available()) help =
             "FSR 4 ML is unavailable on this GPU/runtime. FSR 3.1 is used when supported; otherwise the game uses regular rendering. The status below shows the active path.";
+        opt_next_dropdown();
         opt_choice(backend == TEMPORAL_XESS ? "XeSS mode" : backend == TEMPORAL_FSR4 ? "FSR 4 mode" :
                    backend == TEMPORAL_FSR2 ? "FSR 2 mode" : "FSR 3.1 mode",
                    settings_temporal_mode(), modes, DLSS_MODE_COUNT, DLSS_QUALITY, help);
@@ -1327,9 +1434,11 @@ static void tab_graphics(void) {
     } else {
         static const char *modes[] = {"Off", "DLAA", "Quality", "Balanced", "Performance"};
         static const char *presets[] = {"Default", "K", "L", "M"};
+        opt_next_dropdown();
         opt_choice("DLSS mode", &g_settings.dlss_mode, modes, DLSS_MODE_COUNT, DLSS_OFF,
                    "DLAA anti-aliases at display resolution. Quality, Balanced and Performance render at progressively "
                    "lower resolutions. Changes apply during play; history resets while the new mode is prepared.");
+        opt_next_dropdown();
         opt_choice("DLSS preset", &g_settings.dlss_preset, presets, DLSS_PRESET_COUNT, DLSS_PRESET_DEFAULT,
                    "Model hint for NVIDIA DLSS. Default uses K for DLAA/Quality/Balanced and M for Performance. Changes during play.");
     }
@@ -1356,6 +1465,7 @@ static void tab_graphics(void) {
         static const char *methods[] = {"Off", "AMD FSR 1", "AMD FSR 2"};
         bool avail[] = {true, true, vk_fsr2_available()};
         int m = !g_settings.temporal_off && g_settings.temporal_backend == TEMPORAL_FSR2 ? 2 : g_settings.upscaler == UPSCALE_FSR1 ? 1 : 0;
+        opt_next_dropdown();
         if (opt_choice_avail("Upscale method", &m, methods, 3, 0,
                              "How the picture is upscaled to the window. Off: the game renders plainly at the internal "
                              "resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and "
@@ -1370,6 +1480,7 @@ static void tab_graphics(void) {
     }
     if (!g_settings.temporal_off && g_settings.temporal_backend == TEMPORAL_FSR2) {
         static const char *modes[] = {"Off", "Native AA", "Quality", "Balanced", "Performance"};
+        opt_next_dropdown();
         opt_choice("FSR 2 mode", &g_settings.fsr3_mode, modes, DLSS_MODE_COUNT, DLSS_QUALITY,
                    "Native AA: renders at the display resolution, anti-aliasing only. Quality (1.5x), Balanced (1.7x) and "
                    "Performance (2x): render at lower resolutions - less work for the GPU. Changes during play.");
@@ -1411,6 +1522,7 @@ static void tab_graphics(void) {
     }
     {
         static const char *sq[] = {"Switch", "High (2x)", "Ultra (4x)"};
+        mem_note_shadows();
         opt_choice("Shadow quality", &g_settings.shadow_quality, sq, 3, 0,
                    "Draws the game's shadow maps at 2x or 4x their size: sharper, steadier shadow edges without the "
                    "stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the "
@@ -1437,6 +1549,7 @@ static void tab_graphics(void) {
                    "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false))
             g_settings.bloom_quality = bq_value[bq_shown];
         static const char *ao[] = {"Off", "Medium", "High"};
+        mem_note_pixels("Graphics memory for ambient occlusion:", 12, false);
         opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 0,
                    "Darkens the places light reaches less: the corners between steps and walls, the ground under "
                    "Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch "
@@ -1601,6 +1714,7 @@ static void tab_performance(void) {
     }
     {
         static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
+        mem_note_ram();
         opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_NORMAL,
                    "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
                    "RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first "

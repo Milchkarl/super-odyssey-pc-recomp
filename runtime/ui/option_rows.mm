@@ -24,6 +24,10 @@ static std::string g_desc_first;  // the page's first row (shown until a row is 
 static std::string g_title_hover, g_title_focus, g_title_shown, g_title_first;  // their rows' labels (the card's title)
 static int g_row_toggle = -1;  // (opt_toggle -> row: the toggle's state)
 static float g_row_slider = -1;  // (opt_int_slider -> row: the value's place on its track, 0..1; -1 not a slider)
+static bool g_next_dropdown;     // (opt_next_dropdown -> the next opt_choice / opt_choice_avail: a dropdown list)
+static std::string g_row_note;   // (opt_next_note -> the next row: a line under its description, already in the menu's language)
+void opt_next_note(const char *note) { g_row_note = note ? note : ""; }
+static bool g_row_chevron;       // (-> row: a dropdown's chevron in the box instead of the arrows)
 static float g_slider_drag = -1;  // (row -> opt_int_slider: where the mouse holds the track, 0..1; -1 not dragged)
 static std::string g_page, g_page_shown;  // this page's id, and the page g_desc_shown belongs to
 static bool g_next_disabled;
@@ -81,6 +85,12 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     ImGui::PushID(label_en);  // (the English one: the same row whatever the menu's language)
     // (the menu's language: runtime/ui/i18n.h - label, value and description as shown)
     const char *label = tr(label_en), *desc = tr(desc_en);
+    static std::string with_note;  // (opt_next_note: a live line under the description - the memory a choice takes)
+    if (!g_row_note.empty()) {
+        with_note = g_row_note + (desc && *desc ? std::string("\n\n") + desc : std::string());  // (first: long ones scroll)
+        desc = with_note.c_str();
+        g_row_note.clear();
+    }
     // (the option's plain-English note on top: what it does, what is recommended - option_notes.h)
     std::string noted;
     if (const OptionNote *n = option_note(label_en)) {
@@ -150,6 +160,8 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     // one band across.
     int tog = g_row_toggle;  // (opt_toggle: 1 On, 0 Off; -1 not a toggle)
     g_row_toggle = -1;
+    bool chev = g_row_chevron;  // (a dropdown: a chevron at the box's right end)
+    g_row_chevron = false;
     float sl = g_row_slider;  // (opt_int_slider: a track filled to the value, dragged with the mouse)
     g_row_slider = -1;
     g_slider_drag = -1;
@@ -228,6 +240,12 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         float tagw = tag ? ImGui::CalcTextSize(tag).x * tag_s + fs * 0.35f : 0;
         if (tag && vw0 + tagw > inner) tag = NULL, tagw = 0;  // (no room: the value keeps its size)
         if (vw0 > inner && vw0 > 0) vs = fmaxf(0.7f, inner / vw0);
+        if (chev) {  // (a dropdown: the list opens with a click or A; left / right still step)
+            ImU32 ac = off ? kTextOff : theme_u32(kAccentV, lit ? 1.0f : 0.85f);
+            float cx = b1.x - agap - aw;
+            dl->AddTriangleFilled(ImVec2(cx - aw * 0.9f, cy - aw * 0.45f), ImVec2(cx + aw * 0.9f, cy - aw * 0.45f),
+                                  ImVec2(cx, cy + aw * 0.6f), ac);
+        }
         if (arrows) {
             ImU32 ac = off ? kTextOff : theme_u32(kAccentV, lit ? 1.0f : 0.85f);  // (the red accent)
             float lx = b0.x + agap, rx = b1.x - agap - aw;
@@ -270,9 +288,52 @@ bool opt_toggle(const char *label, bool *v, bool def, const char *desc) {
     return true;
 }
 
+void opt_next_dropdown(void) { g_next_dropdown = true; }
+
+// A dropdown row's list, under its value box (the row is the last item): open = a click or A on the row this frame.
+// The mouse or up / down and A choose, B / Esc closes it; avail (may be NULL) greys choices this PC can't use.
+// Returns the chosen index, or -1.
+static int dropdown_list(const char *label, int cur, const char *const *names, int n, const bool *avail, bool open) {
+    ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+    float w = r1.x - r0.x, bx = r0.x + floorf(w * 0.54f) + 6 * g_scale, bw = r1.x - bx;
+    ImGui::PushID(label);
+    if (open) ImGui::OpenPopup("##dropdown");
+    int pick = -1;
+    float rowh = ImGui::GetFontSize() * 1.6f, avail_h = ImGui::GetIO().DisplaySize.y - r1.y - 8 * g_scale;
+    float list_h = fminf(rowh * n + 12 * g_scale, fmaxf(avail_h, rowh * 4));
+    bool above = avail_h < rowh * fminf((float)n, 4.0f);  // (no room below: it opens upward)
+    ImGui::SetNextWindowPos(above ? ImVec2(bx, r0.y - list_h) : ImVec2(bx, r1.y));
+    ImGui::SetNextWindowSize(ImVec2(bw, list_h));
+    if (ImGui::BeginPopup("##dropdown")) {
+        for (int i = 0; i < n; i++) {
+            bool en = !avail || avail[i];
+            if (!en) ImGui::BeginDisabled();
+            if (ImGui::Selectable(tr(names[i]), i == cur, 0, ImVec2(0, rowh))) pick = i;
+            if (i == cur && ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus(), ImGui::SetScrollHereY(0.5f);
+            if (!en) ImGui::EndDisabled();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    if (pick >= 0) menu_rec("dropdown \"%s\": chose \"%s\"", label, names[pick]);
+    return pick;
+}
+
 bool opt_choice(const char *label, int *v, const char *const *names, int n, int def, const char *desc, bool wrap) {
     int cur = *v >= 0 && *v < n ? *v : 0;
-    int step = row(label, names[cur], cur != def, desc, false, true);
+    bool dd = g_next_dropdown;
+    g_next_dropdown = false;
+    g_row_chevron = dd;
+    int step = row(label, names[cur], cur != def, desc, false, !dd);
+    if (dd) {
+        int pick = dropdown_list(label, cur, names, n, NULL, step == 2);
+        if (step == 2) return false;  // (the list opened instead)
+        if (pick >= 0) {
+            if (pick == cur) return false;
+            *v = pick;
+            return true;
+        }
+    }
     if (!step) return false;
     int nv = cur + (step == 2 ? 1 : step);
     nv = wrap ? (nv + n) % n : nv < 0 ? 0 : nv >= n ? n - 1 : nv;
@@ -291,7 +352,19 @@ bool opt_choice_avail(const char *label, int *v, const char *const *names, int n
     for (int i = 0; i < n; i++)
         if (!avail[i]) missing += (missing.empty() ? "" : ", ") + std::string(tr(names[i]));
     if (!missing.empty()) d += "\n\n" + std::string(tr("Not available on this PC (greyed out):")) + " " + missing + ".";
-    int step = row(label, names[cur], cur != def, d.c_str(), false, true);
+    bool dd = g_next_dropdown;
+    g_next_dropdown = false;
+    g_row_chevron = dd;
+    int step = row(label, names[cur], cur != def, d.c_str(), false, !dd);
+    if (dd) {
+        int pick = dropdown_list(label, cur, names, n, avail, step == 2);
+        if (step == 2) return false;  // (the list opened instead)
+        if (pick >= 0) {
+            if (pick == cur || !avail[pick]) return false;
+            *v = pick;
+            return true;
+        }
+    }
     if (!step) return false;
     int dir = step == 2 ? 1 : step, nv = cur;
     for (int k = 0; k < n; k++) {  // (the next available one that way, wrapping)

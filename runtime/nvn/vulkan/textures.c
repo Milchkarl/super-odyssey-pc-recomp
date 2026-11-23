@@ -4,6 +4,7 @@
 #include <float.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -293,6 +294,7 @@ void vk_collect_dead(void) {
 }
 
 static __thread bool t_prefetch;  // (vk_tex_prefetch, below) uploading ahead of a first use
+static void count_image(TexBackend *b);  // (the menu's memory estimates: below)
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->sx = b->scalable ? tex_factor(b, t, false) : 1;
@@ -427,6 +429,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         VK_CHECK(r2);
         depthfmt = false;
     }
+    count_image(b);
     b->storage = (ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
     b->format = vf;
     b->width = tw; b->height = th; b->depth = depth; b->layers = layers; b->levels = levels; b->samples = samples;
@@ -472,7 +475,24 @@ void vk_dl_note_upload(void *img, uint32_t w, uint32_t h, uint32_t lv);  // (exe
 static uint32_t level_w(const TexBackend *b, uint32_t lv) { uint32_t v = b->width >> lv; return v ? v : 1; }
 static uint32_t level_h(const TexBackend *b, uint32_t lv) { uint32_t v = b->height >> lv; return v ? v : 1; }
 
+// The game's textures' memory by kind (the menu's estimates: menu.mm mem_cost): 0 the targets drawn at the internal
+// resolution (scalable), 1 the shadow maps (Shadow quality), 2 everything else
+static _Atomic int64_t g_tex_bytes[3];
+void vk_tex_memory(uint64_t out[3]) {
+    for (int k = 0; k < 3; k++) { int64_t v = atomic_load(&g_tex_bytes[k]); out[k] = v > 0 ? (uint64_t)v : 0; }
+}
+static void count_image(TexBackend *b) {
+    if (!b->mem) return;
+    VmaAllocationInfo info;
+    vmaGetAllocationInfo(g_vk.vma, b->mem, &info);
+    b->mem_bytes = info.size;
+    b->mem_kind = b->shadow ? 1 : b->scalable ? 0 : 2;
+    atomic_fetch_add(&g_tex_bytes[b->mem_kind], (int64_t)b->mem_bytes);
+}
+
 static void destroy_image(TexBackend *b) {
+    if (b->mem && b->mem_bytes) atomic_fetch_sub(&g_tex_bytes[b->mem_kind], (int64_t)b->mem_bytes);
+    b->mem_bytes = 0;
     views_forget(b);
     if (b->image || b->mem) defer((Dead){.img = b->image, .mem = b->mem});  // (never the same allocation twice)
     b->image = VK_NULL_HANDLE;

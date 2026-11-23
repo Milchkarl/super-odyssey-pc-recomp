@@ -21,6 +21,10 @@ bool opt_slider(const char *label, float *v, float lo, float hi, float step, flo
 // (if given) is shown for lo instead (e.g. "Any")
 bool opt_int(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc,
              const char *lo_name = NULL);
+// the next opt_choice / opt_choice_avail as a dropdown: a click or A opens its list (left / right still step)
+void opt_next_dropdown(void);
+// a line under the next row's description (worked out live, e.g. the memory its choice takes)
+void opt_next_note(const char *note);
 // the same as a slider: a track the mouse drags (left / right step, held: faster; A: back to the default)
 bool opt_int_slider(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc);
 // an action: true when activated
