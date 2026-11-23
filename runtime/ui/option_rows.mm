@@ -214,7 +214,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
             if (chosen && !off) {
                 float lw2 = fmaxf(ts.x, fs * 1.2f), ly = b1.y - fmaxf(3, 4 * g_scale);
                 float lx0 = (a.x + z.x - lw2) * 0.5f;
-                dl->AddRectFilled(ImVec2(lx0, ly), ImVec2(lx0 + lw2, ly + fmaxf(2, 2.5f * g_scale)), kText, 2 * g_scale);
+                dl->AddRectFilled(ImVec2(lx0, ly), ImVec2(lx0 + lw2, ly + fmaxf(2, 2.5f * g_scale)), theme_u32(kGoldV), 2 * g_scale);
             }
         }
         if (clicked && !off && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {  // (a click on the chosen half: nothing)
@@ -226,7 +226,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         float m = fs * 0.5f, x0 = b0.x + m, x1 = b1.x - m, f = fminf(fmaxf(sl, 0), 1), hx = x0 + (x1 - x0) * f;
         float ty = p.y + h * 0.74f, th = fmaxf(3, 4 * g_scale);
         dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(x1, ty + th * 0.5f), theme_u32(kSidebarV), th);
-        if (!off) dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(hx, ty + th * 0.5f), theme_u32(kTextV, lit ? 0.95f : 0.75f), th);
+        if (!off) dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(hx, ty + th * 0.5f), theme_u32(kGoldV, lit ? 1.0f : 0.85f), th);
         dl->AddCircleFilled(ImVec2(hx, ty), fs * 0.32f, off ? kTextOff : kText);
         ImVec2 vs = ImGui::CalcTextSize(value.c_str());
         float vx = (b0.x + b1.x - vs.x) * 0.5f, vy = p.y + h * 0.08f;
@@ -308,22 +308,46 @@ static int dropdown_list(const char *label, int cur, const char *const *names, i
     ImGui::PushID(label);
     if (open) ImGui::OpenPopup("##dropdown");
     int pick = -1;
-    float rowh = ImGui::GetFontSize() * 1.6f, avail_h = ImGui::GetIO().DisplaySize.y - r1.y - 8 * g_scale;
-    float list_h = fminf(rowh * n + 12 * g_scale, fmaxf(avail_h, rowh * 4));
+    // (its own look, owner 2026-11-23: a charcoal panel the value box's width just under it, a thin border, the
+    // choices centred as in the box, the hovered one lighter, the current one marked with a red bar)
+    float rowh = (r1.y - r0.y) * 0.9f, pad = 4 * g_scale, gap = 3 * g_scale;
+    float avail_h = ImGui::GetIO().DisplaySize.y - r1.y - gap - 8 * g_scale;
+    float list_h = fminf(rowh * n + 2 * pad, fmaxf(avail_h, rowh * 4 + 2 * pad));
     bool above = avail_h < rowh * fminf((float)n, 4.0f);  // (no room below: it opens upward)
-    ImGui::SetNextWindowPos(above ? ImVec2(bx, r0.y - list_h) : ImVec2(bx, r1.y));
+    ImGui::SetNextWindowPos(above ? ImVec2(bx, r0.y - list_h - gap) : ImVec2(bx, r1.y + gap));
     ImGui::SetNextWindowSize(ImVec2(bw, list_h));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, theme_u32(kBoxV));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 40));
+    ImGui::PushStyleColor(ImGuiCol_Header, theme_u32(kBoxHotV));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, theme_u32(kSurfaceHoverV));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, theme_u32(kBoxHotV));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, theme_u32(kGoldV));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 5 * g_scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, fmaxf(1, g_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopup("##dropdown")) {
         g_dropdown_frame = ImGui::GetFrameCount();
         for (int i = 0; i < n; i++) {
             bool en = !avail || avail[i];
             if (!en) ImGui::BeginDisabled();
+            ImGui::PushID(i);
             if (ImGui::Selectable(tr(names[i]), i == cur, 0, ImVec2(0, rowh))) pick = i;
+            if (i == cur) {  // (the current choice: a short red bar at its left)
+                ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+                float bh = (b.y - a.y) * 0.5f;
+                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + 2 * g_scale, a.y + bh * 0.5f),
+                                                          ImVec2(a.x + 5 * g_scale, b.y - bh * 0.5f), theme_u32(kGoldV), 2 * g_scale);
+            }
             if (i == cur && ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus(), ImGui::SetScrollHereY(0.5f);
+            ImGui::PopID();
             if (!en) ImGui::EndDisabled();
         }
         ImGui::EndPopup();
     }
+    ImGui::PopStyleVar(5);
+    ImGui::PopStyleColor(6);
     ImGui::PopID();
     if (pick >= 0) menu_rec("dropdown \"%s\": chose \"%s\"", label, names[pick]);
     return pick;

@@ -1331,7 +1331,7 @@ static void tab_graphics(void) {
         int n = snprintf(d, sizeof d, "%s\n\n%s", tr("How sharp the 3D image is - each choice shows the size it renders at in this window "
                                       "and picture shape. Shown as your screen's resolution: that resolution (at least the "
                                       "Switch's 1600 x 900). 100% (the default): exactly your screen's pixels (Steam Deck: 1280 x 800). "
-                                      "Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of "
+                                      "75% / 50% / 25%: a share of "
                                       "the display, for slower machines; the fixed sizes render at exactly that, above the "
                                       "screen's for a sharper picture (supersampling)."), at);
         if (g_settings.res_mode == RES_DYNAMIC && n >= 0 && (size_t)n < sizeof d)
@@ -1347,6 +1347,8 @@ static void tab_graphics(void) {
         const char *shown[11];
         int shown_mode[11], ns = 0, si = 0, sdef = 0;
         for (int i = 0; i < NRES; i++) {
+            // (Dynamic: out of the list - owner 2026-11-23; shown only while it is the setting, to move away from)
+            if (res_mode[i] == RES_DYNAMIC && i != ri) continue;
             int twin = -1;
             for (int k = 0; k < ns && res_mode[i] != RES_DYNAMIC; k++)
                 if (res_w[i] > 0 && res_mode[k] != RES_DYNAMIC) {
