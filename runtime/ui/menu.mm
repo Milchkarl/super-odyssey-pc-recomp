@@ -964,13 +964,16 @@ extern "C" void vk_tex_memory(uint64_t out[3]);  // (textures.c: the game's text
 
 #ifndef __APPLE__
 // Memory at the top of the Display and Graphics pages: what the game uses of the graphics card's memory and of the
-// PC's, live (the performance overlay's numbers), green / yellow / red as it nears the limit - past it the game
+// PC's, live (the performance overlay's numbers), green, red near the limit - past it the game
 // stutters or stops ("out of memory"). Drawn, not a row: the cursor passes over it.
 static void memory_bars(float scale) {
     VulkanOverlayStats s = vk_overlay_stats();
     if (!s.vram_budget_mib && !s.ram_total_mib) return;
     ImDrawList *dl = ImGui::GetWindowDrawList();
-    float w = ImGui::GetContentRegionAvail().x, fs = ImGui::GetFontSize(), h = fs * 1.15f, gap = fs * 0.35f;
+    // (laid out as the rows under them - owner 2026-11-23: the label on its band, the bar in the value boxes' column,
+    // a row's height and gap - green, red near the limit)
+    float w = ImGui::GetContentRegionAvail().x, fs = ImGui::GetFontSize(), h = fs * 1.9f, gap = fs * 0.35f;
+    float r = 5 * scale, pad = 18 * scale, split = floorf(w * 0.54f), gapx = 6 * scale;
     struct { const char *label; float used, part, total; } bars[2] = {
         {tr("Graphics memory"), (float)s.vram_mib, 0, (float)s.vram_budget_mib},
         {tr("System memory"), (float)s.ram_used_mib, (float)s.game_ram_mib, (float)s.ram_total_mib},
@@ -979,15 +982,17 @@ static void memory_bars(float scale) {
     for (int i = 0; i < 2; i++) {
         if (bars[i].total <= 0) continue;
         ImVec2 p = ImGui::GetCursorScreenPos();
-        float f = fminf(bars[i].used / bars[i].total, 1), lw = floorf(w * 0.30f);
-        // (black / grey / white, owner 2026-11-23: a grey fill, brighter as it nears the limit)
-        ImU32 col = f < 0.75f ? IM_COL32(120, 120, 128, 255) : f < 0.9f ? IM_COL32(175, 175, 182, 255) : IM_COL32(235, 235, 240, 255);
+        float f = fminf(bars[i].used / bars[i].total, 1);
+        ImU32 col = f < 0.9f ? IM_COL32(76, 175, 90, 255) : theme_u32(kGoldV);  // (green; red near the limit)
         warn |= f >= 0.9f;
         char txt[96];
         snprintf(txt, sizeof txt, "%.1f / %.1f GB", bars[i].used / 1024, bars[i].total / 1024);
-        dl->AddText(ImVec2(p.x + 8 * scale, p.y + (h - fs) * 0.5f), IM_COL32(230, 230, 235, 255), bars[i].label);
-        ImVec2 b0(p.x + lw, p.y + h * 0.2f), b1(p.x + w - 8 * scale, p.y + h * 0.8f);
-        dl->AddRectFilled(b0, b1, IM_COL32(45, 45, 55, 255), 4 * scale);
+        dl->AddRectFilled(p, ImVec2(p.x + split, p.y + h), theme_u32(kSurfaceV), r);
+        dl->AddText(ImVec2(p.x + pad, p.y + (h - fs) * 0.5f), theme_u32(kTextV), bars[i].label);
+        ImVec2 v0(p.x + split + gapx, p.y), v1(p.x + w, p.y + h);
+        dl->AddRectFilled(v0, v1, theme_u32(kBoxV), r);
+        ImVec2 b0(v0.x + fs * 0.5f, p.y + h * 0.22f), b1(v1.x - fs * 0.5f, p.y + h * 0.78f);
+        dl->AddRectFilled(b0, b1, theme_u32(kSidebarV), 4 * scale);
         dl->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * f, b1.y), col, 4 * scale);
         if (bars[i].part > 0)  // (the game's own share of the PC's memory, darker inside)
             dl->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * fminf(bars[i].part / bars[i].total, f), b1.y),
@@ -995,7 +1000,8 @@ static void memory_bars(float scale) {
         ImVec2 ts = ImGui::CalcTextSize(txt), tp((b0.x + b1.x - ts.x) * 0.5f, p.y + (h - fs) * 0.5f);
         dl->AddText(ImVec2(tp.x + 1.5f * scale, tp.y + 1.5f * scale), IM_COL32(0, 0, 0, 220), txt);  // (readable on any fill)
         dl->AddText(tp, IM_COL32(255, 255, 255, 255), txt);
-        ImGui::Dummy(ImVec2(w, h + gap * 0.5f));
+        ImGui::Dummy(ImVec2(w, h));
+        ImGui::Dummy(ImVec2(w, 4 * scale));  // (the rows' gap)
     }
     if (warn) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));

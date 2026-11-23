@@ -310,22 +310,23 @@ static int dropdown_list(const char *label, int cur, const char *const *names, i
     int pick = -1;
     // (its own look, owner 2026-11-23: a charcoal panel the value box's width just under it, a thin border, the
     // choices centred as in the box, the hovered one lighter, the current one marked with a red bar)
-    float rowh = (r1.y - r0.y) * 0.9f, pad = 4 * g_scale, gap = 3 * g_scale;
-    float avail_h = ImGui::GetIO().DisplaySize.y - r1.y - gap - 8 * g_scale;
-    float list_h = fminf(rowh * n + 2 * pad, fmaxf(avail_h, rowh * 4 + 2 * pad));
+    // (each choice a small rounded box with a gap under it, as the rows are; owner 2026-11-23: better spacing)
+    float rowh = (r1.y - r0.y) * 0.85f, pad = 6 * g_scale, gap = 4 * g_scale, igap = 3 * g_scale;
+    float avail_h = ImGui::GetIO().DisplaySize.y - r1.y - gap - 48 * g_scale;  // (above the hint bar)
+    float list_h = fminf((rowh + igap) * n - igap + 2 * pad, fmaxf(avail_h, (rowh + igap) * 4 + 2 * pad));
     bool above = avail_h < rowh * fminf((float)n, 4.0f);  // (no room below: it opens upward)
     ImGui::SetNextWindowPos(above ? ImVec2(bx, r0.y - list_h - gap) : ImVec2(bx, r1.y + gap));
     ImGui::SetNextWindowSize(ImVec2(bw, list_h));
     ImGui::PushStyleColor(ImGuiCol_PopupBg, theme_u32(kBoxV));
     ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 40));
-    ImGui::PushStyleColor(ImGuiCol_Header, theme_u32(kBoxHotV));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, theme_u32(kSurfaceHoverV));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, theme_u32(kBoxHotV));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));  // (the choices' boxes are drawn below, rounded)
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_NavCursor, theme_u32(kGoldV));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 5 * g_scale);
     ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, fmaxf(1, g_scale));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, igap));
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopup("##dropdown")) {
         g_dropdown_frame = ImGui::GetFrameCount();
@@ -333,6 +334,12 @@ static int dropdown_list(const char *label, int cur, const char *const *names, i
             bool en = !avail || avail[i];
             if (!en) ImGui::BeginDisabled();
             ImGui::PushID(i);
+            {   // (its box: rounded, lighter under the mouse, the current one lighter still)
+                ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + ImGui::GetContentRegionAvail().x, a.y + rowh);
+                bool hov = en && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(a, b);
+                ImU32 bg = i == cur ? theme_u32(kBoxHotV) : hov ? theme_u32(kSurfaceHoverV) : theme_u32(kSurfaceV);
+                ImGui::GetWindowDrawList()->AddRectFilled(a, b, bg, 4 * g_scale);
+            }
             if (ImGui::Selectable(tr(names[i]), i == cur, 0, ImVec2(0, rowh))) pick = i;
             if (i == cur) {  // (the current choice: a short red bar at its left)
                 ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
