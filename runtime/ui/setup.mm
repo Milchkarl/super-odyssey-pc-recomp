@@ -453,8 +453,9 @@ static void *work(void *) {
 // Done: a file in the launcher's data folder (recomplauncher.json prepare.done), wherever the game's data is.
 static void cli_progress_print(float f, const std::string &step) {
     if (!g_code_only && f < 1) f /= 0.55f;  // (the installer's bar: files and code up to 0.55, then shaders - not here)
-    printf("progress %.2f %s\n", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
-    fflush(stdout);
+    char line[600];
+    snprintf(line, sizeof line, "progress %.2f %s", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
+    plat_parent_line(line);  // (the launcher's stdout, also when the log took ours)
 }
 static void *cli_progress_thread(void *) {  // (while the work runs: a line when the step or the bar moves)
     std::string last_step;
@@ -477,8 +478,7 @@ extern "C" int setup_prepare_cli(const char *game) {
         rt_data_root(), files_here ? "here" : "not here");
     if (!game || !*game) {
         if (!files_here) {
-            printf("No game files yet: choose your extracted game (the folder with exefs and romfs).\n");
-            fflush(stdout);
+            plat_parent_line("No game files yet: choose your extracted game (the folder with exefs and romfs).");
             return 2;
         }
         g_code_only = true;
@@ -499,8 +499,7 @@ extern "C" int setup_prepare_cli(const char *game) {
             pthread_mutex_lock(&g_lock);
             std::string head = g_fail_head, hint = g_fail_hint;
             pthread_mutex_unlock(&g_lock);
-            printf("%s: %s\n", head.empty() ? "Setup didn't finish" : head.c_str(), hint.c_str());
-            fflush(stdout);
+            plat_parent_line(((head.empty() ? std::string("Setup didn't finish") : head) + ": " + hint).c_str());
             return 1;
         }
         cli_progress_print(1, "Ready to play");

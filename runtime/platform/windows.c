@@ -163,6 +163,21 @@ static unsigned __stdcall log_forward(void *arg) {
 
 static void log_forward_at_exit(void) { log_forward_now(); }
 
+static int g_parent_stdout = -1;  // (the stdout this process was given, before it went into the log)
+
+void plat_parent_line(const char *line) {
+    if (g_parent_stdout < 0) {  // (stdout as given: a console, or not moved)
+        printf("%s\n", line);
+        fflush(stdout);
+        return;
+    }
+    fprintf(stderr, "%s\n", line);  // (the log)
+    char buf[1100];
+    int n = snprintf(buf, sizeof buf, "%s\n", line);
+    if (n > (int)sizeof buf - 1) n = (int)sizeof buf - 1;
+    if (n > 0 && _write(g_parent_stdout, buf, (unsigned)n) < 0) {}
+}
+
 static void log_to_file_without_console(void) {
     HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
     bool piped = false;
@@ -199,6 +214,9 @@ static void log_to_file_without_console(void) {
     }
     if (!freopen(g_log_path, append ? "ab" : "wb", stderr)) { g_log_path[0] = 0; return; }
     setvbuf(stderr, NULL, _IONBF, 0);
+    fflush(stdout);
+    g_parent_stdout = _dup(_fileno(stdout));  // (plat_parent_line: RecompLauncher reads the setup step's lines there)
+    if (g_parent_stdout >= 0) SetHandleInformation((HANDLE)_get_osfhandle(g_parent_stdout), HANDLE_FLAG_INHERIT, 0);
     _dup2(_fileno(stderr), _fileno(stdout));
     _putenv("ODYSSEY_LOG_APPEND=1");
     if (g_forward_to != INVALID_HANDLE_VALUE) {
