@@ -204,12 +204,23 @@ static float shadow_factor(void) {
     int q = env > 0 ? env : g_settings.shadow_quality == 2 ? 4 : g_settings.shadow_quality == 1 ? 2 : 1;
     return q >= 4 ? 4.0f : q >= 2 ? 2.0f : 1.0f;
 }
+// Half-size effects (tests): the game draws some effects into half-size (800x450) targets - Sand's dust and sand clouds
+// over a half-size copy of the depth, the Wooded Kingdom's light shafts' source - and lays them over its picture.
+// ODYSSEY_HALF_FULL=1 draws those at the picture's full size. Tried as a setting for 1.0.0 and left out: in Sand,
+// Wooded, Seaside, Metro, Snow and Cap it made no visible difference (ODYSSEY_LOG_SMALL_TARGETS lists such passes).
+static float half_effects_factor(const NvnTexture *t) {
+    static int env = -2;
+    if (env == -2) env = getenv("ODYSSEY_HALF_FULL") ? atoi(getenv("ODYSSEY_HALF_FULL")) : 0;
+    return env && t && t->width == 800 && t->height == 450 ? 2.0f : 1.0f;
+}
+
 static bool tex_shadow_map(const NvnTexture *t) {
     return (t->target == 1 || t->target == 4) && t->samples <= 1 && !(t->flags & 0x4) && renderer_format_is_depth(t->format) &&
            t->width == t->height && t->width >= 256 && !nvn_flags_linear(t->flags);
 }
+static float half_effects_factor(const NvnTexture *t);
 static float tex_factor(const TexBackend *b, const NvnTexture *t, bool y) {
-    if (!b->shadow) return y ? g_rs_y : g_rs_x;
+    if (!b->shadow) return (y ? g_rs_y : g_rs_x) * half_effects_factor(t);
     float f = shadow_factor();
     while (f > 1 && t->width * f > 8192) f *= 0.5f;
     return f;

@@ -9075,12 +9075,18 @@ static void draw_(CmdRec *r, bool indexed) {
         }
     }
     {   // ODYSSEY_LOG_BLOOM_CHAIN=<frame> (debug): that frame's draws into the glow chain's small R11G11B10F targets
-        // and the draws that read them - target, shaders, and each sampled texture's size
+        // and the draws that read them - target, shaders, and each sampled texture's size. ODYSSEY_LOG_SMALL_TARGETS=
+        // <frame>: every draw into a 16:9 target smaller than the game's picture (its reduced-size passes) instead.
         static long at = -2;
-        if (at == -2) at = getenv("ODYSSEY_LOG_BLOOM_CHAIN") ? atol(getenv("ODYSSEY_LOG_BLOOM_CHAIN")) : -1;
+        static int small = 0;
+        if (at == -2) {
+            at = getenv("ODYSSEY_LOG_BLOOM_CHAIN") ? atol(getenv("ODYSSEY_LOG_BLOOM_CHAIN")) : -1;
+            if (getenv("ODYSSEY_LOG_SMALL_TARGETS")) at = atol(getenv("ODYSSEY_LOG_SMALL_TARGETS")), small = 1;
+        }
         NvnTexture *t0 = at > 0 && st.rt.ncolor ? st.rt.color[0] : NULL;
         if (t0 && renderer_present_count() == (uint64_t)at) {
-            bool chain = t0->format == 0x3f && t0->width <= 400 && t0->height <= 228;
+            bool chain = small ? t0->width < 1600 && t0->width >= 8 && fabsf((float)t0->width / t0->height - 1.7778f) < 0.07f
+                               : t0->format == 0x3f && t0->width <= 400 && t0->height <= 228;
             char tx[600] = "";
             size_t o = 0;
             for (int i = 0; i < pr->fi->ntex && i < 8; i++) {
@@ -9088,7 +9094,7 @@ static void draw_(CmdRec *r, bool indexed) {
                 uint64_t h = (slot >= 0 && slot < 32) ? st.tex[1][slot] : 0;
                 uint32_t tic = h & 0xFFFFF;
                 NvnTexture *x = h && st.tpool && tic < (uint32_t)st.tpool->count ? ((NvnTexEntry *)st.tpool->entries)[tic].tex : NULL;
-                if (x && x->format == 0x3f && x->width <= 400 && x->height <= 228) chain = true;
+                if (!small && x && x->format == 0x3f && x->width <= 400 && x->height <= 228) chain = true;
                 if (x && o < sizeof tx - 64)
                     o += snprintf(tx + o, sizeof tx - o, " t%d=%llx %ux%u f%#x lv%u", slot, (unsigned long long)x->addr, x->width,
                                   x->height, x->format, x->levels);
