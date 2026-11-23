@@ -2209,6 +2209,7 @@ static float pass_sx = 1, pass_sy = 1;
 static float vp_sx = 1, vp_sy = 1, vp_ox = 0, vp_oy = 0;
 static float tex_sc[2][64][2];
 static uint32_t tex_wh[2][64][2];
+static uint64_t g_glow_inputs;  // (draw_) the HDR composite's glow inputs, a bit per fragment texture: stage_set
 
 // ---- HUD layer: the game's layouts at the output resolution
 // The game draws its HUD (nn::ui2d layouts: runtime/hle/odyssey_120.c layout_draw marks them, CMD_UI_MARK) into its
@@ -5991,6 +5992,84 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
     return true;
 }
 
+// The warm-up on several threads: start-up spent ~6 s building ~2,600 pipelines one at a time (~2 ms each, the
+// driver linking from its cache; ~15 s, the budget's end, after a driver or game update). The builds themselves run on
+// worker threads in play as well (build_pipeline / link_pipeline); what the warm-up shares - the pipeline table, its
+// program table, the shader pack read for a program's SPIR-V, the miss counters - is behind warm_lock. A slot is
+// claimed by writing its key (pipe_slot then skips it for other keys; one left without a pipe is built in play, as a
+// key never warmed). ODYSSEY_PREWARM_THREADS=<n>: that many (1: one at a time, as before).
+static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool use_libraries) {
+    pthread_mutex_lock(&warm_lock);
+    uint32_t slot = pipe_slot(hash);
+    if (slot == PIPE_TAB || pipe_tab[slot].pipe || pipe_tab[slot].key == hash) {
+        g_warm_miss[0]++;
+        pthread_mutex_unlock(&warm_lock);
+        return false;
+    }
+    pipe_tab[slot].key = hash;  // (claimed)
+    Pipe *pp = calloc(1, sizeof *pp);
+    bool in_range = false;
+    if (pp) {
+        memcpy((uint8_t *)&pp->k + PIPE_STATE_OFFSET, r->state, sizeof r->state);
+        in_range = r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2;
+        if (in_range) pp->k.prog = prewarm_program(r, use_libraries);
+    }
+    pthread_mutex_unlock(&warm_lock);
+    if (!pp) return false;
+    if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
+    bool ok = atomic_load(&pp->state) == 1;
+    pthread_mutex_lock(&warm_lock);
+    if (ok) {
+        pp->recorded = true;
+        pipe_tab[slot].pipe = pp;
+    } else g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
+    pthread_mutex_unlock(&warm_lock);
+    if (!ok) free(pp);
+    return ok;
+}
+typedef struct {
+    const PipeRecipe *recipes;
+    const uint32_t *order;
+    uint32_t count, recent;
+    bool libs;
+    uint64_t t0, memory, memory_budget, time_budget;
+    _Atomic uint32_t next, warmed, compute, attempted;
+    _Atomic bool stop;
+} WarmJob;
+static int warm_worker(void *arg) {
+    WarmJob *j = arg;
+    for (;;) {
+        if (atomic_load(&j->stop)) break;
+        uint32_t a = atomic_fetch_add(&j->next, 1);
+        if (a >= j->count) break;
+        // (the same bounds as before: driver allocations for libraries can be much larger than the recipe file)
+        if (a && a % 16 == 0 && (plat_private_bytes() > j->memory + j->memory_budget || plat_now_ns() - j->t0 > j->time_budget)) {
+            atomic_store(&j->stop, true);
+            break;
+        }
+        atomic_fetch_add(&j->attempted, 1);
+        uint32_t index = j->order ? j->order[a] : a < j->recent ? j->count - j->recent + a : a - j->recent;
+        const PipeRecipe *r = &j->recipes[index];
+        uint64_t hash = pipe_recipe_hash(r);
+        if (!r->spv[1]) {
+            pthread_mutex_lock(&warm_lock);
+            uint32_t c = prewarm_compute(r, hash);
+            pthread_mutex_unlock(&warm_lock);
+            atomic_fetch_add(&j->compute, c);
+            continue;
+        }
+        if (warm_graphics_pipeline_mt(r, hash, j->libs)) atomic_fetch_add(&j->warmed, 1);
+    }
+    return 0;
+}
+static int warm_threads(void) {
+    const char *e = getenv("ODYSSEY_PREWARM_THREADS");
+    if (e) return atoi(e) < 1 ? 1 : atoi(e) > 32 ? 32 : atoi(e);
+    int n = SDL_GetNumLogicalCPUCores() - 2;  // (the game's own start-up and the window keep two)
+    return n < 1 ? 1 : n > 8 ? 8 : n;
+}
+
 static bool warm_uses_libraries(void) {
     const char *shared = getenv("ODYSSEY_SHARED_LIBS");
     return g_vk.gpl && (!shared || atoi(shared) != 0);
@@ -6128,7 +6207,20 @@ void vk_pipeline_prewarm(bool build) {
     if (recent > 768) recent = 768;
     uint32_t *order = build ? prioritize_first_scene(recipes, h.count, recent) : NULL;
     uint32_t attempted = 0;
-    for (; build && attempted < h.count; attempted++) {
+    int nthreads = build ? warm_threads() : 1;
+    if (build && nthreads > 1) {
+        WarmJob job = {.recipes = recipes, .order = order, .count = h.count, .recent = recent, .libs = use_libraries,
+                       .t0 = t0, .memory = memory, .memory_budget = memory_budget, .time_budget = time_budget};
+        SDL_Thread *th[32];
+        int started = 0;
+        for (int i = 0; i < nthreads; i++)
+            if ((th[started] = SDL_CreateThread(warm_worker, "warmup", &job))) started++;
+        if (!started) warm_worker(&job);
+        for (int i = 0; i < started; i++) SDL_WaitThread(th[i], NULL);
+        warmed = atomic_load(&job.warmed), compute = atomic_load(&job.compute), attempted = atomic_load(&job.attempted);
+        LOG("[vk] warm-up on %d threads\n", started ? started : 1);
+    }
+    for (; build && nthreads <= 1 && attempted < h.count; attempted++) {
         uint32_t index = order ? order[attempted] : attempted < recent ? h.count - recent + attempted : attempted - recent;
         const PipeRecipe *r = &recipes[index];
         // Driver allocations for libraries can be much larger than the recipe file. Keep startup bounded.
@@ -6179,6 +6271,22 @@ static const char *snap_why[8];
 static const char *snap_reason = "?";
 static void snapshots_invalidate(NvnTexture *t) {
     for (int i = 0; i < 8; i++) if ((!t || snap_tex[i] == t) && snap_ok[i]) { snap_ok[i] = false; snap_why[i] = snap_reason; }
+}
+// A draw that samples a colour target and writes it too (read-modify-write in one pass) leaves its snapshot in use
+// until the game's next barrier or render target change: on the Switch a draw sees earlier draws' writes to a texture
+// only after nvnCommandBufferBarrier, so a run of such draws with no barrier between them reads the target as it was
+// before the run - one snapshot. The Secret Flower Field after Torkdrift (#136): ~230 effect draws a frame (one
+// program, fs 0x727530c500 in 1.4.1) sample colour target 2 of the 4-target scene pass and write it, with no barrier
+// between them; each made a new full-size snapshot, with a pass split and a full barrier - 236 copies and 314 passes
+// a frame (now 4 and 82), a 2060 SUPER at 98% and ~40 FPS. Any other write still ends the snapshot at once.
+// ODYSSEY_SNAP_PER_DRAW=1: a new snapshot for every such draw, as before.
+static bool snap_stale[8];
+static void snapshots_mark_stale(NvnTexture *t) {
+    for (int i = 0; i < 8; i++) if (snap_tex[i] == t && snap_ok[i]) snap_stale[i] = true;
+}
+static void snapshots_settle(const char *why) {
+    for (int i = 0; i < 8; i++)
+        if (snap_stale[i]) { snap_stale[i] = false; if (snap_ok[i]) { snap_ok[i] = false; snap_why[i] = why; } }
 }
 
 typedef struct { NvnTexture *key; TexBackend copy; } Snap;
@@ -6710,6 +6818,7 @@ static void resolve_feedback(Prog *pr) {
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, nrg, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
+            snap_stale[si] = false;
             st.rt_dirty = true;
         }
 }
@@ -7974,10 +8083,11 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             // .w: the distant view's smooth enlargement (only that recognised shader reads it: translate.c farSample)
             // (a layout's draw at HUD quality High: .z the enlargement's strength instead - its variant's hudSample)
             float bq = sg ? bloom_high() : 0.0f, fv = sg ? farview_mode(bq) : 0.0f;
-            if (sg && !g_settings.motion_blur) bq += 4.0f;  // (Motion blur off: translate.c camBlurSample)
             if (sg && p->fkey.hud_filter) bq = g_hud_draw_filter;
             for (int t = 0; t < si->ntex && t < 64; t++) {
-                rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = bq; rs[1 + t][3] = fv;
+                // (the HDR composite: Bloom quality on its glow inputs only - the others read as the game reads them)
+                float z = sg && p->fkey.glow_comp ? ((g_glow_inputs >> t) & 1 ? bq : 0.0f) : bq;
+                rs[1 + t][0] = tex_sc[sg][t][0]; rs[1 + t][1] = tex_sc[sg][t][1]; rs[1 + t][2] = z; rs[1 + t][3] = fv;
             }
             bi[n] = ubo_span(copy_dedupe(sg ? DEDUPE_RSCALE_F : DEDUPE_RSCALE_V, rs, sizeof rs, 256), sizeof rs);
         } else {
@@ -8508,6 +8618,17 @@ static void draw_(CmdRec *r, bool indexed) {
     // too: the program table keys on it)
     g_hud_draw_filter = ui_mark ? hud_filter_strength() : 0.0f;
     if (g_hud_draw_filter > 0) vkey.hud_filter = fkey.hud_filter = 1;
+    {   // The game's HDR composite (scene + glow, tone mapped): the full-screen draw into the picture (R11G11B10F,
+        // NVN format 0x3d) and its luma (R8, 0x1). Found by that rather than by its code: it has a dozen versions -
+        // by kingdom, and while the camera turns - and two known by hash left Bloom quality and Motion blur doing
+        // nothing in most kingdoms. Its variant reads its inputs through bloomUp (translate.c), steered per input below.
+        NvnTexture *c0 = st.rt.ncolor == 2 ? st.rt.color[0] : NULL, *c1 = c0 ? st.rt.color[1] : NULL;
+        static int comp_on = -1;
+        if (comp_on < 0) { const char *e = getenv("ODYSSEY_GLOW_COMPOSITE"); comp_on = !e || atoi(e) != 0; }
+        if (comp_on && c0 && c1 && c0->format == 0x3d && c1->format == 0x1 && c0->width == c1->width &&
+            c0->height == c1->height && g_draw_fullscreen)
+            vkey.glow_comp = fkey.glow_comp = 1;
+    }
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
         // rt_kind 3; the picture before it has half floats: textures.c "Banding")
         bool deband = vk_deband();
@@ -8638,8 +8759,15 @@ static void draw_(CmdRec *r, bool indexed) {
     snap_reason = "draw-depthwrite";
     if (st.rt.depth && st.ds[0] && st.ds[1]) snapshots_invalidate(st.rt.depth);
     snap_reason = "draw-colorwrite";
+    static int per_draw = -1;
+    if (per_draw < 0) { const char *e = getenv("ODYSSEY_SNAP_PER_DRAW"); per_draw = e && atoi(e) != 0; }
     for (int i = 0; i < st.rt.ncolor; i++)
-        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
+        if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) {
+            bool sampled = false;  // (this draw read it through a snapshot: snapshots_mark_stale)
+            for (int k = 0; k < nfeedback && !per_draw; k++) sampled |= feedback_tex[k] == st.rt.color[i];
+            if (sampled) snapshots_mark_stale(st.rt.color[i]);
+            else snapshots_invalidate(st.rt.color[i]);
+        }
     begin_pass();
     if (pass_depth_written_next) pass_depth_written = true, pass_depth_written_next = false;
     // (the recording thread: from here this draw's calls are queued - not with frame interpolation's replays)
@@ -8871,6 +8999,26 @@ static void draw_(CmdRec *r, bool indexed) {
         float sc[2]; uint32_t wh[2];
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
         tex_sc[1][i][0] = sc[0]; tex_sc[1][i][1] = sc[1]; tex_wh[1][i][0] = wh[0]; tex_wh[1][i][1] = wh[1];
+    }
+    g_glow_inputs = 0;
+    if (pr->fkey.glow_comp && st.rt.color[0]) {
+        // The composite's inputs by their size against the picture's (all R11G11B10F, NVN 0x3f): a quarter is the glow
+        // (Bloom quality steers it: stage_set), a half the blurred copy it mixes in while the camera turns, the
+        // picture's own size the sharp scene. Motion blur off: the sharp scene in the blurred copy's place (#123).
+        uint32_t w = st.rt.color[0]->width, h = st.rt.color[0]->height;
+        int blurred = -1, sharp = -1;
+        for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
+            NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
+            if (!t || t->format != 0x3f || pr->fi->tex[i].type != TEXTYPE_2D) continue;
+            if (t->width * 4 == w && t->height * 4 == h) g_glow_inputs |= 1ull << i;
+            else if (t->width * 2 == w && t->height * 2 == h) blurred = i;
+            else if (t->width == w && t->height == h) sharp = i;
+        }
+        if (!g_settings.motion_blur && blurred >= 0 && sharp >= 0) {
+            fii[blurred] = fii[sharp];
+            tex_sc[1][blurred][0] = tex_sc[1][sharp][0], tex_sc[1][blurred][1] = tex_sc[1][sharp][1];
+            tex_wh[1][blurred][0] = tex_wh[1][sharp][0], tex_wh[1][blurred][1] = tex_wh[1][sharp][1];
+        }
     }
     if (prof) prof_tex += SDL_GetTicksNS() - prof_tx_;
     if (fabsf(pass_sx - pass_sy) > 0.01f * pass_sy && st.rt.ncolor && renderer_texture_presented(st.rt.color[0])) {
@@ -9442,6 +9590,17 @@ static void debug_draw(Prog *pr, CmdRec *r, bool indexed) {
                         f[v * 4 + 2], f[v * 4 + 3]);
             }
         }
+    }
+    {   // the fragment shader by the translator's own hash (translate.c, ODYSSEY_LOG_FS_HASH / ODYSSEY_LOG_GLSL): the
+        // log's "fs hash" above is another; and whether it is the HDR composite's variant (ShaderKey glow_comp)
+        uint64_t th = 0;
+        if (pr->code[1]) {
+            size_t ext = maxwell_code_extent((const uint8_t *)(uintptr_t)pr->code[1], pr->cmax[1], STAGE_FRAGMENT);
+            th = 1469598103934665603ull;
+            for (size_t i = 0x30; i < ext; i++) th = (th ^ ((const uint8_t *)(uintptr_t)pr->code[1])[i]) * 1099511628211ull;
+        }
+        LOG("[draw]   fs translator hash %016llx%s, rscale %d\n", (unsigned long long)th,
+            pr->fkey.glow_comp ? " (HDR composite)" : "", (int)pr->fi->uses_rscale);
     }
     for (int i = 0; i < pr->vi->ntex && i < 64; i++) {  // vertex textures (displacement maps): which, size, format
         NvnTexture *t = shader_texture_object(0, &pr->vi->tex[i]);
@@ -10867,7 +11026,9 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         case CMD_SET_TEXTURE_POOL: st.tpool = (NvnDescPool *)(uintptr_t)r->x[0]; break;
         case CMD_SET_SAMPLER_POOL: st.spool = (NvnDescPool *)(uintptr_t)r->x[0]; break;
+        case CMD_BARRIER: snapshots_settle("barrier"); break;
         case CMD_SET_RENDER_TARGETS: {
+            snapshots_settle("render targets");
             const struct { uint64_t tex[8]; NvnTextureView views[8]; uint8_t has_view[8]; uint64_t depth;
                            NvnTextureView dview; uint8_t has_dview; } *rt = x;
             RtState prev = st.rt;  // the same targets again: keep the pass (a restart = full barrier + reload)

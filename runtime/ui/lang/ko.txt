@@ -526,3 +526,6 @@ The game holds Snapshot Mode (D-pad Down) to 30 FPS. On: it runs at 60 FPS like 
 Shadow distance ||| 그림자 거리
 Very high (4x) ||| 매우 높음 (4x)
 How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with it. Switch: as on the Switch. Changes at once. ||| 카메라에서 얼마나 멀리까지 태양 그림자를 그릴지 정합니다: 더 먼 물체도 그림자를 유지합니다. 같은 그림자 맵이 더 넓은 땅을 덮으므로 마리오 근처 그림자는 더 부드러워집니다 - 그림자 품질도 함께 올리세요. Switch: Switch와 같음. 바로 적용됩니다.
+Shake button and key ||| 흔들기 버튼과 키
+Homing throw ||| 호밍 던지기
+What the shake button and key do. Shake: the controller shaken while held, as on the Switch - with Cappy on Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake moves (shaking a pole, rolling faster). Homing throw: one press throws Cappy and sends it homing at the nearest target (with Cappy already out: the homing attack alone) - never a spin; the Spin throw button does that (#137). ||| 흔들기 버튼과 키가 하는 일입니다. 흔들기: 누르고 있는 동안 컨트롤러를 흔드는 것으로, Switch와 같습니다 - 캐피가 마리오 머리에 있으면 회전 던지기, 캐피를 던진 상태면 호밍 공격, 그리고 흔들기 동작(기둥 흔들기, 더 빨리 구르기)이 됩니다. 호밍 던지기: 한 번 누르면 캐피를 던지고 가장 가까운 목표로 호밍시킵니다(캐피가 이미 나가 있으면 호밍 공격만) - 회전은 하지 않습니다. 회전 던지기 버튼이 그 일을 합니다 (#137).

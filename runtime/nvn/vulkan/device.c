@@ -445,6 +445,17 @@ static void create_device(void) {
     b->depthBiasClamp = h->depthBiasClamp;
     b->depthClamp = h->depthClamp;
     g_vk.features_depth_clamp = h->depthClamp;
+#ifdef _WIN32
+    // Intel's legacy Windows driver (UHD 620 etc., 31.0.101.2xxx, Vulkan 1.3.215) offers depth clamp but crashes in
+    // igvk64.dll (exception at 0x298) the first time a pipeline uses it - the game's sun shadow map, at the first
+    // gameplay frame (#122). Left off there: the shadow map clips casters past its range instead, as before 0.3.1.
+    // ODYSSEY_DEPTH_CLAMP=1 / =0 still forces it on / off (exec.c).
+    if (g_vk.props.vendorID == 0x8086 && g_vk.props.apiVersion < VK_MAKE_API_VERSION(0, 1, 3, 250) && !getenv("ODYSSEY_DEPTH_CLAMP")) {
+        g_vk.features_depth_clamp = false;
+        LOG("[vk] depth clamp: off on this Intel driver (Vulkan %u.%u.%u; its legacy driver crashes with it)\n",
+            VK_API_VERSION_MAJOR(g_vk.props.apiVersion), VK_API_VERSION_MINOR(g_vk.props.apiVersion), VK_API_VERSION_PATCH(g_vk.props.apiVersion));
+    }
+#endif
     b->largePoints = h->largePoints;
     b->wideLines = h->wideLines;
     b->imageCubeArray = h->imageCubeArray;

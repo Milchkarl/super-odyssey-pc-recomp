@@ -1326,8 +1326,11 @@ static void tab_graphics(void) {
                    "How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same "
                    "shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with "
                    "it. Switch: as on the Switch. Changes at once.", false);
-        static const char *bq[] = {"Switch", "High", "Off"};
-        opt_choice("Bloom quality", &g_settings.bloom_quality, bq, 3, 0,
+        // (shown Switch / Off / High - the owner's order; stored as before: 0 Switch, 1 High, 2 Off)
+        static const char *bq[] = {"Switch", "Off", "High"};
+        static const int bq_value[] = {0, 2, 1};
+        int bq_shown = g_settings.bloom_quality == 2 ? 1 : g_settings.bloom_quality == 1 ? 2 : 0;
+        if (opt_choice("Bloom quality", &bq_shown, bq, 3, 0,
                    "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
                    "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
                    "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
@@ -1335,7 +1338,8 @@ static void tab_graphics(void) {
                    "stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon "
                    "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
                    "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Off: no glow "
-                   "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false);
+                   "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false))
+            g_settings.bloom_quality = bq_value[bq_shown];
         static const char *ao[] = {"Off", "Medium", "High"};
         opt_choice("Ambient occlusion", &g_settings.ambient_occlusion, ao, 3, 0,
                    "Darkens the places light reaches less: the corners between steps and walls, the ground under "
@@ -2010,6 +2014,15 @@ static void tab_about(void) {
          "Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then "
          "press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was "
          "bound to.");
+    {
+        static const char *const names[] = {"Shake", "Homing throw"};
+        int i = g_settings.shake_homing ? 1 : 0;
+        if (choice("Shake button and key", &i, names, 2)) g_settings.shake_homing = i;
+    }
+    hint("What the shake button and key do. Shake: the controller shaken while held, as on the Switch - with Cappy on "
+         "Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake moves (shaking a pole, "
+         "rolling faster). Homing throw: one press throws Cappy and sends it homing at the nearest target (with Cappy "
+         "already out: the homing attack alone) - never a spin; the Spin throw button does that (#137).");
     toggle("Vibration", &g_settings.rumble);
     {
         static const int pct[] = {25, 50, 75, 100};

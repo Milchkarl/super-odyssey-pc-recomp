@@ -14,3 +14,6 @@ bool romfs_visit_files(const char *image, RomfsFileVisitor visit, void *arg);
 extern const char *romfs_visit_name;  // (during romfs_visit_files) the file's name, without its folder: "EffectPtcl.szs"
 bool sarc_visit_files(const uint8_t *data, size_t size, RomfsFileVisitor visit, void *arg);
 bool nso_visit_segments(const char *path, RomfsFileVisitor visit, void *arg);
+// (mods) a new SARC: the mod's files, then the files only the game's own archive has; NULL with *added 0: none missing
+uint8_t *sarc_fill_missing(const uint8_t *mod, size_t mod_n, const uint8_t *orig, size_t orig_n, size_t *out_n, int *added);
+uint8_t *yaz0_store(const uint8_t *d, size_t n, const uint8_t *like, size_t *out_n);  // d as Yaz0 (literals only)

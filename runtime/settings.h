@@ -124,7 +124,7 @@ typedef struct {
     int spin_pad, spin_key;  // the spin throw: the left stick turned a full circle and the throw pressed (hle/input.c)
     int shot_pad, shot_key;  // a screenshot of the window, saved as a PNG in the screenshots folder (platform)
     int amiibo;              // the virtual amiibo figure (runtime/hle/nfp.c k_figures; 0: none - no NFC reader)
-    bool motion_blur;        // the game's blur while the camera turns (on: as the Switch; off: translate.c camBlurSample)
+    bool motion_blur;        // the game's blur while the camera turns (on: as the Switch; off: exec.c draw_, the HDR composite)
     int shadow_distance;     // 0 as the Switch, 1 high (2x), 2 very high (4x): how far the sun's shadows reach (hle/odyssey_draw.c)
     bool snapshot_full_rate; // Snapshot Mode not held to 30 FPS (nvn/objects.c nvnQueuePresentTexture, #123)
     bool first_person_mario; // the first-person view starts the way Mario faces, not the camera (hle/odyssey_120.c, #118)
@@ -138,6 +138,7 @@ typedef struct {
     int stick_deadzone_l, stick_deadzone_r;
     int stick_range_l, stick_range_r;
     int motion_gyro_sens;      // percent, 25..400: the gyro's turn rates as the game gets them (aiming with motion)
+    int shake_homing;    // the shake key / button: 0 shakes while held (as the Switch), 1 a homing throw (#137)
     int motion_shake_threshold;  // tenths of a G, 0..20: smaller jolts than this are not passed on (rumble, #107)
     bool mouse_camera;   // the mouse turns the camera (the right stick; the pointer is held in the window while playing)
     bool mouse_menus;    // in the game's menus, the mouse buttons are A / B (bound or not) and an unbound wheel the D-pad (hle/input.c, #64)
