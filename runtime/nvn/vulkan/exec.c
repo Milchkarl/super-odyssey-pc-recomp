@@ -3329,7 +3329,8 @@ static bool tcache_enabled(void) {
     static const char *const off[] = {"ODYSSEY_TCACHE", "ODYSSEY_SAVE_MSL", "ODYSSEY_LOG_GLSL", "ODYSSEY_VS_HACK",
                                       "ODYSSEY_VS_ATTR_HACK", "ODYSSEY_NO_DISCARD", "ODYSSEY_FS_SOLID", "ODYSSEY_SHADER_GUARD",
                                       "ODYSSEY_ORDERED_BLOCKS", "ODYSSEY_SHADER_SALT", "ODYSSEY_VK_NO_SPIRV_CACHE",
-                                      "ODYSSEY_EAGER_MODULES", "ODYSSEY_HUGE_SHADER"};
+                                      "ODYSSEY_EAGER_MODULES", "ODYSSEY_HUGE_SHADER",
+                                      "ODYSSEY_HDR_COMP"};  // (its composites without HDR must not be saved for others)
     bool v = true;
     for (size_t i = 0; i < sizeof off / sizeof *off; i++) {
         const char *e = getenv(off[i]);
@@ -8099,6 +8100,21 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
         }
         n++;
     }
+    if (sg && p->fkey.glow_comp && getenv("ODYSSEY_HDR_DEBUG")) {  // (ODYSSEY_HDR_DEBUG=1: each composite program's bindings)
+        static const Prog *seen[64];
+        static int nseen;
+        bool known = false;
+        for (int i = 0; i < nseen; i++) known |= seen[i] == p;
+        if (!known && nseen < 64) {
+            seen[nseen++] = p;
+            char list[400] = "";
+            for (int i = 0; i < p->nbinds; i++) {
+                size_t l = strlen(list);
+                snprintf(list + l, sizeof list - l, " %u/%u", p->binds[i].set, p->binds[i].binding);
+            }
+            LOG("[hdr] composite program fs=%llx: %d bindings (set/binding):%s\n", (unsigned long long)p->code[1], p->nbinds, list);
+        }
+    }
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
         if (b->set != set || b->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
@@ -8122,9 +8138,12 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
         } else if (b->binding == HDRC_BUFFER_INDEX) {  // (the HDR composite: translate.c comp_main)
             float k[20];
             comp_hdr_params(k);
-            static int dbg_n;
-            if (getenv("ODYSSEY_HDR_DEBUG") && dbg_n++ < 3)
-                LOG("[hdr] composite: mode %g peak %g scale %g exposure %g kinds %g %g %g %g\n", k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+            static float dbg_last[8] = {-1};
+            if (getenv("ODYSSEY_HDR_DEBUG") && memcmp(dbg_last, k + 4, sizeof dbg_last)) {  // (ODYSSEY_HDR_DEBUG=1: each new input layout)
+                memcpy(dbg_last, k + 4, sizeof dbg_last);
+                LOG("[hdr] composite (frame %llu, %d textures): mode %g peak %g scale %g exposure %g kinds %g %g %g %g %g\n",
+                    (unsigned long long)renderer_present_count(), si->ntex, k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[16]);
+            }
             bi[n] = ubo_span(vk_transient_copy(k, sizeof k, 256), sizeof k);
         } else {
             float zero[8] = {0};
@@ -8671,6 +8690,17 @@ static void draw_(CmdRec *r, bool indexed) {
         for (int i = 0; i < st.rt.ncolor; i++) {
             NvnTexture *t = st.rt.color[i];
             if (t && t->window && t->backend && ((TexBackend *)t->backend)->hdr_window && fkey.rt_kind[i] == 0) fkey.rt_kind[i] = 4;
+            if (t && t->window && getenv("ODYSSEY_HDR_DEBUG")) {
+                static int last = -1;
+                TexBackend *wb = t->backend;
+                int now = (wb ? wb->hdr_able * 4 + wb->hdr_window * 2 : 1) * 8 + fkey.rt_kind[i];
+                if (now != last) {
+                    last = now;
+                    LOG("[hdr] window copy (frame %llu): texture %p %ux%u fmt %#x, backend %s, able %d, float %d, kind %d\n",
+                        (unsigned long long)renderer_present_count(), (void *)t, t->width, t->height, t->format, wb ? "yes" : "none",
+                        wb ? wb->hdr_able : -1, wb ? wb->hdr_window : -1, fkey.rt_kind[i]);
+                }
+            }
         }
         bool deband = vk_deband();
         for (int i = 0; deband && i < st.rt.ncolor; i++) {

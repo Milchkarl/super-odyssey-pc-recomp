@@ -2735,13 +2735,16 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
 
 // Native HDR and scene grading in the game's HDR composite (exec.c draw_ recognises it: key->glow_comp). The game
 // tone-maps its scene there - an exponential or a two-part rational curve per kingdom, some with a 3D grading map, an
-// overlay mixed after - into the picture's 0..1. Its code is kept whole as comp_ and run up to three times on the
+// overlay mixed after - into the picture's 0..1. Its code is kept whole as comp_ and run up to four times on the
 // same pixel, its scene and glow inputs (hk_, exec.c comp_hdr_inputs) at another exposure:
-//   y  = comp_(x)           the game's own result (exposure: hdrc[0].w)
-//   z  = comp_(0)           its black / overlay level
-//   q  = comp_(x / 16)      the same pixel well below the curve's knee, graded as the game grades it
-// lin = z + 16 (q - z) is then the pixel's light before the curve flattened it, in the game's own colours. Below the
-// knee (Y < 0.5) the picture stays the game's; above it the luminance follows lin, rolling off to the display's peak
+//   y   = comp_(x)          the game's own result (exposure: hdrc[0].w)
+//   z   = comp_(0)          its black / overlay level
+//   q4  = comp_(x / 4), q16 = comp_(x / 16): the same pixel lower on the curve, graded as the game grades it
+// The pixel's light before the curve flattened it is read where the curve is near straight - its middle, not its toe
+// (the filmic variants rise slowly near black: read there, the light came out too low and no highlight was kept):
+// z + 4 (q4 - z) while q4 is still in the middle (luminance below 0.35), else z + 16 (q16 - z), blended between, and
+// the game's own y while that is (below 0.35). Below the knee (Y < 0.5) the picture stays the game's; above it the
+// luminance follows that light, rolling off to the display's peak
 // (P = peak / game white), with the game's hue; highlight saturation and blowout steer the colour of what is
 // restored. The grading sliders then act on the scene alone (the HUD is drawn after this pass). Values are in units
 // of the game's white, scaled by game / UI white (hdrc[0].z) so the HUD's white lands at UI brightness.
@@ -2756,10 +2759,10 @@ static void comp_main(Str *s, uint32_t omap) {
           "  }\n"
           "}\n"
           "void main() {\n"
-          "  vec4 a[8], z[8], q[8];\n");
-    char args[3][160] = {"", "", ""};
-    const char *nm[3] = {"a", "z", "q"};
-    for (int v = 0; v < 3; v++) {
+          "  vec4 a[8], z[8], q[8], u[8];\n");
+    char args[4][160] = {"", "", "", ""};
+    const char *nm[4] = {"a", "z", "q", "u"};
+    for (int v = 0; v < 4; v++) {
         bool first = true;
         for (int rt = 0; rt < 8; rt++)
             if ((omap >> (rt * 4)) & 0xF) {
@@ -2773,10 +2776,13 @@ static void comp_main(Str *s, uint32_t omap) {
         if ((omap >> (rt * 4)) & 0xF) sp(s, "  c%d = a[%d];\n", rt, rt);
     sp(s, "  if (hdrc[0].x < 0.5f) { c0 = a[0]; return; }\n"
           "  hk_set(0.0f);\n  comp_(%s);\n"
-          "  hk_set(hdrc[0].w / 16.0f);\n  comp_(%s);\n", args[1], args[2]);
+          "  hk_set(hdrc[0].w / 4.0f);\n  comp_(%s);\n"
+          "  hk_set(hdrc[0].w / 16.0f);\n  comp_(%s);\n", args[1], args[2], args[3]);
     sp(s, "  const vec3 W = vec3(0.2126f, 0.7152f, 0.0722f);\n"
           "  vec3 y = max(a[0].rgb, vec3(0.0f)), f0 = max(z[0].rgb, vec3(0.0f));\n"
-          "  vec3 lin = max(f0 + (q[0].rgb - f0) * 16.0f, vec3(0.0f));\n"
+          "  vec3 l4 = max(f0 + (q[0].rgb - f0) * 4.0f, vec3(0.0f)), l16 = max(f0 + (u[0].rgb - f0) * 16.0f, vec3(0.0f));\n"
+          "  float m1 = smoothstep(0.25f, 0.35f, dot(y, W)), m4 = smoothstep(0.25f, 0.35f, dot(q[0].rgb, W));\n"
+          "  vec3 lin = mix(y, mix(l4, l16, m4), m1);\n"
           "  float Y = dot(y, W), L = max(dot(lin, W), Y), P = hdrc[0].y;\n"
           "  vec3 o = y;\n"
           "  if (P > 1.001f && Y > 1e-6f) {\n"
