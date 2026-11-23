@@ -936,6 +936,7 @@ extern "C" void vk_request_swapchain_remake(void);
 extern "C" void output_scale_preview(double dw, double dh, double want, int mode, double *w, double *h);
 extern "C" float odyssey_wide_shape(void);
 extern "C" int input_pad_family(void);  // runtime/hle/input.c
+extern "C" bool kbprompts_active(void);  // runtime/nvn/kbprompts.c (keyboard / mouse icons shown now)
 extern "C" void input_stick_now(int right, float *x, float *y);  // runtime/hle/input.c
 extern "C" void input_motion_calibrate(void);
 extern "C" int input_motion_calibration(void);
@@ -1062,6 +1063,30 @@ static void mem_note_ram(void) {
 }
 #endif
 
+// A choice whose stored value may be "Auto" (auto_v): the list holds only real values (vals / names), and Auto shows as
+// the one it stands for now (resolved_v) - a pick stores that value. Two values: a switch; more: a dropdown (option_rows).
+static bool opt_choice_resolved(const char *label, int *v, int auto_v, const int *vals, const char *const *names, int n,
+                                int resolved_v, const char *desc) {
+    int now = *v == auto_v ? resolved_v : *v, idx = 0, def = 0;
+    for (int i = 0; i < n; i++) {
+        if (vals[i] == now) idx = i;
+        if (vals[i] == resolved_v) def = i;
+    }
+    if (!opt_choice(label, &idx, names, n, def, desc, false)) return false;
+    *v = vals[idx];
+    return true;
+}
+
+// the game's language Auto stands for now: the language code it serves (settings_language) as an index
+static int language_resolved(void) {
+    const char *c = settings_language();
+    for (int i = 1; i < N_LANGUAGES; i++)
+        if (!strcmp(c, g_language_codes[i])) return i;
+    for (int i = 1; i < N_LANGUAGES; i++)  // ("en" -> the first English)
+        if (!strncmp(c, g_language_codes[i], 2)) return i;
+    return 1;
+}
+
 static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
@@ -1090,23 +1115,24 @@ static void tab_display(void) {
             static char gl[9][VK_NAME_MAX + 16];
             const char *gp[9];
             static const char *in_use = vk_gpu_in_use();  // (the one this start picked)
-            snprintf(gl[0], sizeof gl[0], "Automatic");
-            gp[0] = gl[0];
-            int sel = 0, n = 1;
+            // (the cards only: with none picked, the one this start uses - the dedicated card over integrated)
+            int sel = 0, n = 0, def = 0;
             for (int i = 0; i < ng; i++, n++) {
                 snprintf(gl[n], sizeof gl[n], "%s", gpus[i]);
                 gp[n] = gl[n];
-                if (g_settings.gpu[0] && !strcmp(g_settings.gpu, gpus[i])) sel = n;
+                if (!strcmp(in_use, gpus[i])) def = n;
             }
+            sel = def;
+            for (int i = 0; i < n; i++) if (g_settings.gpu[0] && !strcmp(g_settings.gpu, gp[i])) sel = i;
             bool pending = strcmp(g_settings.gpu[0] ? g_settings.gpu : in_use, in_use) != 0;
             char d[600];
-            snprintf(d, sizeof d, "Which graphics card draws the game. Automatic picks a dedicated card over integrated "
-                                  "graphics. Choose another for a laptop that starts on the wrong one, or to compare. "
+            snprintf(d, sizeof d, "Which graphics card draws the game. Until you pick one, a dedicated card is used over "
+                                  "integrated graphics. Choose another for a laptop that starts on the wrong one, or to compare. "
                                   "In use: %s.%s", in_use,
                      pending ? "\n\nApplies when the game starts again." : "");
             opt_next_dropdown();
-            if (opt_choice("Graphics card", &sel, gp, n, 0, d, false))
-                snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", sel ? gp[sel] : "");
+            if (n && opt_choice("Graphics card", &sel, gp, n, def, d, false))
+                snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", gp[sel]);
         }
     }
 #endif
@@ -1148,22 +1174,31 @@ static void tab_display(void) {
         static char rlabels[34][32];
         const char *rp[34];
         int rn = 0, rsel = 0;
-        snprintf(rlabels[rn], sizeof rlabels[rn], "Auto"); (void)desk_rate;
-        rp[rn] = rlabels[rn], rn++;
+        (void)desk_rate;
+        // (the monitor's rates only: with none picked (0), the one it uses - the highest that is a multiple of the frame
+        // rate, else the highest)
+        int fps = settings_fps_hz(g_settings.frame_rate), best = -1, top = -1;
+        for (size_t i = 0; i < rates.size() && i < 34; i++) {
+            if (top < 0 || rates[i] > rates[top]) top = (int)i;
+            if (fps > 0 && (rates[i] % fps <= 1 || rates[i] % fps >= fps - 1) && (best < 0 || rates[i] > rates[best])) best = (int)i;
+        }
+        int rdef = best >= 0 ? best : top >= 0 ? top : 0;
         for (int r : rates) {
             if (rn >= 34) break;
             snprintf(rlabels[rn], sizeof rlabels[rn], "%d Hz", r);
             if (r == g_settings.refresh_rate) rsel = rn;
             rp[rn] = rlabels[rn], rn++;
         }
+        if (!g_settings.refresh_rate) rsel = rdef;
+        if (!rn) snprintf(rlabels[0], sizeof rlabels[0], "%s", tr("The monitor's")), rp[0] = rlabels[0], rn = 1;
         if (g_settings.window_mode != EXCLUSIVE_FULLSCREEN) opt_disable_next();
         opt_next_dropdown();
-        if (opt_choice("Refresh rate", &rsel, rp, rn, 0,
+        if (opt_choice("Refresh rate", &rsel, rp, rn, rdef,
                        "The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change "
-                       "it in your system's display settings). Auto: the highest rate your monitor offers that is a multiple "
-                       "of the frame rate (120 Hz on a 144 Hz monitor at 60 FPS), so every frame is shown for the same time - "
+                       "it in your system's display settings). Until you pick one: the highest rate your monitor offers that "
+                       "is a multiple of the frame rate (120 Hz on a 144 Hz monitor at 60 FPS), so every frame is shown for the same time - "
                        "the smoothest picture. Other rates (144 Hz at 60 FPS) show frames for uneven times: judder.")) {
-            g_settings.refresh_rate = rsel == 0 ? 0 : rates[rsel - 1];
+            if (rsel < (int)rates.size()) g_settings.refresh_rate = rates[rsel];
             g_want_window_apply.store(true);
         }
     }
@@ -1752,13 +1787,16 @@ static void tab_performance(void) {
             g_settings.shader_wait = !async;  // (opt_toggle flipped it)
     }
     {
-        static const char *const mem[MEMORY_COUNT] = {"Auto", "Normal", "Low"};
+        static const int mv[] = {MEMORY_NORMAL, MEMORY_LOW};
+        static const char *const mem[] = {"Normal", "Low"};
         mem_note_ram();
-        opt_choice("Memory use", &g_settings.memory, mem, MEMORY_COUNT, MEMORY_NORMAL,
+        // (until one is picked: the one in effect - Low on a PC with less than 12 GB of RAM)
+        opt_choice_resolved("Memory use", &g_settings.memory, MEMORY_AUTO, mv, mem, 2,
+                            settings_low_memory() && g_settings.memory == MEMORY_AUTO ? MEMORY_LOW : MEMORY_NORMAL,
                    "Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of "
                    "RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first "
-                   "time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about "
-                   "3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.", false);
+                   "time, about 6.5 GB. Until you pick one: Low on a PC with less than 12 GB of RAM. The game itself needs "
+                   "about 3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start.");
     }
     opt_toggle("Low GPU memory mode", &g_settings.low_gpu_memory, false,
                "For PCs with integrated graphics and 8 GB of RAM where the game crashes with \"Out of graphics memory\" a "
@@ -1781,10 +1819,10 @@ static void tab_performance(void) {
     }
     opt_section("Shaders - advanced");
     {
-        static const char *wn[WARMUP_COUNT] = {"Auto", "Normal", "Long"};
+        static const char *wn[WARMUP_COUNT] = {"Short", "Normal", "Long"};
         opt_choice("Warm-up at start", &g_settings.warmup, wn, WARMUP_COUNT, WARMUP_AUTO,
                    "How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter "
-                   "the first time they appear. Each one keeps some graphics driver memory. Auto (the default): up to "
+                   "the first time they appear. Each one keeps some graphics driver memory. Short (the default): up to "
                    "1 GB, the first scene's and the most recent - as smooth as more in our tests, with the least memory. "
                    "Normal: up to 15 s and 3 GB. Long: up to 30 s and 12 GB (at most half of this PC's memory). Applies "
                    "at the next start.", false);
@@ -1794,19 +1832,18 @@ static void tab_performance(void) {
 #ifndef __APPLE__  // (Vulkan: nvn/vulkan/exec.c "Recording thread")
     {
         static const int rt_start = g_settings.record_thread;  // (read at start)
-        int v = g_settings.record_thread + 1;  // (-1 Auto, 0 Off, 1 On)
-        static char autolab[48];
-        snprintf(autolab, sizeof autolab, "%s", tr(vk_gpu_is_nvidia() ? "Auto (on)" : "Auto (off)"));
-        const char *rt[] = {autolab, "Off", "On"};
+        // (-1 Auto, 0 Off, 1 On: until one is picked, the one in effect - on with an NVIDIA card)
+        static const int rv[] = {1, 0};
+        static const char *const rt[] = {"On", "Off"};
         char d[1100];
         snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
                                          "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
-                                         "Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; "
+                                         "Uses one more CPU core. Until you pick one: on with an NVIDIA graphics card, where it has been tested; "
                                          "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
                                          "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
                                          "crashes, set it to Off."),
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        if (opt_choice("Multithreaded rendering", &v, rt, 3, 1, d, false)) g_settings.record_thread = v - 1;
+        opt_choice_resolved("Multithreaded rendering", &g_settings.record_thread, -1, rv, rt, 2, vk_gpu_is_nvidia() ? 1 : 0, d);
     }
 #endif
     opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,
@@ -1835,11 +1872,17 @@ static void tab_audio(void) {
                    "The game's volume. 100% is the game's own level; above it, louder."))
         g_settings.volume = pct / 100.0f;
     {
-        static const char *const names[AUDIO_OUT_COUNT] = {"Auto", "Stereo", "5.1 surround"};
-        opt_choice("Audio output", &g_settings.audio_output, names, AUDIO_OUT_COUNT, AUDIO_OUT_AUTO,
+        // (until one is picked: what the sound device has - 5.1 with 6 or more channels)
+        static const int av[] = {AUDIO_OUT_STEREO, AUDIO_OUT_SURROUND};
+        static const char *const names[] = {"Stereo", "5.1 surround"};
+        SDL_AudioSpec dev;
+        bool six = SDL_WasInit(SDL_INIT_AUDIO) && SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &dev, NULL) &&
+                   dev.channels >= 6;
+        opt_choice_resolved("Audio output", &g_settings.audio_output, AUDIO_OUT_AUTO, av, names, 2,
+                            six ? AUDIO_OUT_SURROUND : AUDIO_OUT_STEREO,
                    "What the game mixes for. 5.1 surround: the game's own 5.1 mix (front, centre, subwoofer, rear) - "
-                   "needs a 5.1 or 7.1 speaker setup in your system's sound settings. Stereo: two channels. Auto: 5.1 "
-                   "when your sound device is set up with 6 or more channels. Applies the next time the game starts.");
+                   "needs a 5.1 or 7.1 speaker setup in your system's sound settings. Stereo: two channels. Until you pick one: 5.1 when "
+                   "your sound device is set up with 6 or more channels. Applies the next time the game starts.");
     }
     opt_toggle("Reverb", &g_settings.reverb, true,
                "The game's echo effect in caves and big rooms.");
@@ -2174,198 +2217,230 @@ static void ptbr_dialog(float scale) {
 
 // The menu's own language (this menu and the configuration screen), apart from the game's text language (Controls)
 static void tab_language(void) {
-    header("Menu language");
+    opt_begin("##language", ImGui::GetFontSize() / 34);
+    opt_section("Menu language");
     // the same list as the game's language (names in English, so they show in any menu language); only Korean and
-    // Brazilian Portuguese have a translation (runtime/ui/lang/): the others show the menu in English
-    if (choice("Language", &g_settings.menu_language, g_language_names, MENU_LANG_COUNT)) settings_save();
-    hint("This menu's own language. Auto: the game's language when the menu has a translation for it (Korean, "
-         "Brazilian Portuguese), else English. Applies the next time the game starts.");
-    hint("This covers this menu and the configuration screen. The game's own text language is in Controls > System language.");
+    // Brazilian Portuguese have a translation (runtime/ui/lang/): the others show the menu in English. Until one is
+    // picked: the language the menu shows now (the game's when there's a translation for it, else English).
+    static int vals[MENU_LANG_COUNT];
+    const char *names[MENU_LANG_COUNT];
+    for (int i = 1; i < MENU_LANG_COUNT; i++) vals[i - 1] = i, names[i - 1] = g_language_names[i];
+    int now = 1;
+    {
+        const char *c = i18n_lang();
+        for (int i = MENU_LANG_COUNT - 1; i >= 1; i--) if (!strncmp(c, g_language_codes[i], strlen(c))) now = i;
+    }
+    opt_next_dropdown();
+    if (opt_choice_resolved("Menu language", &g_settings.menu_language, MENU_LANG_AUTO, vals, names, MENU_LANG_COUNT - 1,
+                            now, "This menu's own language, and the configuration screen's. Korean and Brazilian "
+                                 "Portuguese have a translation; the others show the menu in English. Until you pick "
+                                 "one: the game's language when the menu has a translation for it, else English. "
+                                 "Applies the next time the game starts. The game's own text language is in Controls > "
+                                 "System language."))
+        settings_save();
+    opt_end();
 }
 
 static void tab_about(void) {
-    header("System language");
-    {
-        // what the game is told the console's language is: its text follows this (runtime/settings.c)
-        char autol[64];
-        snprintf(autol, sizeof autol, "Auto (%s)", settings_language_name());
+    opt_begin("##controls", ImGui::GetFontSize() / 34);
+    opt_section("System language");
+    {   // what the game is told the console's language is: its text follows this (runtime/settings.c)
+        static int vals[N_LANGUAGES];
         const char *names[N_LANGUAGES];
-        names[0] = autol;
-        for (int i = 1; i < N_LANGUAGES; i++) names[i] = g_language_names[i];
+        for (int i = 1; i < N_LANGUAGES; i++) vals[i - 1] = i, names[i - 1] = g_language_names[i];
         int previous = g_settings.language;
-        if (choice("Language", &g_settings.language, names, N_LANGUAGES)) {
+        opt_next_dropdown();
+        if (opt_choice_resolved("Language", &g_settings.language, LANG_AUTO, vals, names, N_LANGUAGES - 1,
+                                language_resolved(),
+                                "The game's text language. Until you pick one it follows your system's language. "
+                                "Applies the next time the game starts.")) {
             if (g_settings.language == LANG_PT_BR && localization_ptbr_status() != PTBR_READY && !g_ptbr_saved) {
                 g_settings.language = previous;
                 ptbr_request();
             } else settings_save();
         }
     }
-    hint("The game's text language. Auto keeps the one your save has (the game's own Options > Language changes it); "
-         "any other choice replaces it. Applies the next time the game starts.");
-    if (g_settings.language == LANG_PT_BR) {
-        hint(g_ptbr_saved ? "Translation installed. Restart to load Portuguese text." : localization_ptbr_message());
-        if (localization_ptbr_status() != PTBR_READY && !g_ptbr_saved) {
-            if (!g_ptbr_asked || ImGui::Button("Instalar tradu\xc3\xa7\xc3\xa3o brasileira...")) ptbr_request();
-        }
+    if (g_settings.language == LANG_PT_BR && localization_ptbr_status() != PTBR_READY && !g_ptbr_saved) {
+        if (opt_button("Instalar tradu\xc3\xa7\xc3\xa3o brasileira...", localization_ptbr_message())) ptbr_request();
+    } else if (g_settings.language == LANG_PT_BR && g_ptbr_saved) {
+        opt_disable_next();
+        opt_action("Brazilian translation", "Installed", "Translation installed. Restart to load Portuguese text.");
     }
-    ImGui::Spacing();
-    header("Controller");
-    toggle("Motion controls", &g_settings.motion);
-    hint("The controller's gyro and accelerometer for the game's motion moves: shake it to throw Cappy at a target, "
-         "spin him, or tilt where the game asks. Needs a controller with motion sensors (PlayStation, Switch Pro, "
-         "Steam Deck).");
-    toggle("Invert gyro X", &g_settings.motion_invert_x);
-    toggle("Invert gyro Y", &g_settings.motion_invert_y);
-    hint("If a motion move goes the wrong way on your controller: X turns tilting forward / back the other way round, "
-         "Y turning left / right.");
-    slider("Gyro sensitivity", &g_settings.motion_gyro_sens, 25, 400, 5, "%d%%");
-    hint("How far turning the controller turns what the game aims with motion (first-person views, aiming Cappy). "
-         "100% is the controller's own movement.");
+
+    opt_section("Controller");
+    opt_toggle("Motion controls", &g_settings.motion, true,
+               "The controller's gyro and accelerometer for the game's motion moves: shake it to throw Cappy at a target, "
+               "spin him, or tilt where the game asks. Needs a controller with motion sensors (PlayStation, Switch Pro, "
+               "Steam Deck).");
+    opt_toggle("Invert gyro X", &g_settings.motion_invert_x, false,
+               "If a motion move goes the wrong way on your controller: X turns tilting forward / back the other way "
+               "round.");
+    opt_toggle("Invert gyro Y", &g_settings.motion_invert_y, false,
+               "If a motion move goes the wrong way on your controller: Y turns turning left / right the other way round.");
+    opt_int_slider("Gyro sensitivity", &g_settings.motion_gyro_sens, 25, 400, 5, 100, "%d%%",
+                   "How far turning the controller turns what the game aims with motion (first-person views, aiming "
+                   "Cappy). 100% is the controller's own movement.");
     {
-        int th = g_settings.motion_shake_threshold;
-        char fmt[32];
-        if (th) snprintf(fmt, sizeof fmt, "%d.%d G", th / 10, th % 10);  // (the slider's text: the value already in it)
-        else snprintf(fmt, sizeof fmt, "%s", tr("Off"));
-        slider("Shake threshold", &g_settings.motion_shake_threshold, 0, 20, 1, fmt);
+        float g = g_settings.motion_shake_threshold / 10.0f;
+        if (opt_slider("Shake threshold", &g, 0.0f, 2.0f, 0.1f, 0.0f, "%.1f G",
+                       "Jolts smaller than this are not passed on to the game, so the controller's own rumble (hidden "
+                       "moons nearby) or bumping it doesn't throw Cappy. Raise it until rumble no longer throws; real "
+                       "shakes then need to be a little stronger. 0.0 G passes everything on, as the Switch does."))
+            g_settings.motion_shake_threshold = (int)lroundf(g * 10.0f);
     }
-    hint("Jolts smaller than this are not passed on to the game, so the controller's own rumble (hidden moons nearby) "
-         "or bumping it doesn't throw Cappy. Raise it until rumble no longer throws; real shakes then need to be a "
-         "little stronger. Off passes everything on, as the Switch does.");
     {   // Calibrate gyro (runtime/hle/input.c input_motion_calibrate)
         int st = input_motion_calibration();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(tr("Gyro calibration"));
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
-        ImGui::BeginDisabled(st == 1 || st < 0);
-        if (ImGui::Button(tr("Calibrate gyro"), ImVec2(-1, 0))) input_motion_calibrate();
-        ImGui::EndDisabled();
-        hint(st < 0 ? "No controller with a gyro is connected." :
-             st == 1 ? "Calibrating: keep the controller still..." :
-             st == 2 ? "Done: the offset is saved and used from now on." :
-             "Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) "
-             "and saved. Use it if the game sees motion while the controller lies still.");
+        if (st == 1 || st < 0) opt_disable_next();
+        if (opt_action("Gyro calibration", st == 1 ? "Calibrating..." : st == 2 ? "Done" : "Calibrate",
+                       st < 0 ? "No controller with a gyro is connected." :
+                       st == 1 ? "Calibrating: keep the controller still..." :
+                       st == 2 ? "Done: the offset is saved and used from now on." :
+                       "Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 "
+                       "seconds) and saved. Use it if the game sees motion while the controller lies still."))
+            input_motion_calibrate();
     }
     {   // the virtual amiibo (runtime/hle/nfp.c, #48)
         static const char *names[32];
         int n = nfp_figure_count() < 32 ? nfp_figure_count() : 32;
         for (int i = 0; i < n; i++) names[i] = nfp_figure_name(i);
         int i = g_settings.amiibo >= 0 && g_settings.amiibo < n ? g_settings.amiibo : 0;
-        if (choice("amiibo", &i, names, n)) g_settings.amiibo = i;
-        hint("The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle "
-             "amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a "
-             "short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the "
-             "wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next "
-             "start of the game.");
+        opt_next_dropdown();
+        if (opt_choice("amiibo", &i, names, n, 0,
+                       "The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer "
+                       "Uncle amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario "
+                       "figures give a short invincibility, Peach a life-up heart, Bowser shows regional coins, any other "
+                       "a Power Moon hint; the wedding figures also give their outfits early. None: no amiibo, as before. "
+                       "A change applies at the next start of the game.", false))
+            g_settings.amiibo = i;
     }
-    controls_actions_draw();  // shake, spin throw, screenshot: any button and any key (controls_ui.mm, hle/bindings.c)
-    hint("Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins "
-         "and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. "
-         "Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then "
-         "press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was "
-         "bound to.");
     {
         static const char *const names[] = {"Shake", "Homing throw"};
         int i = g_settings.shake_homing ? 1 : 0;
-        if (choice("Shake button and key", &i, names, 2)) g_settings.shake_homing = i;
+        if (opt_choice("Shake button and key", &i, names, 2, 0,
+                       "What the shake button and key do. Shake: the controller shaken while held, as on the Switch - "
+                       "with Cappy on Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake "
+                       "moves (shaking a pole, rolling faster). Homing throw: one press throws Cappy and sends it homing "
+                       "at the nearest target (with Cappy already out: the homing attack alone) - never a spin; the Spin "
+                       "throw button does that (#137)."))
+            g_settings.shake_homing = i;
     }
-    hint("What the shake button and key do. Shake: the controller shaken while held, as on the Switch - with Cappy on "
-         "Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake moves (shaking a pole, "
-         "rolling faster). Homing throw: one press throws Cappy and sends it homing at the nearest target (with Cappy "
-         "already out: the homing attack alone) - never a spin; the Spin throw button does that (#137).");
-    toggle("Vibration", &g_settings.rumble);
+    opt_toggle("Vibration", &g_settings.rumble, true,
+               "The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Off: "
+               "no rumble at all. DualSense and Switch Pro controllers use their own motors through it.");
     {
         static const int pct[] = {25, 50, 75, 100};
         static const char *const names[] = {"25%", "50%", "75%", "100%"};
         int i = 3;
         for (int k = 0; k < 4; k++) if (pct[k] == g_settings.rumble_strength) i = k;
-        if (choice("Vibration strength", &i, names, 4)) g_settings.rumble_strength = pct[i];
+        if (!g_settings.rumble) opt_disable_next();
+        opt_next_dropdown();
+        if (opt_choice("Vibration strength", &i, names, 4, 3, "How strong the controller's rumble is.", false))
+            g_settings.rumble_strength = pct[i];
     }
-    hint("The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Turn it off "
-         "for no rumble at all; DualSense and Switch Pro controllers use their own motors through it.");
 #ifdef _WIN32
     {   // runtime/switch2*.c (settings.ini `switch2`; 2 also logs every Bluetooth device, kept as it is here)
         bool on = g_settings.switch2 != 0;
-        if (toggle("Switch 2 controllers (Bluetooth)", &on)) g_settings.switch2 = on;
+        if (opt_toggle("Switch 2 controllers (Bluetooth)", &on, false,
+                       "The Switch 2 Pro Controller and Joy-Con 2 over Bluetooth, with their gyro and the game's HD rumble "
+                       "- no other program needed. Applies at the next start. Then hold the small Sync button on the "
+                       "controller until its lights sweep; after that any button reconnects it. Don't pair it in "
+                       "Windows' Bluetooth settings: the game connects it."))
+            g_settings.switch2 = on;
     }
-    hint("The Switch 2 Pro Controller and Joy-Con 2 over Bluetooth, with their gyro and the game's HD rumble - no other "
-         "program needed. Applies at the next start. Then hold the small Sync button on the controller until its lights "
-         "sweep; after that any button reconnects it. Don't pair it in Windows' Bluetooth settings: the game connects it.");
 #endif
-    ImGui::Spacing();
-    header("Sticks");
-    slider("Left stick deadzone", &g_settings.stick_deadzone_l, 0, 50, 1, "%d%%");
-    slider("Right stick deadzone", &g_settings.stick_deadzone_r, 0, 50, 1, "%d%%");
-    hint("How far a stick moves before it counts. Raise it if Mario, the camera or the map pointer moves on its own "
-         "(the map's pointer drifting away from what you select is a sign of it). The default is 5%.");
-    slider("Left stick range", &g_settings.stick_range_l, 50, 150, 5, "%d%%");
-    slider("Right stick range", &g_settings.stick_range_r, 50, 150, 5, "%d%%");
-    hint("How much of a full tilt the stick's end gives. Above 100% a full tilt comes before the stick's end (a worn or "
-         "small stick that doesn't reach it); below 100% the stick's end gives less than a full tilt.");
-    {   // what the game gets from each stick now (a check for drift and range)
+
+    opt_section("Sticks");
+    opt_int_slider("Left stick deadzone", &g_settings.stick_deadzone_l, 0, 50, 1, 5, "%d%%",
+                   "How far the left stick moves before it counts. Raise it if Mario moves on his own. The default is 5%.");
+    opt_int_slider("Right stick deadzone", &g_settings.stick_deadzone_r, 0, 50, 1, 5, "%d%%",
+                   "How far the right stick moves before it counts. Raise it if the camera or the map pointer moves on "
+                   "its own (the map's pointer drifting away from what you select is a sign of it). The default is 5%.");
+    {
         float v[2][2];
         input_stick_now(0, &v[0][0], &v[0][1]);
         input_stick_now(1, &v[1][0], &v[1][1]);
-        char line[160];
-        snprintf(line, sizeof line, tr("Now: left %3.0f%%, right %3.0f%% of a full tilt"),
+        static char note[160];
+        snprintf(note, sizeof note, tr("Now: left %3.0f%%, right %3.0f%% of a full tilt"),
                  100 * sqrtf(v[0][0] * v[0][0] + v[0][1] * v[0][1]), 100 * sqrtf(v[1][0] * v[1][0] + v[1][1] * v[1][1]));
-        ImGui::TextDisabled("%s", line);
+        opt_next_note(note);
     }
-    ImGui::Spacing();
-    header("Stick camera");
-    camera_speed("Stick horizontal speed", &g_settings.stick_camera_x);
-    camera_speed("Stick vertical speed", &g_settings.stick_camera_y);
-    toggle("Invert stick horizontal", &g_settings.stick_camera_invert_x);
-    toggle("Invert stick vertical", &g_settings.stick_camera_invert_y);
-    hint("The main gameplay camera only. Mario's movement and menu navigation keep their normal controls. "
-         "The game's own camera inversion options also apply.");
-    toggle("First-person view faces Mario's way", &g_settings.first_person_mario);
-    hint("The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera "
-         "was looking, as on the Switch.");
-    ImGui::Spacing();
-    header("Mouse");
-    toggle("Mouse camera", &g_settings.mouse_camera);
-    hint("Moving the mouse turns the camera. While you play, the pointer stays in the window; it is free again in this "
-         "menu (Esc) or when you switch to another window.");
-    camera_speed("Mouse horizontal speed", &g_settings.mouse_sensitivity);
-    camera_speed("Mouse vertical speed", &g_settings.mouse_sensitivity_y);
-    hint("Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a "
-         "stick (the usual follow camera; the other camera kinds take the mouse as a stick).");
-    toggle("Mouse camera stays where you put it", &g_settings.mouse_no_recenter);
-    hint("The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, "
-         "it only turns when you move the mouse. Off: as on the Switch.");
-    slider("Mouse smoothing", &g_settings.mouse_smoothing, 0, 90, 10, "%d%%");
-    hint("Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still "
-         "turns as far in total, slightly later. 0%: raw, as the mouse moves.");
-    toggle("Invert mouse left / right", &g_settings.mouse_invert_x);
-    toggle("Invert mouse up / down", &g_settings.mouse_invert_y);
-    hint("Moving the mouse up turns the camera down instead.");
-    toggle("Mouse in menus", &g_settings.mouse_menus);
-    hint("In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click "
-         "or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something "
-         "else keep that binding. Not while you play.");
-    {
-        static const char *const names[PROMPTS_COUNT] = {"Auto", "Controller", "Keyboard and mouse", "Switch", "Xbox",
-                                                         "PlayStation"};
-        int i = g_settings.prompts >= 0 && g_settings.prompts < PROMPTS_COUNT ? g_settings.prompts : PROMPTS_AUTO;
-        if (choice("Button prompts", &i, names, PROMPTS_COUNT)) g_settings.prompts = i;
+    opt_int_slider("Left stick range", &g_settings.stick_range_l, 50, 150, 5, 100, "%d%%",
+                   "How much of a full tilt the left stick's end gives. Above 100% a full tilt comes before the stick's "
+                   "end (a worn or small stick that doesn't reach it); below 100% the stick's end gives less.");
+    opt_int_slider("Right stick range", &g_settings.stick_range_r, 50, 150, 5, 100, "%d%%",
+                   "How much of a full tilt the right stick's end gives. Above 100% a full tilt comes before the stick's "
+                   "end; below 100% the stick's end gives less.");
+
+    opt_section("Stick camera");
+    opt_int_slider("Stick horizontal speed", &g_settings.stick_camera_x, 25, 400, 5, 100, "%d%%",
+                   "How fast the right stick turns the main gameplay camera left and right. Mario's movement and menu "
+                   "navigation keep their normal controls.");
+    opt_int_slider("Stick vertical speed", &g_settings.stick_camera_y, 25, 400, 5, 100, "%d%%",
+                   "How fast the right stick turns the main gameplay camera up and down.");
+    opt_toggle("Invert stick horizontal", &g_settings.stick_camera_invert_x, false,
+               "The main gameplay camera only. The game's own camera inversion options also apply.");
+    opt_toggle("Invert stick vertical", &g_settings.stick_camera_invert_y, false,
+               "The main gameplay camera only. The game's own camera inversion options also apply.");
+    opt_toggle("First-person view faces Mario's way", &g_settings.first_person_mario, false,
+               "The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the "
+               "camera was looking, as on the Switch.");
+
+    opt_section("Mouse");
+    opt_toggle("Mouse camera", &g_settings.mouse_camera, true,
+               "Moving the mouse turns the camera. While you play, the pointer stays in the window; it is free again in "
+               "this menu (Esc) or when you switch to another window.");
+    opt_int_slider("Mouse horizontal speed", &g_settings.mouse_sensitivity, 25, 400, 5, 100, "%d%%",
+                   "How far the camera turns left and right for a mouse movement. The camera turns as far as the mouse "
+                   "moves, at once - no easing as with a stick.");
+    opt_int_slider("Mouse vertical speed", &g_settings.mouse_sensitivity_y, 25, 400, 5, 100, "%d%%",
+                   "How far the camera turns up and down for a mouse movement.");
+    opt_toggle("Mouse camera stays where you put it", &g_settings.mouse_no_recenter, false,
+               "The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the "
+               "camera, it only turns when you move the mouse. Off: as on the Switch.");
+    opt_int_slider("Mouse smoothing", &g_settings.mouse_smoothing, 0, 90, 10, 0, "%d%%",
+                   "Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera "
+                   "still turns as far in total, slightly later. 0%: raw, as the mouse moves.");
+    opt_toggle("Invert mouse left / right", &g_settings.mouse_invert_x, false,
+               "Moving the mouse left turns the camera right instead.");
+    opt_toggle("Invert mouse up / down", &g_settings.mouse_invert_y, false,
+               "Moving the mouse up turns the camera down instead.");
+    opt_toggle("Mouse in menus", &g_settings.mouse_menus, true,
+               "In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), "
+               "right click or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you "
+               "bound to something else keep that binding. Not while you play.");
+    {   // (Auto shows as the icons in use now: the keyboard's after keyboard / mouse use, else the controller's kind)
+        static const int vals[] = {PROMPTS_CONTROLLER, PROMPTS_KEYBOARD, PROMPTS_SWITCH, PROMPTS_XBOX, PROMPTS_PLAYSTATION};
+        static const char *const names[] = {"Connected controller", "Keyboard and mouse", "Switch", "Xbox", "PlayStation"};
+        int fam = input_pad_family();
+        int resolved = kbprompts_active() ? PROMPTS_KEYBOARD : fam == 2 ? PROMPTS_PLAYSTATION : fam == 1 ? PROMPTS_XBOX
+                                                                                                    : PROMPTS_SWITCH;
+        opt_next_dropdown();
+        opt_choice_resolved("Button prompts", &g_settings.prompts, PROMPTS_AUTO, vals, names, 5, resolved,
+                            "The game's button icons. Until you pick one they switch as you play: the keys you bound "
+                            "after you use the keyboard or mouse, the controller's own buttons after you use a "
+                            "controller. Connected controller always shows the connected controller's; Switch, Xbox "
+                            "and PlayStation always those.");
     }
-    hint("The game's button icons. Auto switches as you play: the keys you bound (and the mouse for the camera) after "
-         "you use the keyboard or mouse, the controller's own buttons (Xbox, PlayStation or Switch) after you use a "
-         "controller. Controller always shows the connected controller's; Switch, Xbox and PlayStation always those.");
-    toggle("Skip the start-up controller screen", &g_settings.skip_intro);
-    hint("Leaves out the wait on the Joy-Con instructions screen before the title screen. Applies at the next start. "
-         "The game's own tips while playing (\"You can also shake the controller\", the Joy-Con videos) stay, as on the "
-         "Switch.");
-    ImGui::Spacing();
-    header("Controls");
-    controls_bindings_draw(ImGui::GetFontSize() / 34);
-    ImGui::Spacing();
-    header("Menu");
-    ImGui::PushTextWrapPos(0);  // (wrapped: at 1280 x 800 the first line ran past the window's edge)
-    ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
-    ImGui::TextUnformatted(tr("Select:  A / Cross  (Enter)        Back:  B / Circle  (Esc)        Switch tabs:  L / R  (Q / E)"));
-    ImGui::TextUnformatted(tr("Fullscreen:  F11 / Alt+Enter"));
+    opt_toggle("Skip the start-up controller screen", &g_settings.skip_intro, true,
+               "Leaves out the wait on the Joy-Con instructions screen before the title screen. Applies at the next "
+               "start. The game's own tips while playing (\"You can also shake the controller\", the Joy-Con videos) "
+               "stay, as on the Switch.");
+
+    opt_section("Buttons for shake, spin throw and screenshot");
+    controls_actions_draw();  // shake, spin throw, screenshot: any button and any key (controls_ui.mm, hle/bindings.c)
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("%s", tr("Select a cell, then press any button, key or mouse button (Delete clears it). It then no "
+                                 "longer presses the game button it was bound to."));
     ImGui::PopTextWrapPos();
+    opt_section("Controls");
+    controls_bindings_draw(ImGui::GetFontSize() / 34);
+    opt_section("Menu");
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("%s", tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
+    ImGui::TextDisabled("%s", tr("Select:  A / Cross  (Enter)        Back:  B / Circle  (Esc)        Switch tabs:  L / R  (Q / E)"));
+    ImGui::TextDisabled("%s", tr("Fullscreen:  F11 / Alt+Enter"));
+    ImGui::PopTextWrapPos();
+    opt_end();
 }
 
 // Reboot (runtime/main.c): the game is gone - menu and name dialog close; the ImGui context stays.

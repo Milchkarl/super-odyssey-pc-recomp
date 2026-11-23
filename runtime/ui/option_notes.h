@@ -13,7 +13,7 @@ static const OptionNote k_option_notes[] = {
     {"Monitor", "Which screen the game shows on.", "Your main screen."},
     {"Display mode", "A window, borderless full screen, or exclusive full screen.", "Borderless (the default)."},
     {"Display resolution", "The size of the window, or of the screen mode in exclusive full screen.", "Desktop (the default)."},
-    {"Refresh rate", "How many times a second the screen updates (exclusive full screen only).", "Auto (the default)."},
+    {"Refresh rate", "How many times a second the screen updates (exclusive full screen only).", "The one shown first (the default): the highest a multiple of the frame rate."},
     {"VSync", "Lines the frames up with the screen's refreshes, so the picture never tears (splits in two).",
      "Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen."},
     {"Aspect ratio", "The picture's shape. 16:9 is the Switch's.", "16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck."},
@@ -89,21 +89,21 @@ static const OptionNote k_option_notes[] = {
     {"Memory use", "How much memory is used to prepare shaders ahead of time.", "Normal (the default). Low on a PC with less than 12 GB of RAM."},
     {"Low GPU memory mode", "Makes only the parts of the game's memory the graphics need visible to the GPU (applies at the next start).",
      "Off (the default). On if the game crashes with Out of graphics memory on a laptop with integrated graphics."},
-    {"Warm-up at start", "How long the game prepares the effects it has seen before, before you play.", "Auto (the default)."},
+    {"Warm-up at start", "How long the game prepares the effects it has seen before, before you play.", "Short (the default)."},
     {"Only set up shaders seen before", "When an area loads, prepares only shaders the game has drawn before.",
      "Off (the default). On with a slow CPU if the frame rate dips after loading."},
     {"Preload area shaders (more RAM)", "Prepares all of an area's shaders as soon as it loads.",
      "Off (the default): it uses a lot of memory."},
     // ---- Audio
     {"Volume", "The game's volume.", "100% (the default)."},
-    {"Audio output", "Stereo or 5.1 surround sound.", "Auto (the default)."},
+    {"Audio output", "Stereo or 5.1 surround sound.", "What your sound device has (the default)."},
     {"Reverb", "The echo in caves and big rooms, as on the Switch.", "On (the default)."},
     {"Movie audio", "Sound in the game's videos.", "On (the default)."},
     {"Mute in background", "No sound while another window is in front.", "As you like (off by default)."},
     // ---- Updates
     {"Check at start", "Looks for a new version each time the game starts.", "On (the default)."},
     // ---- Controls (a line under the control)
-    {"Language", "", "Auto (the default)."},
+    {"Language", "", "Your system's language (the default)."},
     {"Motion controls", "", "On if your controller has motion sensors (the default)."},
     {"Invert gyro X", "", "Off, unless motion moves feel reversed."},
     {"Invert gyro Y", "", "Off, unless motion moves feel reversed."},
@@ -124,7 +124,7 @@ static const OptionNote k_option_notes[] = {
     {"Mouse in menus", "", "On (the default)."},
     {"Invert mouse left / right", "", "Off (the default)."},
     {"Invert mouse up / down", "", "Off (the default)."},
-    {"Button prompts", "", "Auto (the default)."},
+    {"Button prompts", "", "The device you use (the default): they switch as you play."},
     {"Skip the start-up controller screen", "", "On (the default)."},
 };
 
