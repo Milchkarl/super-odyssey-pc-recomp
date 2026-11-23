@@ -45,3 +45,21 @@ float odyssey_shadow_distance(void) {
     int q = g_settings.shadow_distance;
     return k[q < 0 ? 0 : q > 2 ? 2 : q];
 }
+
+// al::ShadowDirector::update, before al::DepthShadowDrawer::setNearFar (tools/odyssey_patches.py SHADOW_SITES): s3, the
+// far end of the sun's shadow map, times the factor; s0-s2 are the cascades' split distances (left as they are).
+// ODYSSEY_LOG_SHADOW_FAR=1 logs them when they change.
+#include <string.h>
+static float sreg(Cpu *c, int n) { float f; memcpy(&f, &c->v[n], 4); return f; }
+void odyssey_shadow_far(Cpu *c) {
+    float f = odyssey_shadow_distance(), v[4] = {sreg(c, 0), sreg(c, 1), sreg(c, 2), sreg(c, 3)};
+    static int lg = -1;
+    static float last[4];
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_SHADOW_FAR") != NULL;
+    if (lg && memcmp(v, last, sizeof v)) {
+        memcpy(last, v, sizeof v);
+        LOG("[shadow] splits %.0f %.0f %.0f, far %.0f -> %.0f (x%g)\n", v[0], v[1], v[2], v[3], v[3] * f, f);
+    }
+    v[3] *= f;
+    memcpy(&c->v[3], &v[3], 4);  // (s3: an argument; its upper lanes aren't read)
+}

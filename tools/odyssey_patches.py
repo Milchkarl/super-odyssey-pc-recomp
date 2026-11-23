@@ -92,18 +92,26 @@ for _a in DRAW_SITES:
     PATCHES[_a] = _draw_distance(DRAW_SITES)
 
 
-# Shadow distance (runtime/hle/odyssey_draw.c odyssey_shadow_distance): al::ShadowDirector::getCurrentFar - how far from
-# the camera the sun's shadow map reaches (its parameter's far x the director's scale: fmul s0, s0, s1) - times the factor.
-SHADOW_SITES = {0x7000a1e574: 0x1e210800}
+# Shadow distance (runtime/hle/odyssey_draw.c odyssey_shadow_distance), times the factor at two places:
+#   - al::ShadowDirector::getCurrentFar (its parameter's far x the director's scale: fmul s0, s0, s1): how far from the
+#     camera models still cast shadows (its only caller is al::ModelCtrl::calcView);
+#   - al::ShadowDirector::update, the far handed to al::DepthShadowDrawer::setNearFar (mov v3.16b, v8.16b): how far the
+#     sun's shadow map reaches. (#135: only the first was patched; the shadows' reach didn't change.)
+# The value is the register each instruction leaves the far in.
+SHADOW_SITES = {0x7000a1e574: (0x1e210800, 0), 0x7000a1dfa0: (0x4ea81d03, 3)}
 
 
 def _shadow_distance(sites):
     def patch(gen, a):
         w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-        assert w == sites[a], f'{a:#x}: {w:#x}'
+        want, reg = sites[a]
+        assert w == want, f'{a:#x}: {w:#x}'
         code = ' '.join(gen.render_single(gen.lift(a), a, None, set()))
+        if reg == 3:  # (the shadow map's far: the runtime scales it, and can log it with the cascades' splits in s0-s2)
+            return (f'{code} {{ extern void odyssey_shadow_far(Cpu *); odyssey_shadow_far(c); }}  '
+                    f'/* {a:#x}: shadow distance (the far of the shadow map) */')
         return (f'{code} {{ extern float odyssey_shadow_distance(void); '
-                f'FP_SETS(0, VSF32(0) * odyssey_shadow_distance()); }}  /* {a:#x}: shadow distance */')
+                f'FP_SETS({reg}, VSF32({reg}) * odyssey_shadow_distance()); }}  /* {a:#x}: shadow distance */')
     return patch
 
 
@@ -190,7 +198,8 @@ def _wide_141(gen, a):
 PATCHES_141 = {SITES_141[HEAP_LOCK_SITE]: _heap_lock}
 for _a in WIDE_SITES_141:
     PATCHES_141[_a] = _wide_141
-SHADOW_SITES_141 = {0x700079e6a4: 0x1e210800}  # al::ShadowDirector::getCurrentFar: fmul s0, s0, s1 (the same code)
+SHADOW_SITES_141 = {0x700079e6a4: (0x1e210800, 0),  # al::ShadowDirector::getCurrentFar: fmul s0, s0, s1 (the same code)
+                    0x700079e190: (0x4ea81d03, 3)}  # al::ShadowDirector::update: the far for setNearFar
 for _a in SHADOW_SITES_141:
     PATCHES_141[_a] = _shadow_distance(SHADOW_SITES_141)
 DRAW_SITES_141 = {SITES_141[a]: v for a, v in DRAW_SITES.items()}
