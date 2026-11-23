@@ -639,11 +639,11 @@ static void row(const char *label, const std::string &value, const char *empty, 
     float x0 = ImGui::GetCursorPosX();
     ImGui::PushTextWrapPos(x0 + leftw);
     ImGui::PushStyleColor(ImGuiCol_Text, off ? kTextOffV : kTextV);
-    ImGui::TextUnformatted(label);
+    ImGui::TextUnformatted(tr(label));  // (#153: the rows' labels and hints translated)
     ImGui::PopStyleColor();
     ImGui::PushStyleColor(ImGuiCol_Text, value.empty() ? kTextOffV : kTextDimV);
     ImGui::SetWindowFontScale(0.78f);
-    if (value.empty()) ImGui::TextWrapped("%s", empty);
+    if (value.empty()) ImGui::TextWrapped("%s", tr(empty));
     else ImGui::TextUnformatted(fit(value, leftw).c_str());
     ImGui::SetWindowFontScale(1);
     ImGui::PopStyleColor();
@@ -1270,12 +1270,12 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.55f), sz, IM_COL32(59, 196, 90, 255), 0);  // (the icon's pipe green)
         ImGui::Dummy(ImVec2(sz, lh));
         ImGui::SameLine(0, lh * 0.35f);
-        ImGui::TextUnformatted("Super Odyssey PC Recomp");
+        ImGui::TextUnformatted(tr("Super Odyssey PC Recomp"));
     }
     ImGui::PopFont();
     ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
     ImGui::SetWindowFontScale(0.86f);
-    ImGui::TextUnformatted("Super Mario Odyssey, recompiled to run natively on PC - from your own copy of the game.");
+    ImGui::TextUnformatted(tr("Super Mario Odyssey, recompiled to run natively on PC - from your own copy of the game."));
     ImGui::SetWindowFontScale(1);
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(0, 10 * scale));
@@ -1289,7 +1289,7 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
     pthread_mutex_unlock(&g_lock);
 
     if (st == ST_BUSY) {
-        ImGui::TextUnformatted(g_code_only ? "Getting the game code ready for this version." : "Installing.");
+        ImGui::TextUnformatted(tr(g_code_only ? "Getting the game code ready for this version." : "Installing."));
         ImGui::Dummy(ImVec2(0, 12 * scale));
         float f = g_frac.load();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1302,18 +1302,18 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         char line[240];
         double secs = (double)(plat_now_ns() - g_t0) / 1e9;
         int left = f > 0.04f ? (int)ceil(secs * (1 - f) / f / 60) : 0;
-        if (left > 0) snprintf(line, sizeof line, "%s   %.0f%%   about %d min left", step.c_str(), f * 100, left);
-        else snprintf(line, sizeof line, "%s   %.0f%%", step.c_str(), f * 100);
+        if (left > 0) snprintf(line, sizeof line, tr("%s   %.0f%%   about %d min left"), tr(step.c_str()), f * 100, left);
+        else snprintf(line, sizeof line, "%s   %.0f%%", tr(step.c_str()), f * 100);
         ImGui::TextUnformatted(line);
         ImGui::Dummy(ImVec2(0, 18 * scale));
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextUnformatted(g_code_only ? "This takes a few minutes, once."
-                                           : "This happens once: the game data is checked and written, the game code is "
-                                             "recompiled for this PC, and every shader is compiled ahead so the game "
-                                             "doesn't stutter later. You can keep using your PC meanwhile.");
+        ImGui::TextUnformatted(tr(g_code_only ? "This takes a few minutes, once."
+                                              : "This happens once: the game data is checked and written, the game code is "
+                                                "recompiled for this PC, and every shader is compiled ahead so the game "
+                                                "doesn't stutter later. You can keep using your PC meanwhile."));
         ImGui::PopStyleColor();
     } else if (st == ST_DONE) {
-        ImGui::TextUnformatted("All set. The game is installed and its shaders are compiled.");
+        ImGui::TextUnformatted(tr("All set. The game is installed and its shaders are compiled."));
         ImGui::Dummy(ImVec2(0, 24 * scale));
         if (accent_button("Play", scale)) g_want_play = true;
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
@@ -1321,9 +1321,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
     } else {
         if (st == ST_FAILED) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.6f, 0.55f, 1));
-            ImGui::TextUnformatted(head.c_str());
+            ImGui::TextUnformatted(tr(head.c_str()));
             ImGui::PopStyleColor();
-            ImGui::TextUnformatted(hint.c_str());
+            ImGui::TextUnformatted(tr(hint.c_str()));
             ImGui::Dummy(ImVec2(0, 6 * scale));
         }
         bool pkg = game_is_package(game);
@@ -1336,9 +1336,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
             ImGui::Dummy(ImVec2(0, 10 * scale));
             ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
             ImGui::SetWindowFontScale(0.7f);
-            ImGui::TextUnformatted("Nothing of the game is included, and nothing is uploaded anywhere: your game files are only "
-                                   "read on this PC. The install takes about the size of the game plus a few GB (the recompiled "
-                                   "code and the compiled shaders).");
+            ImGui::TextUnformatted(tr("Nothing of the game is included, and nothing is uploaded anywhere: your game files are only "
+                                      "read on this PC. The install takes about the size of the game plus a few GB (the recompiled "
+                                      "code and the compiled shaders)."));
             ImGui::SetWindowFontScale(1);
             ImGui::PopStyleColor();
         } else {
@@ -1361,9 +1361,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         ImGui::Dummy(ImVec2(0, 10 * scale));
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
         ImGui::SetWindowFontScale(0.7f);
-        ImGui::TextUnformatted("Nothing of the game is included, and nothing is uploaded anywhere: your game file and keys are "
-                               "only read on this PC. The install takes about the size of the game plus a few GB "
-                               "(the recompiled code and the compiled shaders).");
+        ImGui::TextUnformatted(tr("Nothing of the game is included, and nothing is uploaded anywhere: your game file and keys are "
+                                  "only read on this PC. The install takes about the size of the game plus a few GB "
+                                  "(the recompiled code and the compiled shaders)."));
         ImGui::SetWindowFontScale(1);
         ImGui::PopStyleColor();
         }

@@ -2039,19 +2039,22 @@ static void tab_quit(float scale) {
 
 static void quit_dialog(float scale) {
     if (!g_quit_prompt.load()) return;
-    if (!ImGui::IsPopupOpen("Quit game?")) ImGui::OpenPopup("Quit game?");
+    // (#153: the title and text through tr(); the popup's id stays fixed - "##quit" - so it opens in any language)
+    char id[128];
+    snprintf(id, sizeof id, "%s##quit", tr("Quit game?"));
+    if (!ImGui::IsPopupOpen(id)) ImGui::OpenPopup(id);
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Quit game?", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Progress since your last save will be lost.");
+    if (ImGui::BeginPopupModal(id, NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(tr("Progress since your last save will be lost."));
         ImGui::Spacing();
-        if (ImGui::Button("Cancel", ImVec2(136 * scale, 0)) ||
+        if (ImGui::Button(tr("Cancel"), ImVec2(136 * scale, 0)) ||
             ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             g_quit_prompt = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SetItemDefaultFocus();
         ImGui::SameLine();
-        if (ImGui::Button("Quit to Desktop", ImVec2(242 * scale, 0)) && g_quit_prompt.load()) {
+        if (ImGui::Button(tr("Quit to Desktop"), ImVec2(242 * scale, 0)) && g_quit_prompt.load()) {
             settings_save();
             SDL_Event q = {};
             q.type = SDL_EVENT_QUIT;
