@@ -9066,6 +9066,31 @@ static void draw_(CmdRec *r, bool indexed) {
             }
         }
     }
+    {   // ODYSSEY_LOG_BLOOM_CHAIN=<frame> (debug): that frame's draws into the glow chain's small R11G11B10F targets
+        // and the draws that read them - target, shaders, and each sampled texture's size
+        static long at = -2;
+        if (at == -2) at = getenv("ODYSSEY_LOG_BLOOM_CHAIN") ? atol(getenv("ODYSSEY_LOG_BLOOM_CHAIN")) : -1;
+        NvnTexture *t0 = at > 0 && st.rt.ncolor ? st.rt.color[0] : NULL;
+        if (t0 && renderer_present_count() == (uint64_t)at) {
+            bool chain = t0->format == 0x3f && t0->width <= 400 && t0->height <= 228;
+            char tx[600] = "";
+            size_t o = 0;
+            for (int i = 0; i < pr->fi->ntex && i < 8; i++) {
+                int slot = ((int)pr->fi->tex[i].handle_offset - 0x20) / 8;
+                uint64_t h = (slot >= 0 && slot < 32) ? st.tex[1][slot] : 0;
+                uint32_t tic = h & 0xFFFFF;
+                NvnTexture *x = h && st.tpool && tic < (uint32_t)st.tpool->count ? ((NvnTexEntry *)st.tpool->entries)[tic].tex : NULL;
+                if (x && x->format == 0x3f && x->width <= 400 && x->height <= 228) chain = true;
+                if (x && o < sizeof tx - 64)
+                    o += snprintf(tx + o, sizeof tx - o, " t%d=%llx %ux%u f%#x lv%u", slot, (unsigned long long)x->addr, x->width,
+                                  x->height, x->format, x->levels);
+            }
+            if (chain)
+                LOG("[bloom-chain] into %llx %ux%u f%#x lv%u vp %ux%u: fs %llx, blend %d;%s\n", (unsigned long long)t0->addr,
+                    t0->width, t0->height, t0->format, t0->levels, st.viewport[0][2], st.viewport[0][3],
+                    (unsigned long long)st.program->stages[1].code_addr, (int)(st.color_state[0] & 1), tx);
+        }
+    }
     for (int i = 0; i < pr->fi->ntex && i < 64; i++) {
         float sc[2]; uint32_t wh[2];
         texture_info(1, pr->fi, i, &fii[i], sc, wh);
