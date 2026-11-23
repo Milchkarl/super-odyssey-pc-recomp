@@ -338,7 +338,13 @@ static uint64_t menu_mouse_bits(void) {
             bool focus_click = now - atomic_load(&window_focus_ns) < 300000000ull;
             extern bool odyssey_map_open(void);  // (runtime/hle/odyssey_pointer.c: on the map a binding stays)
             bool keep = k_menu_mouse[i].code == BIND_MOUSE_LEFT && mouse_code_bound(BIND_MOUSE_LEFT) && odyssey_map_open();
-            *l = !focus_click && !keep && in_game_menu() ? (uint8_t)(k_menu_mouse[i].bit + 1) : 0xff;
+            // (#151: a mouse button bound to the game's A or B is that in the menus and on the map too - as the game's
+            // button prompts show it. Mouse Right bound to A was B here: it closed the map instead of travelling, and
+            // the prompts asked for the right button while the left one confirmed.)
+            int code = k_menu_mouse[i].code;
+            int bit = g_bind_key[BIND_A] == code ? BIND_A : g_bind_key[BIND_B] == code ? BIND_B : k_menu_mouse[i].bit;
+            if (bit != k_menu_mouse[i].bit) keep = false;
+            *l = !focus_click && !keep && in_game_menu() ? (uint8_t)(bit + 1) : 0xff;
         }
         if (*l && *l != 0xff) b |= 1ull << (*l - 1);
     }
