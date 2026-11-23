@@ -360,18 +360,26 @@ static int dropdown_list(const char *label, int cur, const char *const *names, i
     return pick;
 }
 
+// (a two-choice row is a switch unless asked to be a dropdown, or a name doesn't fit its half of the value box - two
+// graphics cards' names overlapped there)
+static bool seg_fits(const char *const *names) {
+    float half = ImGui::GetContentRegionAvail().x * 0.46f * 0.5f - 16 * g_scale;
+    return ImGui::CalcTextSize(tr(names[0])).x <= half && ImGui::CalcTextSize(tr(names[1])).x <= half;
+}
+
 // (owner 2026-11-23: no left / right rows - two choices are a switch like On | Off, more are a dropdown)
 bool opt_choice(const char *label, int *v, const char *const *names, int n, int def, const char *desc, bool wrap) {
     int cur = *v >= 0 && *v < n ? *v : 0;
+    bool want_dd = g_next_dropdown;
     g_next_dropdown = false;
-    if (n == 2) {  // (a switch: a click on the other half, A, left / right choose the other)
+    if (n == 2 && !want_dd && seg_fits(names)) {  // (a switch: a click on the other half, A, left / right choose the other)
         g_row_toggle = cur == 0 ? 1 : 0;
         g_row_seg[0] = names[0], g_row_seg[1] = names[1];
         if (!row(label, names[cur], cur != def, desc)) return false;
         *v = 1 - cur;
         return true;
     }
-    bool dd = n >= 3;
+    bool dd = n >= 2;  // (two only when it isn't a switch: above)
     g_row_chevron = dd;
     int step = row(label, names[cur], cur != def, desc, false, !dd);
     if (dd) {
@@ -401,15 +409,16 @@ bool opt_choice_avail(const char *label, int *v, const char *const *names, int n
     for (int i = 0; i < n; i++)
         if (!avail[i]) missing += (missing.empty() ? "" : ", ") + std::string(tr(names[i]));
     if (!missing.empty()) d += "\n\n" + std::string(tr("Not available on this PC (greyed out):")) + " " + missing + ".";
+    bool want_dd = g_next_dropdown;
     g_next_dropdown = false;
-    if (n == 2) {  // (a switch, as opt_choice: only to an available choice)
+    if (n == 2 && !want_dd && seg_fits(names)) {  // (a switch, as opt_choice: only to an available choice)
         g_row_toggle = cur == 0 ? 1 : 0;
         g_row_seg[0] = names[0], g_row_seg[1] = names[1];
         if (!row(label, names[cur], cur != def, d.c_str()) || !avail[1 - cur]) return false;
         *v = 1 - cur;
         return true;
     }
-    bool dd = n >= 3;
+    bool dd = n >= 2;  // (two only when it isn't a switch: above)
     g_row_chevron = dd;
     int step = row(label, names[cur], cur != def, d.c_str(), false, !dd);
     if (dd) {
