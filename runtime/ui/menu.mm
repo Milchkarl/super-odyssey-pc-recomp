@@ -1572,14 +1572,14 @@ static void tab_graphics(void) {
         static const int bq_value[] = {0, 2, 1};
         int bq_shown = g_settings.bloom_quality == 2 ? 1 : g_settings.bloom_quality == 1 ? 2 : 0;
         if (opt_choice("Bloom quality", &bq_shown, bq, 3, 0,
-                   "The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, "
-                   "and stretches it over the screen; its edges along bright sky and lights then show small steps, "
-                   "more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother "
-                   "filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail "
-                   "stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon "
-                   "behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and "
-                   "blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Off: no glow "
-                   "at all (not as the game looks). Switch: as on the Switch. Changes at once.", false))
+                   "The game draws its glow (bloom, light shafts) as a small image, a quarter or an eighth of its "
+                   "picture's width, and stretches it over the screen; its edges along bright sky and lights then show "
+                   "small steps, more visible next to a sharp high-resolution picture. High: the glow is drawn at the "
+                   "picture's resolution, keeping the game's shape and strength, and stretched with a smoother filter, "
+                   "so its edges fade evenly. High also smooths the hazy far horizon behind the kingdoms (a small "
+                   "picture stretched over the sky, whose texels show as blocks and blobs). Costs a little GPU time. "
+                   "Off: no glow at all (not as the game looks). Switch: as on the Switch. The glow's resolution "
+                   "changes from the next area loaded, the rest at once.", false))
             g_settings.bloom_quality = bq_value[bq_shown];
         static const char *ao[] = {"Off", "Medium", "High"};
         mem_note_pixels("Graphics memory for ambient occlusion:", 12, false);

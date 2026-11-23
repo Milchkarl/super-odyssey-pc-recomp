@@ -81,6 +81,7 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool bloom_prefilter;
+    bool glow_chain;    // (key->glow_chain: the glow chain drawn larger - its 2D reads through glowTap, #102)
     bool bloom_smooth;  // (the HDR composite, key->glow_comp: its 2D inputs read through bloomUp, steered per input)
     bool comp_hdr;      // (the same composite: its body a function, comp_, run by an HDR / grading main - see comp_main)
     bool far_smooth;    // (the distant-view panorama: RGBM texels decoded before a B-spline enlargement, farSample)
@@ -697,6 +698,9 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         c->stage == STAGE_FRAGMENT) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "farSample(t0, %s, rscale[1])", P);
+    } else if (c->glow_chain && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1 && !layer) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "glowTap(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
     } else if (c->bloom_smooth && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1) {
         c->uses_rscale = true;
         if (c->comp_hdr && slot < 8)  // (comp_main: the scene's light at another exposure - hk_ per input)
@@ -2368,6 +2372,35 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    return color / (footprint.x * footprint.y);\n"
                "}\n");
     }
+    if (c->glow_chain) {
+        // (#102) The glow chain drawn larger than the game's: a read of a texture rs.xy times the game's size covers
+        // the area of one game texel - a box rs wide around the point, at the level asked for, from bilinear taps on
+        // texel pairs - instead of one bilinear tap, whose spacing was the game's texels: its blur keeps its shape and
+        // reach, now computed per output pixel. rs <= 1 (not enlarged): one tap as the game's.
+        sp(&s, "vec2 glowPair(float p, float lo, float hi) {\n"
+               "    float a = clamp(min(hi, p + 1.0) - max(lo, p), 0.0, 1.0);\n"
+               "    float b = clamp(min(hi, p + 2.0) - max(lo, p + 1.0), 0.0, 1.0);\n"
+               "    return vec2(p + 0.5 + b / max(a + b, 1e-6), a + b);\n"
+               "}\n"
+               "vec4 glowTap(sampler2D src, vec2 uv, float lod, vec4 rs) {\n"
+               "    vec2 k = rs.xy;\n"
+               "    if (all(lessThanEqual(k, vec2(1.01)))) return textureLod(src, uv, lod);\n"
+               "    vec2 size = vec2(textureSize(src, int(lod)));\n"
+               "    vec2 lo = uv * size - 0.5 * k, hi = lo + k;\n"
+               "    ivec2 first = ivec2(floor(lo)), end = ivec2(ceil(hi));\n"
+               "    vec4 color = vec4(0.0);\n"
+               "    float wsum = 0.0;\n"
+               "    for (int y = first.y; y < end.y; y += 2) {\n"
+               "        vec2 ty = glowPair(float(y), lo.y, hi.y);\n"
+               "        for (int x = first.x; x < end.x; x += 2) {\n"
+               "            vec2 tx = glowPair(float(x), lo.x, hi.x);\n"
+               "            float w = tx.y * ty.y;\n"
+               "            if (w > 0.0) { color += textureLod(src, vec2(tx.x, ty.x) / size, lod) * w; wsum += w; }\n"
+               "        }\n"
+               "    }\n"
+               "    return wsum > 0.0 ? color / wsum : textureLod(src, uv, lod);\n"
+               "}\n");
+    }
     if (c->bloom_smooth) {
         // The HDR composite's inputs, as the draw steers each one (exec.c draw_, rscale[slot].z): 0 read as the game
         // reads it (the scene, its blurred copy, the exposure, a lens texture), 1 the glow image enlarged with a cubic
@@ -2836,6 +2869,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             for (size_t i = 0x30; i < ext; i++) hash = (hash ^ blob[i]) * 1099511628211ull;
             // (the composite itself is found by the draw, key->glow_comp: by its hash only 2 of its dozen versions were)
             c->bloom_smooth = key->glow_comp;
+            c->glow_chain = key->glow_chain && !key->glow_comp;
             {   // ODYSSEY_HDR_COMP=0 (tests): the composite as before, without the HDR / grading main
                 static int on = -1;
                 if (on < 0) { const char *e = getenv("ODYSSEY_HDR_COMP"); on = !e || atoi(e) != 0; }

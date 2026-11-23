@@ -180,10 +180,16 @@ uint64_t renderer_present_count(void);
 
 static bool tex_scalable(const NvnTexture *t) {
     if (t->flags & 0x4) return false;  // NVN_TEXTURE_FLAGS_IMAGE: compute uses the guest's integer texel coordinates.
-    // Odyssey's quarter-resolution R11G11B10F bloom chain uses taps spaced for the guest texel grid.
-    // Enlarging these targets separates the taps around small highlights and produces visible grids.
-    static int bloom_full = -1;  // (experiment) ODYSSEY_BLOOM_SCALE=1: the bloom chain at the internal resolution too
-    if (bloom_full < 0) bloom_full = getenv("ODYSSEY_BLOOM_SCALE") && atoi(getenv("ODYSSEY_BLOOM_SCALE"));
+    // Odyssey's quarter- and eighth-size R11G11B10F glow chain (bloom, glare) has taps spaced for the game's texels:
+    // enlarged on its own, its blur lost its reach and showed grids around small highlights. Bloom quality High
+    // (#102) enlarges it with the picture, and its draws read through glowTap (exec.c glow_chain, translate.c) - each
+    // read the area of one game texel - so the glow keeps its shape, computed per output pixel. Decided as each target
+    // is made (the game makes them at each area load). ODYSSEY_BLOOM_SCALE=0/1 overrides (tests).
+    static int bloom_env = -2;
+    if (bloom_env == -2) bloom_env = getenv("ODYSSEY_BLOOM_SCALE") ? atoi(getenv("ODYSSEY_BLOOM_SCALE")) : -1;
+    // (only when the picture is larger than the game's: smaller - a Steam Deck in Handheld mode, a low internal
+    // resolution - keeps the chain at the game's size, as before)
+    bool bloom_full = (bloom_env >= 0 ? bloom_env != 0 : g_settings.bloom_quality == 1) && g_rs_x > 1.01f && g_rs_y > 1.01f;
     if (!bloom_full && t->format == 0x3f && t->width <= 400 && t->height <= 228) return false;
     return output_scale_texture(t);
 }

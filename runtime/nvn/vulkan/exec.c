@@ -8684,6 +8684,14 @@ static void draw_(CmdRec *r, bool indexed) {
             c0->height == c1->height && g_draw_fullscreen)
             vkey.glow_comp = fkey.glow_comp = 1;
     }
+    {   // (#102) a draw into the glow chain drawn larger than the game's (textures.c tex_scalable: its quarter-size
+        // R11G11B10F targets at the picture's scale): the variant whose reads cover one game texel each (glowTap)
+        NvnTexture *c0 = st.rt.ncolor ? st.rt.color[0] : NULL;
+        TexBackend *cb = c0 ? c0->backend : NULL;
+        if (c0 && cb && c0->format == 0x3f && c0->width <= 400 && c0->height <= 228 && cb->scalable &&
+            (cb->sx > 1.01f || cb->sy > 1.01f) && !fkey.glow_comp)
+            vkey.glow_chain = fkey.glow_chain = 1;
+    }
     {   // the game's last copy of its picture into the window (through an 8-bit sRGB view): dithered (translate.c
         // rt_kind 3; the picture before it has half floats: textures.c "Banding"). HDR: the window texture has half
         // floats itself (textures.c hdr_window) - sRGB-encoded there without the clamp, highlights above 1 (rt_kind 4).

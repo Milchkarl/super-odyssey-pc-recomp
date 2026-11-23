@@ -55,6 +55,9 @@ typedef struct {
     uint8_t glow_comp;      // (fragment, GLSL) the game's HDR composite (exec.c draw_: scene + glow into the picture
                             // and its luma): its 2D textures read through bloomUp, which the draw's rscale steers per
                             // texture (translate.c). In the padding, as hud_filter.
+    uint8_t glow_chain;     // (fragment, GLSL) a draw into one of the glow chain's targets drawn larger than the game's
+                            // (#102): its 2D textures read through glowTap - the area of one game texel - so the
+                            // game's blur keeps its shape at the larger size (translate.c). In the padding, as above.
 } ShaderKey;
 
 typedef struct {
