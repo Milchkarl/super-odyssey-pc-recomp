@@ -980,7 +980,8 @@ static void memory_bars(float scale) {
         if (bars[i].total <= 0) continue;
         ImVec2 p = ImGui::GetCursorScreenPos();
         float f = fminf(bars[i].used / bars[i].total, 1), lw = floorf(w * 0.30f);
-        ImU32 col = f < 0.75f ? IM_COL32(80, 190, 110, 255) : f < 0.9f ? IM_COL32(230, 190, 60, 255) : IM_COL32(225, 70, 60, 255);
+        // (black / grey / white, owner 2026-11-23: a grey fill, brighter as it nears the limit)
+        ImU32 col = f < 0.75f ? IM_COL32(120, 120, 128, 255) : f < 0.9f ? IM_COL32(175, 175, 182, 255) : IM_COL32(235, 235, 240, 255);
         warn |= f >= 0.9f;
         char txt[96];
         snprintf(txt, sizeof txt, "%.1f / %.1f GB", bars[i].used / 1024, bars[i].total / 1024);
@@ -991,12 +992,13 @@ static void memory_bars(float scale) {
         if (bars[i].part > 0)  // (the game's own share of the PC's memory, darker inside)
             dl->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * fminf(bars[i].part / bars[i].total, f), b1.y),
                               IM_COL32(0, 0, 0, 70), 4 * scale);
-        ImVec2 ts = ImGui::CalcTextSize(txt);
-        dl->AddText(ImVec2((b0.x + b1.x - ts.x) * 0.5f, p.y + (h - fs) * 0.5f), IM_COL32(255, 255, 255, 255), txt);
+        ImVec2 ts = ImGui::CalcTextSize(txt), tp((b0.x + b1.x - ts.x) * 0.5f, p.y + (h - fs) * 0.5f);
+        dl->AddText(ImVec2(tp.x + 1.5f * scale, tp.y + 1.5f * scale), IM_COL32(0, 0, 0, 220), txt);  // (readable on any fill)
+        dl->AddText(tp, IM_COL32(255, 255, 255, 255), txt);
         ImGui::Dummy(ImVec2(w, h + gap * 0.5f));
     }
     if (warn) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.4f, 1));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
         ImGui::TextWrapped("%s", tr("Near the limit: the game may stutter or stop. Lower Internal resolution, Shadow quality, "
                                     "the upscaler or frame generation, or set Memory use to Low."));
         ImGui::PopStyleColor();
@@ -1293,6 +1295,7 @@ static void tab_graphics(void) {
     // each with the exact size it renders at in this window and picture shape ("Match display (2560 x 1440)")
     static char res_lab[11][48];
     const char *res[11];
+    double res_w[11] = {0}, res_h[11] = {0};
     {
         ImGuiIO &io = ImGui::GetIO();
         double dw = io.DisplaySize.x * io.DisplayFramebufferScale.x, dh = io.DisplaySize.y * io.DisplayFramebufferScale.y;
@@ -1304,6 +1307,7 @@ static void tab_graphics(void) {
         for (int i = 0; i < 11; i++) {
             double rw = 0, rh = 0;
             if (dw > 0 && dh > 0) output_scale_preview(dw, dh, shape, res_mode[i], &rw, &rh);
+            res_w[i] = rw, res_h[i] = rh;
             if (rw <= 0) snprintf(res_lab[i], sizeof res_lab[i], "%s", res_base[i]);
             else if (res_mode[i] == RES_MATCH) snprintf(res_lab[i], sizeof res_lab[i], "%.0f x %.0f", rw, rh);  // (the
             // screen's resolution, as it is - "Match display (2560 x 1440)" was cut off in the row; owner 2026-11-16)
@@ -1338,9 +1342,25 @@ static void tab_graphics(void) {
                      "size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes."), at);
         }
 #endif
+        // (each size once: a choice that renders at the same size as one before it in the list - Match display beside
+        // 100%, 1x or 1440p on a screen that size - is left out; a setting on one of those shows as its twin)
+        const char *shown[11];
+        int shown_mode[11], ns = 0, si = 0, sdef = 0;
+        for (int i = 0; i < NRES; i++) {
+            int twin = -1;
+            for (int k = 0; k < ns && res_mode[i] != RES_DYNAMIC; k++)
+                if (res_w[i] > 0 && res_mode[k] != RES_DYNAMIC) {
+                    int j = 0;
+                    while (res_mode[j] != shown_mode[k]) j++;
+                    if (res_w[j] == res_w[i] && res_h[j] == res_h[i]) twin = k;
+                }
+            if (twin < 0) shown[ns] = res[i], shown_mode[ns] = res_mode[i], twin = ns++;
+            if (i == ri) si = twin;
+            if (i == RES_DISPLAY_AT) sdef = twin;
+        }
         opt_next_dropdown();
         mem_note_resolution();
-        if (opt_choice("Internal resolution", &ri, res, NRES, RES_DISPLAY_AT, d, false)) g_settings.res_mode = res_mode[ri];
+        if (opt_choice("Internal resolution", &si, shown, ns, sdef, d, false)) g_settings.res_mode = shown_mode[si];
     }
 #ifdef __APPLE__
     {   // macOS's own upscaler next to bilinear (Windows / Linux: AMD FSR 1 is in the Upscaling list below)
@@ -2461,7 +2481,7 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
     static int focused_tab = -99;  // the tab the controller's cursor is on (from the frame before; -99: none)
     bool lr_in_page = false;  // L / R with the cursor on a row of the page: it goes to the new page's first row
-    if (!any_popup && !typing) {
+    if (!any_popup && !opt_dropdown_recent() && !typing) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
                  : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1 : 0;
         if (step) {
@@ -2565,7 +2585,7 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
         if (sel) {
             float lw2 = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * fsc, FLT_MAX, 0, tr(t.name)).x;
             float ly = q.y - fmaxf(3, 5 * scale);
-            bdl->AddRectFilled(ImVec2(p.x + (w - lw2) * 0.5f, ly), ImVec2(p.x + (w + lw2) * 0.5f, ly + fmaxf(2, 3 * scale)), kAccent, 2 * scale);
+            bdl->AddRectFilled(ImVec2(p.x + (w - lw2) * 0.5f, ly), ImVec2(p.x + (w + lw2) * 0.5f, ly + fmaxf(2, 3 * scale)), kText, 2 * scale);
         }
         if (foc) bdl->AddRect(ImVec2(p.x + 1, p.y + 1), ImVec2(q.x - 1, q.y - 1), kGold, r, 0, fmaxf(2, 2.5f * scale));
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, tr(t.name));
@@ -3072,7 +3092,8 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         ImGui::PopStyleColor();
         {
             ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
-            around(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y), theme_u32(kPanelV), ImGui::GetStyle().WindowRounding);
+            // (square: the window fills the screen - rounded, the game showed in its corners; owner 2026-11-23)
+            around(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y), theme_u32(kPanelV), 0);
         }
         ImFont *keep_big = g_font_big;  // (the window in the menu's font; header() uses g_font_big)
         g_font_big = g_menu_font_big;
@@ -3106,7 +3127,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImU32 col = theme_u32(kTextV, hot ? 1.0f : 0.85f);
             float m = bx * 0.3f, t = (hot ? 3.0f : 2.4f) * scale * 1.5f;
             ImDrawList *dl = ImGui::GetWindowDrawList();
-            if (hot) dl->AddRect(p, ImVec2(p.x + bx, p.y + bx), kAccent, 4 * scale, 0, 2 * scale);  // (red outline)
+            if (hot) dl->AddRect(p, ImVec2(p.x + bx, p.y + bx), kText, 4 * scale, 0, 2 * scale);  // (white outline)
             dl->AddLine(ImVec2(p.x + m, p.y + m), ImVec2(p.x + bx - m, p.y + bx - m), col, t);
             dl->AddLine(ImVec2(p.x + bx - m, p.y + m), ImVec2(p.x + m, p.y + bx - m), col, t);
             if (close) set_open(false);
@@ -3123,7 +3144,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         quit_dialog(scale);
         // B / Esc (not the one that ends typing: typing is from the frame before, so it's still true the frame a field
         // lets go): in a page, back to the sidebar; on the sidebar (or with the mouse), the menu closes
-        if (!any_popup && !typing && !ui_text_busy() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        if (!any_popup && !opt_dropdown_recent() && !typing && !ui_text_busy() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
             (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
             if (!g_sidebar_was && ImGui::GetCurrentContext()->NavCursorVisible) g_focus_tab = -100, g_focus_frames = 0;
             else set_open(false);

@@ -23,6 +23,7 @@ bool opt_int(const char *label, int *v, int lo, int hi, int step, int def, const
              const char *lo_name = NULL);
 // the next opt_choice / opt_choice_avail as a dropdown: a click or A opens its list (left / right still step)
 void opt_next_dropdown(void);
+bool opt_dropdown_recent(void);  // a dropdown's list was open a frame ago (its B / Esc isn't the menu's)
 // a line under the next row's description (worked out live, e.g. the memory its choice takes)
 void opt_next_note(const char *note);
 // the same as a slider: a track the mouse drags (left / right step, held: faster; A: back to the default)

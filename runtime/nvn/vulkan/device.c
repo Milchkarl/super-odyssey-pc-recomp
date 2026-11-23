@@ -2067,7 +2067,16 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
         g_present_out = g_vk.sc_hdr ? 1 : 0;
-        vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+        {   // (the settings menu open: it covers the whole window but its live picture, drawn below from the same
+            // finished picture - the picture's draw across the window would only be painted over; skipped, its
+            // post-processing still made for the live picture. owner 2026-11-23)
+            extern bool menu_live_picture_px(float r[4]);
+            extern bool g_present_hidden;
+            float lp[4];
+            g_present_hidden = menu_live_picture_px(lp) && lp[2] > lp[0] + 4 && lp[3] > lp[1] + 4;
+            vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+            g_present_hidden = false;
+        }
         g_picture_aspect = v[3] > 0 ? v[2] / v[3] : 0;
         {   // the settings menu's live picture (branch menu-odyssey-look): the game's picture - as placed in the window,
             // without the window's bars - smaller, filling the rectangle the menu leaves open in its shape (16:9, or

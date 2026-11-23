@@ -10877,13 +10877,14 @@ static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy
 static VkImageView g_present_last;
 static float g_present_last_pv[8];
 
+bool g_present_hidden;  // (device.c: the settings menu covers the window - only its live picture shows the game)
 void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh, const float pv[8]) {
     if (!b || !b->image || (b->aspect & ~VK_IMAGE_ASPECT_COLOR_BIT)) return;
     VkImageView src = post_process(cb, b, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
     src = hud_composite(cb, b, src, pv[6] > 0 ? vw / pv[6] : vw, pv[7] > 0 ? vh / pv[7] : vh);
     g_present_last = src;
     memcpy(g_present_last_pv, pv, sizeof g_present_last_pv);
-    present_view(cb, src, vx, vy, vw, vh, pv);
+    if (!g_present_hidden) present_view(cb, src, vx, vy, vw, vh, pv);
 }
 
 // HDR output: the menu and overlays, drawn into an SDR image of their own (device.c overlay_draw), over the HDR10
