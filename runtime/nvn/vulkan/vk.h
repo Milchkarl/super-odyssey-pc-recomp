@@ -154,6 +154,7 @@ typedef struct TexBackend {
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 bool vk_deband(void);  // smooth gradients (textures.c "Banding"): the menu's setting, ODYSSEY_DEBAND=0|1 overrides it
 bool vk_hdr_picture(void);  // HDR output: the game's picture kept above white to the window (textures.c)
+VmaMemoryUsage vk_tex_memory_usage(void);  // the game's textures: GPU memory, or the system's (small-heap iGPUs: textures.c)
 VkFormat vk_format(uint32_t nvn_format);
 bool vk_format_alpha_one(uint32_t nvn_format);
 // View of t (optionally through an NVN texture view) for rendering or sampling.

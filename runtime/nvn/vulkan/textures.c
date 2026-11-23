@@ -384,9 +384,17 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                             .extent = {tw, th, depth}, .mipLevels = levels, .arrayLayers = layers,
                             .samples = (VkSampleCountFlagBits)samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    VmaAllocationCreateInfo ai = {.usage = vk_tex_memory_usage()};
     b->shared = !b->scalable && vk_image_share_small(&ci);  // (small: the compute queue's dispatches may read / write it)
     VkResult r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
+    if ((r == VK_ERROR_OUT_OF_DEVICE_MEMORY || r == VK_ERROR_OUT_OF_HOST_MEMORY) && ai.usage != VMA_MEMORY_USAGE_AUTO_PREFER_HOST) {
+        // (the GPU's own memory is full: the system's instead - slower for a dedicated card, the same RAM on integrated
+        // graphics - rather than ending the game; #147)
+        static int nlog;
+        if (nlog++ < 5) LOG("[vk] texture %ux%u: GPU memory full, placed in system memory\n", t->width, t->height);
+        ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
+    }
     if (getenv("ODYSSEY_LOG_IMAGES"))
         LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s (frame %llu%s%s)\n",
             (void *)b->image, (void *)t, t->format, t->target, tw, th, depth, t->width, t->height, t->depth, layers, levels, samples,
@@ -486,6 +494,29 @@ static void live_remove(TexBackend *b) {
     g_live[b->reg - 1] = last;
     if (last->backend) ((TexBackend *)last->backend)->reg = b->reg;
     b->reg = 0;
+}
+
+// Where the game's textures go. Integrated graphics with a small "GPU" heap (a BIOS carve-out: 256 MB on a Ryzen
+// 4600G, beside a 3.5 GB system heap - both the same RAM): the system heap. Every texture went to the 256 MB one, the
+// driver over-committed it to ~700 MB and then refused one more - "out of memory" with the system heap nearly unused
+// (#147). Otherwise the GPU's own memory, as before. ODYSSEY_VK_TEX_HOST=1 / =0 forces it (tests).
+VmaMemoryUsage vk_tex_memory_usage(void) {
+    static int host = -1;
+    if (host < 0) {
+        const char *e = getenv("ODYSSEY_VK_TEX_HOST");
+        VkPhysicalDeviceMemoryProperties pm;
+        vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+        uint64_t local = 0, sys = 0;
+        for (uint32_t h = 0; h < pm.memoryHeapCount; h++) {
+            if (pm.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) { if (pm.memoryHeaps[h].size > local) local = pm.memoryHeaps[h].size; }
+            else if (pm.memoryHeaps[h].size > sys) sys = pm.memoryHeaps[h].size;
+        }
+        bool small = g_vk.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && local < (1ull << 30) && sys > local;
+        host = e && *e ? atoi(e) != 0 : small;
+        if (host) LOG("[vk] textures in system memory (integrated graphics, GPU heap %llu MB, system heap %llu MB)\n",
+                      (unsigned long long)(local >> 20), (unsigned long long)(sys >> 20));
+    }
+    return host ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 }
 
 // HDR output with the game's highlights (the window is HDR10: device.c g_vk.sc_hdr): its picture kept in floats to the
