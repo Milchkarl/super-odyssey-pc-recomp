@@ -2548,16 +2548,17 @@ static void tabs_body(float scale, void (*prelaunch)(float)) {
     float lo = bp.x + g_tabbar_ends, hi = bp.x + bw - g_tabbar_ends, room = hi - lo;
     float textsum = 0;
     for (int k = 0; k < ntabs; k++) textsum += ImGui::CalcTextSize(tr(tabs[k].name)).x;
-    float tpad = 20 * scale, fsc = 1;
-    if (textsum + 2 * ntabs * tpad > room) tpad = fmaxf(5 * scale, (room - textsum) / (2 * ntabs));
-    if (textsum + 2 * ntabs * tpad > room) fsc = fmaxf(0.7f, (room - 2 * ntabs * tpad) / textsum);
-    float total = textsum * fsc + 2 * ntabs * tpad, tx = lo + fmaxf(0, (room - total) * 0.5f);
+    // (a gap between the tabs, so a lit tab never touches the one beside it)
+    float tpad = 18 * scale, fsc = 1, tgap = 8 * scale, gaps = tgap * (ntabs - 1);
+    if (textsum + 2 * ntabs * tpad + gaps > room) tpad = fmaxf(5 * scale, (room - gaps - textsum) / (2 * ntabs));
+    if (textsum + 2 * ntabs * tpad + gaps > room) fsc = fmaxf(0.7f, (room - gaps - 2 * ntabs * tpad) / textsum);
+    float total = textsum * fsc + 2 * ntabs * tpad + gaps, tx = lo + fmaxf(0, (room - total) * 0.5f);
     for (int k = 0; k < ntabs; k++) {
         const Tab &t = tabs[k];
         ImGui::PushID(t.id + 1000);
         float w = ImGui::CalcTextSize(tr(t.name)).x * fsc + 2 * tpad;
         ImVec2 p(tx, bp.y);
-        tx += w;
+        tx += w + tgap;
         ImGui::SetCursorScreenPos(p);
         ImGui::BeginDisabled(!t.on);
         ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (drawn below: the fill and the gold outline)
