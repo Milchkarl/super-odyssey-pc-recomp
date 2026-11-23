@@ -10413,9 +10413,10 @@ static VkPipeline present_pipeline(VkFormat fmt) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &present_set_layout));
-        VkPushConstantRange r = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
+        // (vertex: flip and crop; fragment: the Colour settings, present_colour)
+        VkPushConstantRange r[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 32}, {VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32}};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
-                                         .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
+                                         .pSetLayouts = &present_set_layout, .pushConstantRangeCount = 2, .pPushConstantRanges = r};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &present_layout));
     }
     VkPipelineShaderStageCreateInfo stages[2] = {
@@ -10814,6 +10815,19 @@ void vk_present_draw_again(VkCommandBuffer cb, float vx, float vy, float vw, flo
     if (g_present_last) present_view(cb, g_present_last, vx, vy, vw, vh, g_present_last_pv);
 }
 
+// The menu's Colour settings for present.frag (shaders.c): c.x on, d = gain, contrast, saturation, gamma. All at their
+// defaults: off, the picture's bytes as before.
+static void present_colour(float out[8]) {
+    const Settings *s = &g_settings;
+    bool on = s->brightness || s->contrast || s->saturation != 100 || s->gamma != 100;
+    float k[8] = {on ? 1.0f : 0.0f, 0, 0, 0,
+                  exp2f(s->brightness / 50.0f),        // (+50: x2, -50: x0.5 - an exposure step either way)
+                  1.0f + s->contrast / 100.0f,         // (+50: 1.5x steeper around mid grey, -50: half)
+                  s->saturation / 100.0f,
+                  s->gamma / 100.0f};
+    memcpy(out, k, sizeof k);
+}
+
 static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy, float vw, float vh, const float pv[8]) {
     VkPipeline p = present_pipeline(g_vk.sc_format);
     VkDescriptorSet ds = vk_alloc_set(present_set_layout);
@@ -10826,6 +10840,9 @@ static void present_view(VkCommandBuffer cb, VkImageView src, float vx, float vy
     VkViewport vp = {vx, vy, vw, vh, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
+    float colour[8];
+    present_colour(colour);
+    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32, colour);
     vkCmdDraw(cb, 3, 1, 0, 0);
     VkViewport full = {0, 0, (float)g_vk.sc_extent.width, (float)g_vk.sc_extent.height, 0, 1};
     vkCmdSetViewport(cb, 0, 1, &full);
@@ -10873,6 +10890,8 @@ void renderer_save_texture_tex(TexBackend *b, const char *path) {
     vkCmdSetScissor(cb, 0, 1, &sc);
     float pv[8] = {renderer_origin_lower_left() && !strstr(path, "window") ? 1.0f : 0.0f, 0, 0, 0, crop[0], crop[1], crop[2], crop[3]};
     vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 32, pv);
+    static const float neutral[8] = {0};  // (a game texture as it is: no Colour settings)
+    vkCmdPushConstants(cb, present_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 32, 32, neutral);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRendering(cb);
     vk_full_barrier(cb);

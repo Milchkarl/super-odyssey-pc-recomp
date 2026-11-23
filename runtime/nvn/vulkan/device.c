@@ -132,7 +132,25 @@ static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name) {
 static void *vk_dlss_probe_thread(void *arg) { (void)arg; vk_dlss_probe_run(); return NULL; }
 #endif
 
-// Discrete GPU first (ODYSSEY_GPU=<index> picks one), needs Vulkan 1.3 and a queue that can present.
+// Which graphics card: the menu's choice by its name (settings gpu), else discrete first, then integrated;
+// ODYSSEY_GPU=<index> overrides both. Vulkan 1.3 only. Also used for the shader preparation's identity (prep_identity).
+static int gpu_score(uint32_t i, const VkPhysicalDeviceProperties *p) {
+    if (p->apiVersion < VK_API_VERSION_1_3) return -1;
+    const char *env = getenv("ODYSSEY_GPU");
+    if (env && *env) { if (atoi(env) == (int)i) return 100; }
+    else if (g_settings.gpu[0] && !strcmp(g_settings.gpu, p->deviceName)) return 100;
+    return p->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+}
+// (the menu's Graphics card list: the Vulkan 1.3 cards found at start, by name)
+static char g_gpu_names[8][VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+static int g_gpu_count;
+int vk_gpu_list(const char *names[8]) {
+    for (int i = 0; i < g_gpu_count; i++) names[i] = g_gpu_names[i];
+    return g_gpu_count;
+}
+const char *vk_gpu_in_use(void) { return g_vk.props.deviceName; }
+
+// Discrete GPU first (or the one chosen: gpu_score), needs Vulkan 1.3 and a queue that can present.
 static void pick_device(void) {
     uint32_t n = 0;
     PFN_vkEnumeratePhysicalDevices enumerate = vkEnumeratePhysicalDevices;
@@ -146,18 +164,23 @@ static void pick_device(void) {
     if (!n) FATAL("no Vulkan device\n");
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     enumerate(g_vk.inst, &n, pd);
-    int want = getenv("ODYSSEY_GPU") ? atoi(getenv("ODYSSEY_GPU")) : -1, best = -1, best_score = -1;
+    int best = -1, best_score = -1;
+    g_gpu_count = 0;
     for (uint32_t i = 0; i < n; i++) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(pd[i], &p);
         LOG("[vk] gpu %u: %s (api %u.%u.%u)\n", i, p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
             VK_API_VERSION_MINOR(p.apiVersion), VK_API_VERSION_PATCH(p.apiVersion));
-        if (p.apiVersion < VK_API_VERSION_1_3) continue;
-        int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
-        if ((int)i == want) score = 100;
+        int score = gpu_score(i, &p);
+        if (score < 0) continue;
+        bool listed = false;  // (one entry per name: a card can be listed twice, e.g. by two Vulkan drivers)
+        for (int k = 0; k < g_gpu_count; k++) listed |= !strcmp(g_gpu_names[k], p.deviceName);
+        if (!listed && g_gpu_count < 8) snprintf(g_gpu_names[g_gpu_count++], sizeof g_gpu_names[0], "%s", p.deviceName);
         if (score > best_score) { best_score = score; best = (int)i; }
     }
     if (best < 0) FATAL("no Vulkan 1.3 device\n");
+    if (g_settings.gpu[0] && best_score < 100)
+        LOG("[vk] the chosen graphics card \"%s\" isn't there: picked automatically\n", g_settings.gpu);
     g_vk.phys = pd[best];
     free(pd);
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
@@ -2277,13 +2300,12 @@ static void prep_identity(char out[128]) {
                 VkPhysicalDevice pd[16];
                 if (n > 16) n = 16;
                 vkEnumeratePhysicalDevices(inst, &n, pd);
-                int want = getenv("ODYSSEY_GPU") ? atoi(getenv("ODYSSEY_GPU")) : -1, best_score = -1;
+                int best_score = -1;
                 for (uint32_t i = 0; i < n; i++) {
                     VkPhysicalDeviceProperties p;
                     vkGetPhysicalDeviceProperties(pd[i], &p);
-                    if (p.apiVersion < VK_API_VERSION_1_3) continue;
-                    int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
-                    if ((int)i == want) score = 100;
+                    int score = gpu_score(i, &p);
+                    if (score < 0) continue;
                     if (score > best_score) best_score = score, best = p;
                 }
                 vkDestroyInstance(inst, NULL);

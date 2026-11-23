@@ -954,6 +954,12 @@ extern "C" bool vk_xess_available(void);
 extern "C" bool vk_dlss_available(void);   // runtime/nvn/vulkan/dlss_probe.c
 #endif
 
+#ifndef __APPLE__
+#define VK_NAME_MAX 256  // (VK_MAX_PHYSICAL_DEVICE_NAME_SIZE)
+extern "C" int vk_gpu_list(const char *names[8]);   // runtime/nvn/vulkan/device.c
+extern "C" const char *vk_gpu_in_use(void);
+#endif
+
 static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
@@ -972,6 +978,33 @@ static void tab_display(void) {
         }
     }
     pthread_mutex_unlock(&g_displays_mutex);
+#ifndef __APPLE__
+    {   // the graphics card, by its name (device.c gpu_score; read at start)
+        const char *gpus[8];
+        int ng = vk_gpu_list(gpus);
+        if (ng > 1 || g_settings.gpu[0]) {
+            static char gl[9][VK_NAME_MAX + 16];
+            const char *gp[9];
+            static const char *in_use = vk_gpu_in_use();  // (the one this start picked)
+            snprintf(gl[0], sizeof gl[0], "Automatic");
+            gp[0] = gl[0];
+            int sel = 0, n = 1;
+            for (int i = 0; i < ng; i++, n++) {
+                snprintf(gl[n], sizeof gl[n], "%s", gpus[i]);
+                gp[n] = gl[n];
+                if (g_settings.gpu[0] && !strcmp(g_settings.gpu, gpus[i])) sel = n;
+            }
+            bool pending = strcmp(g_settings.gpu[0] ? g_settings.gpu : in_use, in_use) != 0;
+            char d[600];
+            snprintf(d, sizeof d, "Which graphics card draws the game. Automatic picks a dedicated card over integrated "
+                                  "graphics. Choose another for a laptop that starts on the wrong one, or to compare. "
+                                  "In use: %s.%s", in_use,
+                     pending ? "\n\nApplies when the game starts again." : "");
+            if (opt_choice("Graphics card", &sel, gp, n, 0, d, false))
+                snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", sel ? gp[sel] : "");
+        }
+    }
+#endif
     static const char *window_modes[] = {"Windowed", "Borderless", "Exclusive fullscreen"};
     if (opt_choice("Display mode", &g_settings.window_mode, window_modes, WINDOW_MODE_COUNT, BORDERLESS,
                    "Borderless uses the desktop's resolution. Exclusive fullscreen requests a monitor display mode. "
@@ -1379,6 +1412,28 @@ static void tab_graphics(void) {
                    "bigger the screen; a Steam Deck's own screen is too close to the Switch's to change. The "
                    "pictures keep their detail (nothing is redrawn). Costs a little GPU time while a menu covers the "
                    "screen. Switch: as the game draws them. Changes at once (the HUD may blink the first time).", false);
+    }
+#endif
+#ifndef __APPLE__
+    // (nvn/vulkan/exec.c present_colour: the last pass into the window - the game's picture with its HUD; this menu
+    // and the overlays stay as they are)
+    opt_section("Colour");
+    opt_int("Brightness", &g_settings.brightness, -50, 50, 1, 0, "%+d",
+            "Makes the whole picture lighter or darker, as a camera's exposure: +50 twice as bright, -50 half. 0: as "
+            "the game. Changes at once.");
+    opt_int("Contrast", &g_settings.contrast, -50, 50, 1, 0, "%+d",
+            "Higher: darker shadows and brighter highlights, a punchier picture. Lower: flatter, more detail in dark "
+            "and bright parts. Mid grey stays where it is. 0: as the game. Changes at once.");
+    opt_int("Saturation", &g_settings.saturation, 0, 200, 5, 100, "%d%%",
+            "How colourful the picture is: 0% black and white, 200% twice as vivid. 100%: as the game. Changes at once.");
+    opt_int("Gamma", &g_settings.gamma, 50, 150, 1, 100, "%d",
+            "The mid tones: higher is darker and moodier, lower lifts dark scenes. Black and white stay. 100: as the "
+            "game. Changes at once.");
+    if (opt_button("Reset colour",
+                   "Brightness, contrast, saturation and gamma back to the game's own picture.")) {
+        g_settings.brightness = g_settings.contrast = 0;
+        g_settings.saturation = g_settings.gamma = 100;
+        settings_save();
     }
 #endif
     opt_end();

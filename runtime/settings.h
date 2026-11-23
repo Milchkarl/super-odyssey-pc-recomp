@@ -188,6 +188,18 @@ typedef struct {
     bool discord_presence; // the kingdom and time played on the player's Discord profile (runtime/discord.c)
     bool config_at_start;  // the configuration page before the game at every start (runtime/ui/setup.mm config_run)
     bool check_updates;  // look for a newer release at start (runtime/updater.c)
+    char gpu[128];       // the graphics card by its Vulkan name, "" = automatic (nvn/vulkan/device.c; read at start;
+                         // ODYSSEY_GPU=<index> overrides)
+    // Colour (nvn/vulkan/exec.c present_view, the last pass into the window; the menu and overlay are not changed):
+    int brightness;      // -50..50, 0 = as the game: a gain on the linear picture (+50: x2, -50: x0.5)
+    int contrast;        // -50..50, 0 = as the game: steeper (+) or flatter (-) around mid grey, in the sRGB curve
+    int saturation;      // 0..200, 100 = as the game: 0 grey, 200 twice as colourful
+    int gamma;           // 50..150, 100 = as the game: the picture's mid tones darker (>100) or lighter (<100)
+    // HDR output (nvn/vulkan/device.c swapchain, exec.c present_view): HDR10 (PQ, BT.2020) when the display offers it
+    bool hdr;            // on: an HDR10 window; off (the default): SDR as before (read when the window is made)
+    int hdr_peak;        // 400..10000 nits: the display's brightest; highlights are expanded up to it
+    int hdr_paper_white; // 80..500 nits: how bright the game's white (the HUD, the menus) is shown
+    int hdr_highlights;  // 0..100: how much of the picture's brightest part is expanded above paper white
 } Settings;
 // The pipeline warm-up at start: Auto picks Long on PCs with 16 GB of memory or more
 enum { WARMUP_AUTO = 0, WARMUP_NORMAL = 1, WARMUP_LONG = 2, WARMUP_COUNT };

@@ -625,11 +625,28 @@ static const char *builtin_src(const char *name, int *stage) {
     }
     if (!strcmp(name, "present.frag")) {
         *stage = STAGE_FRAGMENT;
+        // The picture's sRGB bytes into the window. c.x = 1: the menu's Colour settings (exec.c present_colour):
+        // brightness (a gain on linear light, d.x), contrast (around mid grey on the sRGB curve, d.y), saturation
+        // (against BT.709 luma, d.z) and gamma (an exponent on linear light, d.w). c.x = 0: the bytes as they are.
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(push_constant) uniform P { layout(offset = 32) vec4 c; vec4 d; } pc;\n"
                "layout(location = 0) in vec2 uv;\n"
                "layout(location = 0) out vec4 o;\n"
-               "void main() { o = vec4(texture(t, uv).rgb, 1.0); }\n";
+               "vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }\n"
+               "vec3 enc(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }\n"
+               "void main() {\n"
+               "  vec3 s = texture(t, uv).rgb;\n"
+               "  if (pc.c.x > 0.5) {\n"
+               "    vec3 l = dec(clamp(s, 0.0, 1.0)) * pc.d.x;\n"
+               "    vec3 e = clamp((enc(clamp(l, 0.0, 1.0)) - 0.5) * pc.d.y + 0.5, 0.0, 1.0);\n"
+               "    l = dec(e);\n"
+               "    float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
+               "    l = clamp(mix(vec3(y), l, pc.d.z), 0.0, 1.0);\n"
+               "    s = enc(pow(l, vec3(pc.d.w)));\n"
+               "  }\n"
+               "  o = vec4(s, 1.0);\n"
+               "}\n";
     }
     // ---- post passes before the present (Video tab "Anti-aliasing" / "Upscaler"): exec.c vk_present_draw.
     // Each draws a fullscreen triangle into an image the size of its output; push constants: two vec4.

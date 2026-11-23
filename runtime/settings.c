@@ -82,6 +82,11 @@ Settings g_settings = {
     .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
     .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
     .low_gpu_memory = false,  // (owner 2026-11-20: opt-in, not chosen by the GPU memory's size)
+    .saturation = 100,
+    .gamma = 100,
+    .hdr_peak = 1000,
+    .hdr_paper_white = 200,
+    .hdr_highlights = 50,
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -166,6 +171,8 @@ static const char *const temporal_backends[TEMPORAL_BACKEND_COUNT] = {"dlss", "f
 static const char *const fsr3_modes[DLSS_MODE_COUNT] = {"off", "native", "quality", "balanced", "performance"};
 static const char *const window_modes[WINDOW_MODE_COUNT] = {"windowed", "borderless", "exclusive"};
 static const char *const display_modes[DISPLAY_MODE_COUNT] = {"auto", "1080p", "1440p", "2160p"};
+
+static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 static int named_option(const char *value, const char *const *options, int count) {
     for (int i = 0; i < count; i++) if (!strcmp(value, options[i])) return i;
@@ -420,6 +427,15 @@ void settings_load(void) {
         else if (!strcmp(key, "record_thread")) g_settings.record_thread = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "low_gpu_memory")) g_settings.low_gpu_memory = atoi(val) != 0;
+        else if (!strcmp(key, "gpu")) snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", strcmp(val, "auto") ? val : "");
+        else if (!strcmp(key, "brightness")) g_settings.brightness = clampi(atoi(val), -50, 50);
+        else if (!strcmp(key, "contrast")) g_settings.contrast = clampi(atoi(val), -50, 50);
+        else if (!strcmp(key, "saturation")) g_settings.saturation = clampi(atoi(val), 0, 200);
+        else if (!strcmp(key, "gamma")) g_settings.gamma = clampi(atoi(val), 50, 150);
+        else if (!strcmp(key, "hdr")) g_settings.hdr = atoi(val) != 0;
+        else if (!strcmp(key, "hdr_peak")) g_settings.hdr_peak = clampi(atoi(val), 400, 10000);
+        else if (!strcmp(key, "hdr_paper_white")) g_settings.hdr_paper_white = clampi(atoi(val), 80, 500);
+        else if (!strcmp(key, "hdr_highlights")) g_settings.hdr_highlights = clampi(atoi(val), 0, 100);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -578,6 +594,15 @@ void settings_save(void) {
     fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "low_gpu_memory = %d\n", g_settings.low_gpu_memory);
+    fprintf(f, "gpu = %s\n", g_settings.gpu[0] ? g_settings.gpu : "auto");
+    fprintf(f, "brightness = %d\n", g_settings.brightness);
+    fprintf(f, "contrast = %d\n", g_settings.contrast);
+    fprintf(f, "saturation = %d\n", g_settings.saturation);
+    fprintf(f, "gamma = %d\n", g_settings.gamma);
+    fprintf(f, "hdr = %d\n", g_settings.hdr);
+    fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
+    fprintf(f, "hdr_paper_white = %d\n", g_settings.hdr_paper_white);
+    fprintf(f, "hdr_highlights = %d\n", g_settings.hdr_highlights);
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
     fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);
