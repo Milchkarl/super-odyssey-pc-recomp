@@ -8684,6 +8684,12 @@ static void draw_(CmdRec *r, bool indexed) {
             c0->height == c1->height && g_draw_fullscreen)
             vkey.glow_comp = fkey.glow_comp = 1;
     }
+    {   // Shadow edges Soft (settings shadow_soft; ODYSSEY_SOFT_SHADOW=0/1 overrides, tests): the variant whose shadow-map
+        // compares are averaged over a small disc (translate.c softShadow)
+        static int env = -2;
+        if (env == -2) env = getenv("ODYSSEY_SOFT_SHADOW") ? atoi(getenv("ODYSSEY_SOFT_SHADOW")) : -1;
+        if (env >= 0 ? env != 0 : g_settings.shadow_soft != 0) vkey.soft_shadow = fkey.soft_shadow = 1;
+    }
     {   // (#102) a draw into the glow chain drawn larger than the game's (textures.c tex_scalable: its quarter-size
         // R11G11B10F targets at the picture's scale): the variant whose reads cover one game texel each (glowTap)
         NvnTexture *c0 = st.rt.ncolor ? st.rt.color[0] : NULL;

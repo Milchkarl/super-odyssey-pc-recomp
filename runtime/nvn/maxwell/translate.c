@@ -81,6 +81,7 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool bloom_prefilter;
+    bool soft_shadow;   // (key->soft_shadow: 2D (array) shadow compares through softShadow)
     bool glow_chain;    // (key->glow_chain: the glow chain drawn larger - its 2D reads through glowTap, #102)
     bool bloom_smooth;  // (the HDR composite, key->glow_comp: its 2D inputs read through bloomUp, steered per input)
     bool comp_hdr;      // (the same composite: its body a function, comp_, run by an HDR / grading main - see comp_main)
@@ -698,6 +699,10 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         c->stage == STAGE_FRAGMENT) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "farSample(t0, %s, rscale[1])", P);
+    } else if (c->soft_shadow && t->shadow && c->stage == STAGE_FRAGMENT && lod_kind == 0 &&
+               ((type == TEXTYPE_2D && !layer) || (type == TEXTYPE_2D_ARRAY && layer))) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "softShadow%s(t%d, %s, rscale[%d])", layer ? "A" : "", slot, P, slot + 1);
     } else if (c->glow_chain && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1 && !layer) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "glowTap(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
@@ -2372,6 +2377,41 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    return color / (footprint.x * footprint.y);\n"
                "}\n");
     }
+    if (c->soft_shadow) {
+        // Shadow edges Soft: one shadow-map compare becomes the average of 8 (each itself the hardware's 2x2 compare)
+        // on a disc 4 game texels across - times the map's own enlargement (Shadow quality: rs.x), so the softness
+        // is the same in the world at every quality - turned per pixel to break up the pattern. Edges fade over a
+        // few texels instead of stepping.
+        {   // ODYSSEY_SOFT_RADIUS=<game texels> (tests): the disc's radius
+            const char *e = getenv("ODYSSEY_SOFT_RADIUS");
+            sp(&s, "const float SOFT_R = %.3f;\n", e ? (float)atof(e) : 2.0f);
+        }
+        sp(&s, "const vec2 SOFT_DISC[8] = vec2[8](vec2(-0.613, 0.617), vec2(0.170, -0.040), vec2(-0.299, 0.792),\n"
+               "    vec2(0.645, 0.493), vec2(-0.651, 0.718), vec2(0.421, 0.027), vec2(-0.818, -0.410), vec2(0.020, -0.931));\n"
+               "float softRot() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853; }\n"
+               "float softShadow(sampler2DShadow src, vec3 p, vec4 rs) {\n"
+               "    vec2 texel = 1.0 / vec2(textureSize(src, 0));\n"
+               "    float r = SOFT_R * max(rs.x, 1.0), a = softRot(), cs = cos(a), sn = sin(a);\n"
+               "    float sum = 0.0;\n"
+               "    for (int i = 0; i < 8; i++) {\n"
+               "        vec2 o = SOFT_DISC[i];\n"
+               "        o = vec2(o.x * cs - o.y * sn, o.x * sn + o.y * cs) * r * texel;\n"
+               "        sum += texture(src, vec3(p.xy + o, p.z));\n"
+               "    }\n"
+               "    return sum * 0.125;\n"
+               "}\n"
+               "float softShadowA(sampler2DArrayShadow src, vec4 p, vec4 rs) {\n"
+               "    vec2 texel = 1.0 / vec2(textureSize(src, 0).xy);\n"
+               "    float r = SOFT_R * max(rs.x, 1.0), a = softRot(), cs = cos(a), sn = sin(a);\n"
+               "    float sum = 0.0;\n"
+               "    for (int i = 0; i < 8; i++) {\n"
+               "        vec2 o = SOFT_DISC[i];\n"
+               "        o = vec2(o.x * cs - o.y * sn, o.x * sn + o.y * cs) * r * texel;\n"
+               "        sum += texture(src, vec4(p.xy + o, p.z, p.w));\n"
+               "    }\n"
+               "    return sum * 0.125;\n"
+               "}\n");
+    }
     if (c->glow_chain) {
         // (#102) The glow chain drawn larger than the game's: a read of a texture rs.xy times the game's size covers
         // the area of one game texel - a box rs wide around the point, at the level asked for, from bilinear taps on
@@ -2870,6 +2910,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             // (the composite itself is found by the draw, key->glow_comp: by its hash only 2 of its dozen versions were)
             c->bloom_smooth = key->glow_comp;
             c->glow_chain = key->glow_chain && !key->glow_comp;
+            c->soft_shadow = key->soft_shadow != 0;
             {   // ODYSSEY_HDR_COMP=0 (tests): the composite as before, without the HDR / grading main
                 static int on = -1;
                 if (on < 0) { const char *e = getenv("ODYSSEY_HDR_COMP"); on = !e || atoi(e) != 0; }

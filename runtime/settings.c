@@ -406,6 +406,7 @@ void settings_load(void) {
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
         else if (!strcmp(key, "motion_blur")) g_settings.motion_blur = atoi(val) != 0;
         else if (!strcmp(key, "fov")) g_settings.fov = atoi(val) < 100 ? 100 : atoi(val) > 150 ? 150 : atoi(val);
+        else if (!strcmp(key, "shadow_soft")) g_settings.shadow_soft = atoi(val) != 0;
         else if (!strcmp(key, "shadow_distance")) g_settings.shadow_distance = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "snapshot_full_rate")) g_settings.snapshot_full_rate = atoi(val) != 0;
         else if (!strcmp(key, "mouse_no_recenter")) g_settings.mouse_no_recenter = atoi(val) != 0;
@@ -561,6 +562,7 @@ void settings_save(void) {
     fprintf(f, "motion_blur = %d\n", g_settings.motion_blur);
     fprintf(f, "snapshot_full_rate = %d\n", g_settings.snapshot_full_rate);
     fprintf(f, "fov = %d\n", g_settings.fov);
+    fprintf(f, "shadow_soft = %d\n", g_settings.shadow_soft);
     fprintf(f, "shadow_distance = %d\n", g_settings.shadow_distance);
     fprintf(f, "first_person_mario = %d\n", g_settings.first_person_mario);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);

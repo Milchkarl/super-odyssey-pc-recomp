@@ -126,6 +126,7 @@ typedef struct {
     int amiibo;              // the virtual amiibo figure (runtime/hle/nfp.c k_figures; 0: none - no NFC reader)
     bool motion_blur;        // the game's blur while the camera turns (on: as the Switch; off: exec.c draw_, the HDR composite)
     int fov;                 // field of view, percent of the game's (100-150; wider in tan space: hle/odyssey_draw.c)
+    int shadow_soft;         // Shadow edges: 0 as the Switch, 1 soft (each shadow-map compare averaged: translate.c softShadow)
     int shadow_distance;     // 0 as the Switch, 1 high (2x), 2 very high (4x): how far the sun's shadows reach (hle/odyssey_draw.c)
     bool snapshot_full_rate; // Snapshot Mode not held to 30 FPS (nvn/objects.c nvnQueuePresentTexture, #123)
     bool first_person_mario; // the first-person view starts the way Mario faces, not the camera (hle/odyssey_120.c, #118)

@@ -58,6 +58,8 @@ typedef struct {
     uint8_t glow_chain;     // (fragment, GLSL) a draw into one of the glow chain's targets drawn larger than the game's
                             // (#102): its 2D textures read through glowTap - the area of one game texel - so the
                             // game's blur keeps its shape at the larger size (translate.c). In the padding, as above.
+    uint8_t soft_shadow;    // (fragment, GLSL) Shadow edges Soft: each 2D (array) shadow-map compare averaged over a
+                            // small disc (translate.c softShadow). In the padding, as above.
 } ShaderKey;
 
 typedef struct {

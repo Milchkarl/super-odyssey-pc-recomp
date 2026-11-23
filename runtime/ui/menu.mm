@@ -1567,6 +1567,12 @@ static void tab_graphics(void) {
                    "How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same "
                    "shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with "
                    "it. Switch: as on the Switch. Changes at once.", false);
+        static const char *se[] = {"Switch", "Soft"};
+        opt_choice("Shadow edges", &g_settings.shadow_soft, se, 2, 0,
+                   "Soft: shadow edges fade over a short distance instead of stepping from light to dark, which also "
+                   "hides the shadow maps' stair steps. The softness stays the same at every Shadow quality. Costs a "
+                   "little GPU time. Switch: as on the Switch. Changes at once (its shaders are made as they're first "
+                   "drawn).", false);
         // (shown Switch / Off / High - the owner's order; stored as before: 0 Switch, 1 High, 2 Off)
         static const char *bq[] = {"Switch", "Off", "High"};
         static const int bq_value[] = {0, 2, 1};
