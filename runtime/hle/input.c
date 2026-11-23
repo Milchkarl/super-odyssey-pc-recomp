@@ -302,7 +302,9 @@ bool input_pointer_layout(float *x, float *y) {
 // draws its own pointer regardless (runtime/ui/menu.mm).
 static _Atomic bool pointer_pad_last = true;
 static _Atomic uint64_t pointer_mode_ns;  // when the pointer was last held / freed (the warp back isn't a mouse use)
+static _Atomic uint64_t pointer_used_ns;  // the mouse's last move / click / wheel (#109: idle, the pointer hides)
 static void pointer_note_device(bool is_pad) {
+    if (!is_pad) atomic_store(&pointer_used_ns, plat_now_ns());
     if (atomic_load(&pointer_pad_last) == is_pad) return;
     atomic_store(&pointer_pad_last, is_pad);
     static int lm = -1;
@@ -310,9 +312,16 @@ static void pointer_note_device(bool is_pad) {
     if (lm) LOG("[input] menu pointer: %s\n", is_pad ? "hidden (controller / keys)" : "shown (mouse)");
 }
 // The system pointer shown over the game (runtime/ui/menu.mm): in its menus, where the pointer isn't held, and only
-// while the mouse is the device in use
+// while the mouse is the device in use - moved, clicked or scrolled in the last 3 s. (#109: the game doesn't ask for
+// the camera in a cutscene either, which counts as a menu; the pointer showed over cutscenes.)
+#define POINTER_IDLE_NS 3000000000ull
 bool input_pointer_visible(void) {
-    return !atomic_load(&mouse_held) && !atomic_load(&pointer_pad_last) && in_game_menu();
+    bool v = !atomic_load(&mouse_held) && !atomic_load(&pointer_pad_last) && in_game_menu() &&
+             plat_now_ns() - atomic_load(&pointer_used_ns) < POINTER_IDLE_NS;
+    static int lm = -1, was = -1;
+    if (lm < 0) lm = getenv("ODYSSEY_LOG_MOUSE") != NULL;
+    if (lm && v != was) LOG("[input] game menu pointer %s\n", v ? "visible" : "hidden"), was = v;
+    return v;
 }
 // A wheel notch (0 up, 1 down): one D-pad step in a menu, if the wheel isn't bound to anything
 static void menu_wheel_notch(int down) {

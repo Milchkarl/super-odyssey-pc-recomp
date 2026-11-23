@@ -372,7 +372,8 @@ static void sync_mouse_cursor(bool ui_active) {
         push(q);
     }
     g_draw_mouse_cursor.store(draw_cursor);
-    bool show = !focused || (ui_active && !draw_cursor) || (!ui_active && input_pointer_visible());
+    bool game_ptr = input_pointer_visible();  // (asked every frame: its ODYSSEY_LOG_MOUSE line in unfocused tests too)
+    bool show = !focused || (ui_active && !draw_cursor) || (!ui_active && game_ptr);
     static int log_cursor = -1;
     if (log_cursor < 0) log_cursor = getenv("ODYSSEY_LOG_CURSOR") != NULL;
     static int last = -1;
