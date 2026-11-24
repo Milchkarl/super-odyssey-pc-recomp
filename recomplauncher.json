@@ -2,11 +2,14 @@
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
   "repo": "Simon3Sarkis/super-odyssey-pc-recomp",
-  "game": {
-    "kind": "folder",
-    "label": "Your extracted Super Mario Odyssey: the folder that holds exefs and romfs. Version 1.0.0, or 1.4.1 with the update already applied (its full romfs).",
-    "check": { "file": "exefs/main" }
-  },
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your extracted Super Mario Odyssey: the folder that holds exefs and romfs. Version 1.0.0, or 1.4.1 with the update already applied (its full romfs).",
+      "formats": [{ "type": "folder" }],
+      "check": { "file": "exefs/main" }
+    }
+  ],
   "start": {
     "program": ["SuperOdysseyRecomp.exe", "Super.Odyssey.PC.Recomp-linux-x86_64.AppImage"],
     "args": ["--play"],
@@ -14,12 +17,10 @@
   },
   "prepare": {
     "program": ["SuperOdysseyRecomp.exe", "Super.Odyssey.PC.Recomp-linux-x86_64.AppImage"],
-    "args": ["--prepare", "--game={game}"],
+    "args": ["--prepare", "--game={input:game}"],
     "label": "Copying your game files and building the game code for this PC",
-    "timeout": 3600,
     "done": ["{data}/setup-done.txt"],
-    "keeps_copy": true,
-    "version": "1.0.0"
+    "keeps_copy": true
   },
   "saves": [
     "{data}/save",
