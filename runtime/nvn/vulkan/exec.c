@@ -9100,9 +9100,20 @@ static void draw_(CmdRec *r, bool indexed) {
             at = getenv("ODYSSEY_LOG_BLOOM_CHAIN") ? atol(getenv("ODYSSEY_LOG_BLOOM_CHAIN")) : -1;
             if (getenv("ODYSSEY_LOG_SMALL_TARGETS")) at = atol(getenv("ODYSSEY_LOG_SMALL_TARGETS")), small = 1;
         }
+        {   // ODYSSEY_LOG_SHOT_DRAWS=1 (debug): the screenshot key also logs every draw of the frame after it (small = 2)
+            // - for what a test can't reach, like Moe-Eye's sunglasses
+            static int shot_draws = -1;
+            if (shot_draws < 0) shot_draws = getenv("ODYSSEY_LOG_SHOT_DRAWS") != NULL;
+            extern char g_window_shot_request[256];
+            if (shot_draws && g_window_shot_request[0] && at != (long)renderer_present_count() + 1) {
+                at = (long)renderer_present_count() + 1, small = 2;
+                LOG("[shot-draws] frame %ld: settings bloom %d, motion blur %d\n", at, g_settings.bloom_quality, g_settings.motion_blur);
+            }
+        }
         NvnTexture *t0 = at > 0 && st.rt.ncolor ? st.rt.color[0] : NULL;
         if (t0 && renderer_present_count() == (uint64_t)at) {
-            bool chain = small ? t0->width < 1600 && t0->width >= 8 && fabsf((float)t0->width / t0->height - 1.7778f) < 0.07f
+            bool chain = small == 2 ? true
+                       : small ? t0->width < 1600 && t0->width >= 8 && fabsf((float)t0->width / t0->height - 1.7778f) < 0.07f
                                : t0->format == 0x3f && t0->width <= 400 && t0->height <= 228;
             char tx[600] = "";
             size_t o = 0;
@@ -9116,10 +9127,13 @@ static void draw_(CmdRec *r, bool indexed) {
                     o += snprintf(tx + o, sizeof tx - o, " t%d=%llx %ux%u f%#x lv%u", slot, (unsigned long long)x->addr, x->width,
                                   x->height, x->format, x->levels);
             }
-            if (chain)
-                LOG("[bloom-chain] into %llx %ux%u f%#x lv%u vp %ux%u: fs %llx, blend %d;%s\n", (unsigned long long)t0->addr,
-                    t0->width, t0->height, t0->format, t0->levels, st.viewport[0][2], st.viewport[0][3],
-                    (unsigned long long)st.program->stages[1].code_addr, (int)(st.color_state[0] & 1), tx);
+            if (chain) {
+                TexBackend *b0 = t0->backend;
+                LOG("[bloom-chain] into %llx %ux%u f%#x lv%u vp %ux%u: fs %llx, blend %d, comp %d chain %d, scaled %.2f, rts %d;%s\n",
+                    (unsigned long long)t0->addr, t0->width, t0->height, t0->format, t0->levels, st.viewport[0][2],
+                    st.viewport[0][3], (unsigned long long)st.program->stages[1].code_addr, (int)(st.color_state[0] & 1),
+                    (int)pr->fkey.glow_comp, (int)pr->fkey.glow_chain, b0 ? b0->sx : 0.0f, st.rt.ncolor, tx);
+            }
         }
     }
     for (int i = 0; i < pr->fi->ntex && i < 64; i++) {

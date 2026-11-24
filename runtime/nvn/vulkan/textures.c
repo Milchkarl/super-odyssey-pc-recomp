@@ -470,6 +470,20 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                                .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
         VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
         vkCmdPipelineBarrier2(cb, &di);
+    } else if (b->scalable && t->format == 0x3f && t->width <= 400 && t->height <= 228 && (b->sx > 1.01f || b->sy > 1.01f)) {
+        // The glow chain drawn larger (Bloom quality High) starts black too: enlarged by a scale that isn't a power of
+        // two, its mip levels and the game's per-level blur targets no longer match texel for texel, so a row or
+        // column at their edges is never drawn - and kept whatever the memory held (at 4K, a value that turned the whole
+        // picture pure blue in the Sand Kingdom).
+        VkCommandBuffer cb = vk_upload_cmd();
+        VkClearColorValue zero = {{0, 0, 0, 0}};
+        VkImageSubresourceRange rg = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        vkCmdClearColorImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rg);
+        VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                               .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                               .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+        vkCmdPipelineBarrier2(cb, &di);
     }
 }
 
