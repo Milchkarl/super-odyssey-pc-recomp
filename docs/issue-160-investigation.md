@@ -83,6 +83,15 @@ own lock now (the multithreaded warm-up of 0.9.0 could already race there). `ODY
 
 (In the last run the background warm-up built all 12,277 pipelines in 9 s while the game was on screen.)
 
+## Shader compiles left in play and in the opening
+
+Measured with the driver's own creation feedback (`ODYSSEY_LOG_LIBCACHE=1`): a new player's first start (fresh setup,
+1.4.1, new game, the opening cutscene into Cap Kingdom) made 1,480 shader libraries from the game's pipeline cache and
+compiled 6; in the opening itself each took ~0.1 ms. The census used to call those cache hits "compiled" (now fixed).
+On later starts and in the recorded ride nothing is compiled. The opening's long frames on this PC (40-64 ms, the same in
+0.7.0, 1.0.1 and now) come where the game loads: the cutscene starting, Cap Kingdom starting. What remains costly is
+before the first frame: ~760 cache lookups by the warm-up's 8 threads at once (8.4 s of driver time, ~1 s of wall time).
+
 ## Steam Deck (1.0.1 AppImage, the 1.4.1 test copy, the same ride)
 
 - The game code had to be rebuilt for 1.0.1 (the test copy's was from 2026-11-16): **961 s (16 min)** before the
