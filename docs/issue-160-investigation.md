@@ -47,8 +47,11 @@ Measured on the PC with 8 compile jobs, as a Steam Deck has (`ODYSSEY_GAME_JOBS=
 8 jobs busy to the end, so the build is bound by the total work, not by one slow file.
 
 - **Updates**: between 0.9.0 and 1.0.1 (an update that made everyone rebuild) 506 of the 509 compiled files were
-  byte-for-byte the same. Keeping the compiled files and reusing the unchanged ones would make such an update a few
-  seconds on the PC instead of ~2.5 minutes (not done yet).
+  byte-for-byte the same. The build now keeps its compiled files (`<game files>/.gamecache`, ~150 MB, each named by a
+  hash of its C source, compile command, headers and compiler) and reuses those whose hash it has. Measured as a player
+  updating would (RecompLauncher's setup step, 8 jobs): 0.9.0's generator, then 1.0.1's - **2 files compiled, 506
+  reused, 15 s instead of 133 s**; the same build again: 14 s. The ride afterwards plays as usual (first frame 11.0 s,
+  Mushroom 38.7 s, Metro 68.6 s, worst frame 36 ms). It helps from the second update on (the first has nothing kept).
 - **New players**: most of the system libraries and nearly all the video library never run (every kingdom visited with
   the function profiler, plus the recorded ride; our videos play through FFmpeg). A file without one function that runs
   is now compiled without optimization (`runtime/hle/hot_functions.txt`, made by `tools/hot_functions.py`; addresses
