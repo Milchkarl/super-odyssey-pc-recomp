@@ -67,6 +67,22 @@ The last row was left out: `main_092`'s 3,900-line function runs while the game 
 at every start (`ODYSSEY_GAME_COLD=main_092,main_160` reproduces it). The unoptimized functions' stack frames stay
 under 47 KB (the game threads have 1 MB).
 
+## Start-up warm-up in the background
+
+Every start built every pipeline ever recorded on that PC before the first frame (12,312 on the owner's install,
+15,415 on the Deck; the list only grows), up to 15 s. Start-up now waits only for the first scene's pipelines (~1,000,
+already built first), and the warm-up goes on in the background on the same threads at low priority, within the same
+budgets (time, and memory - as a number of pipelines, measured on the first scene's second half). While it runs the
+draw path takes its lock to add a pipeline, and the shared "interface part" tables of the pipeline libraries have their
+own lock now (the multithreaded warm-up of 0.9.0 could already race there). `ODYSSEY_PREWARM_BG=0`: as before.
+
+| A copy of the owner's install, 1.4.1, the ride | First frame | Mushroom / Metro | Hitches in play | RAM |
+|---|---|---|---|---|
+| Waiting for the whole warm-up (as 1.0.1) | 15.3 s | 43.1 / 72.9 s | 0 | 6.2 GB (1.0.1: 6.3-6.4) |
+| Background warm-up | **10.8-11.2 s** | 38.6-39.0 / 68.5-68.8 s | 0-1 | 6.0-6.4 GB |
+
+(In the last run the background warm-up built all 12,277 pipelines in 9 s while the game was on screen.)
+
 ## Steam Deck (1.0.1 AppImage, the 1.4.1 test copy, the same ride)
 
 - The game code had to be rebuilt for 1.0.1 (the test copy's was from 2026-11-16): **961 s (16 min)** before the
