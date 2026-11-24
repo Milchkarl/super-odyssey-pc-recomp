@@ -122,6 +122,23 @@ before the first frame: ~760 cache lookups by the warm-up's 8 threads at once (8
   (shaders translated in play, 50-200 ms each: the test copy's shader preparation was older than this build and was
   skipped in this run). Metro: 280 ms worst. Then 60 FPS, worst frame 17-29 ms.
 
+### After the changes (5eff5ce, AppImage built on the Deck, the same test copy and ride, quits at frame 11,000)
+
+- **Game code rebuild** (the first start after this build changed the game code, 8 jobs, nothing kept to reuse yet):
+  508 files, 268 of them without optimization, **623 s instead of 961 s**. First frame at 634 s.
+- Later starts, the ride (two runs each, `ODYSSEY_PREWARM_BG=0` for the old warm-up):
+
+| | First frame | Frames over 34 ms in the ride | Worst | RAM at 2 min |
+|---|---|---|---|---|
+| Old warm-up (15,810 pipelines in 2.6-3.1 s) | 12.2 / 10.5 s | 13 / 13 | 121-124 ms | 1.4 GB |
+| Background warm-up | 15.0 / 8.5 s | 14 / 13 | 121-131 ms | 1.4 GB |
+
+  (The 15.0 s was the first start after the rebuild, files not yet in the system's cache.) The worst frames are the
+  kingdom arrivals, the same with both; the 544 ms freeze of the 1.0.1 run above is gone (its shader preparation was
+  out of date then). On the Deck the background warm-up stops at ~12,000 of 15,800 pipelines: its per-pipeline memory
+  estimate (82-85 KB, from the first scene) is higher than what the rest costs - the old warm-up built all of them within
+  the same 1 GB.
+
 ## Found on the way: the release's Steam Deck test doesn't reach the game
 
 `tools/release.sh` step 4 starts the AppImage on the Deck's test copy and stops it after 120 s with "errors in the
