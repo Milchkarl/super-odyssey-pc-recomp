@@ -1756,6 +1756,10 @@ static Job *jobq_pop(JobQ *q) {
 #else
 #define RT_THREAD_NAME(...) do { } while (0)
 #endif
+// The game's shader jobs queued or running (builds and translations): the start-up warm-up's background part waits
+// while there are any (exec.c warm_worker)
+static _Atomic int g_shader_jobs;
+static bool sync_shaders(void);
 static void *worker(void *a) {
     (void)a;
     RT_THREAD_NAME("shader worker");
@@ -1769,11 +1773,13 @@ static void *worker(void *a) {
             pthread_cond_wait(&jobs_cond, &jobs_lock);
         }
         pthread_mutex_unlock(&jobs_lock);
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        bool lowered = low && !sync_shaders();  // (see the translator)
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
         j->fn(j->arg);
         free(j);
+        atomic_fetch_sub(&g_shader_jobs, 1);
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
         if (low) {
-            SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
             pthread_mutex_lock(&jobs_lock);
             jobs_low_running--;
             pthread_cond_signal(&jobs_cond);
@@ -1874,10 +1880,14 @@ static void *translator(void *a) {
         // Programs set up ahead translate at low priority, as the workers build them (a Steam Deck's 4 cores: two
         // translators at normal priority for minutes after a stage load, every program it set up, took the game
         // thread from 24 to 38 ms a frame). Urgent ones - a draw waits - stay at normal priority.
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        // While builds block (a scene warming up: its draws wait for them) not even those: on a 4-thread CPU the game's
+        // own loading threads kept low-priority builds from running and the first frame came after 40-100 s.
+        bool lowered = low && !sync_shaders();
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
         j->fn(j->arg);
         free(j);
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+        atomic_fetch_sub(&g_shader_jobs, 1);
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
     }
     return NULL;
 }
@@ -1915,6 +1925,7 @@ static void queue_translate(void (*fn)(void *), void *arg, int q) {
     pthread_once(&once, translator_start);
     Job *j = malloc(sizeof *j);
     j->fn = fn; j->arg = arg;
+    atomic_fetch_add(&g_shader_jobs, 1);
     pthread_mutex_lock(&tjobs_lock);
     jobq_push(&tjobs_q[q], j);
     pthread_cond_signal(&tjobs_cond);
@@ -1926,6 +1937,7 @@ static void queue_job(void (*fn)(void *), void *arg, int q) {
     pthread_once(&once, workers_start);
     Job *j = malloc(sizeof *j);
     j->fn = fn; j->arg = arg;
+    atomic_fetch_add(&g_shader_jobs, 1);
     pthread_mutex_lock(&jobs_lock);
     jobq_push(&jobs_q[q], j);
     pthread_cond_signal(&jobs_cond);
@@ -5978,7 +5990,7 @@ static Prog *prewarm_program(const PipeRecipe *r, bool use_libraries) {
         free(p);
         return NULL;
     }
-    if (use_libraries) make_shader_libs(p, false);
+    (void)use_libraries;  // (its libraries: the caller makes them, outside warm_lock - below)
     // Keep the program's Vulkan objects alive alongside the prewarmed pipelines, as for programs built in play.
     warm_programs[slot].hash = hash;
     warm_programs[slot].prog = p;
@@ -6052,6 +6064,7 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
     memcpy((uint8_t *)&pp->k + PIPE_STATE_OFFSET, r->state, sizeof r->state);
     bool in_range = r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2;
     if (in_range) pp->k.prog = prewarm_program(r, use_libraries);
+    if (pp->k.prog && use_libraries && !pp->k.prog->lib_fs) make_shader_libs(pp->k.prog, false);
     if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
     if (atomic_load(&pp->state) != 1) {
         g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
@@ -6089,6 +6102,11 @@ static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool u
     }
     pthread_mutex_unlock(&warm_lock);
     if (!pp) return false;
+    // (the program's libraries outside warm_lock: a driver compile, 100 ms and more when the pipeline cache doesn't have
+    // it - under the lock it held up the game's own draws, which take that lock to add a pipeline while the warm-up runs
+    // in the background: 50 s before the first frame on a 4-thread run. Two threads asking for one library: shader_lib
+    // makes it once, slib_claim.)
+    if (pp->k.prog && use_libraries && !pp->k.prog->lib_fs) make_shader_libs(pp->k.prog, false);
     if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
     bool ok = atomic_load(&pp->state) == 1;
     pthread_mutex_lock(&warm_lock);
@@ -6133,10 +6151,20 @@ static void warm_bg_done(WarmJob *j) {
 static int warm_worker(void *arg) {
     WarmJob *j = arg;
     bool low = false;
+    uint64_t paused = 0;
     for (;;) {
         if (atomic_load(&j->stop)) break;
         uint32_t a = atomic_fetch_add(&j->next, 1);
         if (a >= j->count) break;
+        // (in the background the game's own shader work goes first: on a 4-core PC the warm-up's threads beside the
+        // programs the game sets up at start, all at low priority, held the first frame until the warm-up ended -
+        // 42 s instead of 20 with the old warm-up. A scene warming up waits for its builds: the same.)
+        uint64_t w0 = 0;
+        while (atomic_load(&j->bg) && !atomic_load(&j->stop) && (atomic_load(&g_shader_jobs) > 0 || sync_shaders())) {
+            if (!w0) w0 = plat_now_ns();
+            SDL_Delay(2);
+        }
+        if (w0) paused += plat_now_ns() - w0;  // (not counted in its time budget - this thread's own waits)
         if (a >= j->first && !low && atomic_load(&j->bg)) {  // (the first scene's are done: the game goes first)
             SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
             low = true;
@@ -6144,7 +6172,8 @@ static int warm_worker(void *arg) {
         // (the same bounds as before: driver allocations for libraries can be much larger than the recipe file)
         bool over = atomic_load(&j->bg) ? atomic_load(&j->warmed) >= j->max_warmed
                                         : plat_private_bytes() > j->memory + j->memory_budget;
-        if (a && a % 16 == 0 && (over || plat_now_ns() - j->t0 > j->time_budget)) {
+        // (in the background: before each pipeline - with the cache missing, 16 can take many seconds each thread)
+        if (a && (atomic_load(&j->bg) || a % 16 == 0) && (over || plat_now_ns() - j->t0 > j->time_budget + paused)) {
             atomic_store(&j->stop, true);
             break;
         }
@@ -6335,7 +6364,8 @@ void vk_pipeline_prewarm(bool build) {
         bool wait_all = !bg_env || !nfirst || !started;
         uint64_t half_mem = 0;
         uint32_t half_warmed = 0;
-        while (!wait_all && atomic_load(&job->running) > 0 && atomic_load(&job->attempted) < nfirst && !atomic_load(&job->stop)) {
+        while (!wait_all && atomic_load(&job->running) > 0 && atomic_load(&job->attempted) < nfirst && !atomic_load(&job->stop) &&
+               plat_now_ns() - t0 < time_budget) {
             if (!half_mem && atomic_load(&job->attempted) >= nfirst / 2)  // (the budget's measure: below)
                 half_mem = plat_private_bytes(), half_warmed = atomic_load(&job->warmed);
             SDL_DelayNS(2000000);

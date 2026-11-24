@@ -83,6 +83,27 @@ own lock now (the multithreaded warm-up of 0.9.0 could already race there). `ODY
 
 (In the last run the background warm-up built all 12,277 pipelines in 9 s while the game was on screen.)
 
+### A 4-thread CPU (the PC limited to 4 logical cores, 2 warm-up threads)
+
+The first version of the background warm-up held the first frame until it ended there (42-58 s). Three causes, fixed:
+the warm-up built shader libraries while holding the lock the game's draws take; its threads and the programs the game
+sets up at start all ran at low priority, so the builds a warming-up scene waits for got almost no CPU beside the
+game's busy loading threads (one saved translation, normally ~1 ms, took up to 40 s); and the warm-up competed with
+those builds. Now the warm-up's libraries are built outside its lock, the background part waits while the game has
+shader jobs or a scene is warming up (that time isn't counted in its budget), and shader jobs stay at normal priority
+while a scene warms up (low priority is for play, as before).
+
+| Owner's install copy, the ride, 4 threads | First frame | Worst frame in play | RAM at 3 min |
+|---|---|---|---|
+| Old warm-up, before these fixes | 19.9 s | - | - |
+| Old warm-up (`ODYSSEY_PREWARM_BG=0`), with the priority fix | 14.2 s | 61 ms (arriving in Metro) | 6.3 GB |
+| Background warm-up, all fixes (12,137 pipelines warmed in the background) | **11.9 s** | 67 ms (arriving in Metro) | 6.4-6.7 GB |
+| The same, all threads (10,039 warmed before its budget ran out) | 10.3 s | 27 ms after the arrivals | 6.2 GB |
+
+On the owner's install most libraries the warm-up asks for come from NVIDIA's own disk cache, not the game's pipeline
+cache (~0.8 ms each instead of ~0.1): by design, the setup's shader pass compiles most programs for the driver's cache
+only, so the pipeline cache the game loads whole at every start stays small.
+
 ## Shader compiles left in play and in the opening
 
 Measured with the driver's own creation feedback (`ODYSSEY_LOG_LIBCACHE=1`): a new player's first start (fresh setup,
