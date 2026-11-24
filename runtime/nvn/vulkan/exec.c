@@ -3958,6 +3958,10 @@ void vk_census_report(void) {
     for (int i = 0; i < 3; i++)
         LOG("[census] %-10s: not prepared %u (%.0f ms), output version %u (%.0f ms), other %u (%.0f ms)\n", k[i],
             census_n[i][0], census_us[i][0] / 1e3, census_n[i][1], census_us[i][1] / 1e3, census_n[i][2], census_us[i][2] / 1e3);
+    extern _Atomic uint32_t g_lib_hits, g_lib_miss;
+    extern _Atomic uint64_t g_lib_miss_us;
+    LOG("[census] libraries : %u from the game's pipeline cache, %u made by the driver (%.0f ms)\n", atomic_load(&g_lib_hits),
+        atomic_load(&g_lib_miss), atomic_load(&g_lib_miss_us) / 1e3);
 }
 
 void vk_drawn_programs_save(void) {
@@ -4477,6 +4481,7 @@ static const VkDynamicState DYN_FO[] = {VK_DYNAMIC_STATE_BLEND_CONSTANTS};
 #define DYN_INFO(a) {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = sizeof a / sizeof a[0], .pDynamicStates = a}
 
 static __thread VkResult t_lib_result;  // (the last create_lib_in's on this thread)
+static __thread bool t_lib_hit;  // (the last library this thread made came from the game's pipeline cache)
 static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryFlagsEXT part) {
     const void *next = pi->pNext;
     VkPipelineCreateFlags flags = pi->flags;
@@ -4498,8 +4503,25 @@ static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateI
         return VK_NULL_HANDLE;
     }
     if (cache) pcache_note(&fb);
+    {   // ODYSSEY_LOG_LIBCACHE=1: each library made - from the game's pipeline cache (hit) or compiled by the driver -,
+        // its part, flags and time; the totals with the census
+        static int lc = -1;
+        if (lc < 0) lc = getenv("ODYSSEY_LOG_LIBCACHE") != NULL;
+        bool valid = fb.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
+        bool hit = valid && (fb.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT);
+        extern _Atomic uint32_t g_lib_hits, g_lib_miss;
+        extern _Atomic uint64_t g_lib_miss_us;
+        t_lib_hit = hit;
+        if (hit) atomic_fetch_add(&g_lib_hits, 1);
+        else atomic_fetch_add(&g_lib_miss, 1), atomic_fetch_add(&g_lib_miss_us, fb.duration / 1000);
+        if (lc)
+            LOG("[libcache] %s part %#x flags %#x cache %s: %s, %.1f ms\n", hit ? "hit " : "miss", part, flags,
+                cache ? "game" : "none", valid ? "" : "(no feedback)", fb.duration / 1e6);
+    }
     return lib;
 }
+_Atomic uint32_t g_lib_hits, g_lib_miss;
+_Atomic uint64_t g_lib_miss_us;
 // (the setup's shader pass, pm_worker) a program compiled only for the driver's own disk cache: not into the game's
 // pipeline cache, which the game loads whole at every start - see pc_worker
 static __thread bool t_driver_cache_only;
@@ -4918,7 +4940,9 @@ static VkPipeline shader_lib_make(Prog *p, bool frag, int fill, bool cached_only
     }
     shader_time_log(cached_only ? (frag ? "cached library fs" : "cached library vs") : frag ? "library fs" : "library vs",
                     p->code[1], t0);
-    if (!capture_only) build_census(p, cached_only ? 2 : 1, t0);
+    // (a library the driver found in the game's pipeline cache counts as "from cache", as a cached_only one: they were all
+    // "compiled" before - 1,456 in a new player's opening that were cache hits, 2026-11-24)
+    if (!capture_only) build_census(p, cached_only || (lib && t_lib_hit) ? 2 : 1, t0);
     return lib;
 }
 
