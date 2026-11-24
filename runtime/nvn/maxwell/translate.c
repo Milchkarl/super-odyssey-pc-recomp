@@ -39,6 +39,8 @@ typedef struct {
     size_t len, cap;
 } Str;
 
+static void comp_main(Str *s, uint32_t omap);  // (the HDR composite's main: below)
+
 static void sp(Str *s, const char *fmt, ...) {
     va_list ap, ap2;
     va_start(ap, fmt);
@@ -79,7 +81,10 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool bloom_prefilter;
+    bool soft_shadow;   // (key->soft_shadow: 2D (array) shadow compares through softShadow)
+    bool glow_chain;    // (key->glow_chain: the glow chain drawn larger - its 2D reads through glowTap, #102)
     bool bloom_smooth;  // (the HDR composite, key->glow_comp: its 2D inputs read through bloomUp, steered per input)
+    bool comp_hdr;      // (the same composite: its body a function, comp_, run by an HDR / grading main - see comp_main)
     bool far_smooth;    // (the distant-view panorama: RGBM texels decoded before a B-spline enlargement, farSample)
     bool hud_smooth;    // (a layout's draw, key->hud_filter: enlarged textures through hudSample)
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
@@ -694,9 +699,20 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         c->stage == STAGE_FRAGMENT) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "farSample(t0, %s, rscale[1])", P);
+    } else if (c->soft_shadow && t->shadow && c->stage == STAGE_FRAGMENT && lod_kind == 0 &&
+               ((type == TEXTYPE_2D && !layer) || (type == TEXTYPE_2D_ARRAY && layer))) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "softShadow%s(t%d, %s, rscale[%d])", layer ? "A" : "", slot, P, slot + 1);
+    } else if (c->glow_chain && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1 && !layer) {
+        c->uses_rscale = true;
+        snprintf(e, sizeof e, "glowTap(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
     } else if (c->bloom_smooth && type == TEXTYPE_2D && !t->shadow && !off && lod_kind <= 1) {
         c->uses_rscale = true;
-        snprintf(e, sizeof e, "bloomUp(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
+        if (c->comp_hdr && slot < 8)  // (comp_main: the scene's light at another exposure - hk_ per input)
+            snprintf(e, sizeof e, "(bloomUp(t%d, %s, %s, rscale[%d]) * vec4(vec3(hk_[%d]), 1.0f))", slot, P,
+                     lod_kind == 1 ? lod : "0.0f", slot + 1, slot);
+        else
+            snprintf(e, sizeof e, "bloomUp(t%d, %s, %s, rscale[%d])", slot, P, lod_kind == 1 ? lod : "0.0f", slot + 1);
     } else if (c->bloom_prefilter && slot == 1 && type == TEXTYPE_2D && !t->shadow && lod_kind <= 1) {
         c->uses_rscale = true;
         snprintf(e, sizeof e, "bloomSample(t%d, %s, %s, rscale[%d].xy)", slot, P,
@@ -2361,6 +2377,70 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                "    return color / (footprint.x * footprint.y);\n"
                "}\n");
     }
+    if (c->soft_shadow) {
+        // Shadow edges Soft: one shadow-map compare becomes the average of 8 (each itself the hardware's 2x2 compare)
+        // on a disc 4 game texels across - times the map's own enlargement (Shadow quality: rs.x), so the softness
+        // is the same in the world at every quality - turned per pixel to break up the pattern. Edges fade over a
+        // few texels instead of stepping.
+        {   // ODYSSEY_SOFT_RADIUS=<game texels> (tests): the disc's radius
+            const char *e = getenv("ODYSSEY_SOFT_RADIUS");
+            sp(&s, "const float SOFT_R = %.3f;\n", e ? (float)atof(e) : 2.0f);
+        }
+        sp(&s, "const vec2 SOFT_DISC[8] = vec2[8](vec2(-0.613, 0.617), vec2(0.170, -0.040), vec2(-0.299, 0.792),\n"
+               "    vec2(0.645, 0.493), vec2(-0.651, 0.718), vec2(0.421, 0.027), vec2(-0.818, -0.410), vec2(0.020, -0.931));\n"
+               "float softRot() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853; }\n"
+               "float softShadow(sampler2DShadow src, vec3 p, vec4 rs) {\n"
+               "    vec2 texel = 1.0 / vec2(textureSize(src, 0));\n"
+               "    float r = SOFT_R * max(rs.x, 1.0), a = softRot(), cs = cos(a), sn = sin(a);\n"
+               "    float sum = 0.0;\n"
+               "    for (int i = 0; i < 8; i++) {\n"
+               "        vec2 o = SOFT_DISC[i];\n"
+               "        o = vec2(o.x * cs - o.y * sn, o.x * sn + o.y * cs) * r * texel;\n"
+               "        sum += texture(src, vec3(p.xy + o, p.z));\n"
+               "    }\n"
+               "    return sum * 0.125;\n"
+               "}\n"
+               "float softShadowA(sampler2DArrayShadow src, vec4 p, vec4 rs) {\n"
+               "    vec2 texel = 1.0 / vec2(textureSize(src, 0).xy);\n"
+               "    float r = SOFT_R * max(rs.x, 1.0), a = softRot(), cs = cos(a), sn = sin(a);\n"
+               "    float sum = 0.0;\n"
+               "    for (int i = 0; i < 8; i++) {\n"
+               "        vec2 o = SOFT_DISC[i];\n"
+               "        o = vec2(o.x * cs - o.y * sn, o.x * sn + o.y * cs) * r * texel;\n"
+               "        sum += texture(src, vec4(p.xy + o, p.z, p.w));\n"
+               "    }\n"
+               "    return sum * 0.125;\n"
+               "}\n");
+    }
+    if (c->glow_chain) {
+        // (#102) The glow chain drawn larger than the game's: a read of a texture rs.xy times the game's size covers
+        // the area of one game texel - a box rs wide around the point, at the level asked for, from bilinear taps on
+        // texel pairs - instead of one bilinear tap, whose spacing was the game's texels: its blur keeps its shape and
+        // reach, now computed per output pixel. rs <= 1 (not enlarged): one tap as the game's.
+        sp(&s, "vec2 glowPair(float p, float lo, float hi) {\n"
+               "    float a = clamp(min(hi, p + 1.0) - max(lo, p), 0.0, 1.0);\n"
+               "    float b = clamp(min(hi, p + 2.0) - max(lo, p + 1.0), 0.0, 1.0);\n"
+               "    return vec2(p + 0.5 + b / max(a + b, 1e-6), a + b);\n"
+               "}\n"
+               "vec4 glowTap(sampler2D src, vec2 uv, float lod, vec4 rs) {\n"
+               "    vec2 k = rs.xy;\n"
+               "    if (all(lessThanEqual(k, vec2(1.01)))) return textureLod(src, uv, lod);\n"
+               "    vec2 size = vec2(textureSize(src, int(lod)));\n"
+               "    vec2 lo = uv * size - 0.5 * k, hi = lo + k;\n"
+               "    ivec2 first = ivec2(floor(lo)), end = ivec2(ceil(hi));\n"
+               "    vec4 color = vec4(0.0);\n"
+               "    float wsum = 0.0;\n"
+               "    for (int y = first.y; y < end.y; y += 2) {\n"
+               "        vec2 ty = glowPair(float(y), lo.y, hi.y);\n"
+               "        for (int x = first.x; x < end.x; x += 2) {\n"
+               "            vec2 tx = glowPair(float(x), lo.x, hi.x);\n"
+               "            float w = tx.y * ty.y;\n"
+               "            if (w > 0.0) { color += textureLod(src, vec2(tx.x, ty.x) / size, lod) * w; wsum += w; }\n"
+               "        }\n"
+               "    }\n"
+               "    return wsum > 0.0 ? color / wsum : textureLod(src, uv, lod);\n"
+               "}\n");
+    }
     if (c->bloom_smooth) {
         // The HDR composite's inputs, as the draw steers each one (exec.c draw_, rscale[slot].z): 0 read as the game
         // reads it (the scene, its blurred copy, the exposure, a lens texture), 1 the glow image enlarged with a cubic
@@ -2505,6 +2585,10 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         sp(&s, "layout(std140, set = %d, binding = 19) uniform Tint { vec4 ltint[2]; };\n", set);
         info->uses_tint = true;
     }
+    if (c->comp_hdr) {  // (comp_main's settings: exec.c stage_set, HDRC_BUFFER_INDEX, comp_hdr_params)
+        sp(&s, "layout(std140, set = %d, binding = %d) uniform HdrC { vec4 hdrc[5]; };\n", set, HDRC_BUFFER_INDEX);
+        sp(&s, "float hk_[8] = float[8](1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);\n");
+    }
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
         sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, glsl_sampler_type(t), i);
@@ -2574,7 +2658,15 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         sp(&s, "layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;\n");
         if (c->uses_shared) sp(&s, "shared uint smem[%d];\n", SMEM_WORDS);
     }
-    sp(&s, "void main() {\n");
+    if (c->comp_hdr && stage == STAGE_FRAGMENT) {  // (its outputs as parameters: they shadow the stage outputs)
+        sp(&s, "void comp_(");
+        bool first = true;
+        for (int rt = 0; rt < 8; rt++)
+            if ((c->omap_target >> (rt * 4)) & 0xF) sp(&s, "%sout vec4 c%d", first ? "" : ", ", rt), first = false;
+        sp(&s, ") {\n");
+    } else {
+        sp(&s, "void main() {\n");
+    }
     if (stage == STAGE_VERTEX) {
         sp(&s, "  gl_Position = vec4(0, 0, 0, 1);\n");
         for (int i = 0; i < 32; i++)
@@ -2651,7 +2743,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
             if (!m) continue;
             int kind = key ? key->rt_kind[rt] : 0;
             const char *cv = kind == 1 ? "int" : kind == 2 ? "uint" : "";
-            if (kind == 3) kind = 0;  // (float, dithered below)
+            if (kind == 3 || kind == 4) kind = 0;  // (float: dithered / HDR-encoded below)
             // ODYSSEY_FS_SOLID=1 (debug): every float output magenta, to see what is rasterized;
             // =<program address in hex> (as in the [draw] log's fs=): only that fragment program
             static long long solid = -1;
@@ -2680,6 +2772,14 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         // step of the encoded value (triangular noise from two interleaved-gradient-noise values, fixed per pixel), so
         // smooth gradients don't round into visible steps ("banding"; vulkan/textures.c, exec.c draw_). Pure black and
         // white stay as they are.
+        // rt_kind 4: the window texture in half floats for HDR output (vulkan/textures.c hdr_window): sRGB-encoded as the
+        // 8-bit target would hold it, but the highlights the HDR composite keeps above 1 stay (present.frag decodes them)
+        for (int rt = 0; rt < 8; rt++) {
+            if (!key || key->rt_kind[rt] != 4 || !((c->omap_target >> (rt * 4)) & 0x7)) continue;
+            sp(&s, "  { vec3 hl = max(c%d.rgb, vec3(0.0f));\n"
+                   "    c%d.rgb = mix(hl * 12.92f, 1.055f * pow(hl, vec3(1.0f / 2.4f)) - 0.055f, step(vec3(0.0031308f), hl)); }\n",
+               rt, rt);
+        }
         for (int rt = 0; rt < 8; rt++) {
             if (!key || key->rt_kind[rt] != 3 || !((c->omap_target >> (rt * 4)) & 0x7)) continue;
             sp(&s, "  { vec2 dp = gl_FragCoord.xy;\n"
@@ -2697,12 +2797,88 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         }
     }
     sp(&s, "}\n");
+    if (c->comp_hdr && stage == STAGE_FRAGMENT) comp_main(&s, c->omap_target);
     info->msl = s.buf;
     info->attr_mask = c->in_attr_mask;
     info->out_mask = stage == STAGE_FRAGMENT ? c->omap_target : c->out_attr_mask;
     free(c->body.buf);
     free(c);
     return info;
+}
+
+// Native HDR and scene grading in the game's HDR composite (exec.c draw_ recognises it: key->glow_comp). The game
+// tone-maps its scene there - an exponential or a two-part rational curve per kingdom, some with a 3D grading map, an
+// overlay mixed after - into the picture's 0..1. Its code is kept whole as comp_ and run up to four times on the
+// same pixel, its scene and glow inputs (hk_, exec.c comp_hdr_inputs) at another exposure:
+//   y   = comp_(x)          the game's own result (exposure: hdrc[0].w)
+//   z   = comp_(0)          its black / overlay level
+//   q4  = comp_(x / 4), q16 = comp_(x / 16): the same pixel lower on the curve, graded as the game grades it
+// The pixel's light before the curve flattened it is read where the curve is near straight - its middle, not its toe
+// (the filmic variants rise slowly near black: read there, the light came out too low and no highlight was kept):
+// z + 4 (q4 - z) while q4 is still in the middle (luminance below 0.35), else z + 16 (q16 - z), blended between, and
+// the game's own y while that is (below 0.35). Below the knee (Y < 0.5) the picture stays the game's; above it the
+// luminance follows that light, rolling off to the display's peak
+// (P = peak / game white), with the game's hue; highlight saturation and blowout steer the colour of what is
+// restored. The grading sliders then act on the scene alone (the HUD is drawn after this pass). Values are in units
+// of the game's white, scaled by game / UI white (hdrc[0].z) so the HUD's white lands at UI brightness.
+// hdrc[0] = mode (0: the game's result, one run), P, scene scale, exposure; hdrc[1] / hdrc[4] = each input's kind (0
+// as read, 1 scene light, 2 glow); hdrc[2] = highlights, shadows, contrast exponents, saturation; hdrc[3] =
+// highlight saturation, blowout, flare, bloom gain.
+static void comp_main(Str *s, uint32_t omap) {
+    sp(s, "void hk_set(float k) {\n"
+          "  for (int i = 0; i < 8; i++) {\n"
+          "    float kind = i < 4 ? hdrc[1][i] : hdrc[4][i - 4];\n"
+          "    hk_[i] = kind > 1.5f ? k * hdrc[3].w : kind > 0.5f ? k : 1.0f;\n"
+          "  }\n"
+          "}\n"
+          "void main() {\n"
+          "  vec4 a[8], z[8], q[8], u[8];\n");
+    char args[4][160] = {"", "", "", ""};
+    const char *nm[4] = {"a", "z", "q", "u"};
+    for (int v = 0; v < 4; v++) {
+        bool first = true;
+        for (int rt = 0; rt < 8; rt++)
+            if ((omap >> (rt * 4)) & 0xF) {
+                size_t l = strlen(args[v]);
+                snprintf(args[v] + l, sizeof args[v] - l, "%s%s[%d]", first ? "" : ", ", nm[v], rt);
+                first = false;
+            }
+    }
+    sp(s, "  hk_set(hdrc[0].w);\n  comp_(%s);\n", args[0]);
+    for (int rt = 1; rt < 8; rt++)
+        if ((omap >> (rt * 4)) & 0xF) sp(s, "  c%d = a[%d];\n", rt, rt);
+    sp(s, "  if (hdrc[0].x < 0.5f) { c0 = a[0]; return; }\n"
+          "  hk_set(0.0f);\n  comp_(%s);\n"
+          "  hk_set(hdrc[0].w / 4.0f);\n  comp_(%s);\n"
+          "  hk_set(hdrc[0].w / 16.0f);\n  comp_(%s);\n", args[1], args[2], args[3]);
+    sp(s, "  const vec3 W = vec3(0.2126f, 0.7152f, 0.0722f);\n"
+          "  vec3 y = max(a[0].rgb, vec3(0.0f)), f0 = max(z[0].rgb, vec3(0.0f));\n"
+          "  vec3 l4 = max(f0 + (q[0].rgb - f0) * 4.0f, vec3(0.0f)), l16 = max(f0 + (u[0].rgb - f0) * 16.0f, vec3(0.0f));\n"
+          "  float m1 = smoothstep(0.25f, 0.35f, dot(y, W)), m4 = smoothstep(0.25f, 0.35f, dot(q[0].rgb, W));\n"
+          "  vec3 lin = mix(y, mix(l4, l16, m4), m1);\n"
+          "  float Y = dot(y, W), L = max(dot(lin, W), Y), P = hdrc[0].y;\n"
+          "  vec3 o = y;\n"
+          "  if (P > 1.001f && Y > 1e-6f) {\n"
+          "    const float K = 0.5f;\n"
+          "    float roll = L <= K ? L : K + (P - K) * (1.0f - exp(-(L - K) / (P - K)));\n"
+          "    float w = smoothstep(K, 1.0f, Y);\n"
+          "    float T = Y + w * max(roll - Y, 0.0f);\n"
+          "    vec3 cv = y / Y, cl = lin / max(L, 1e-6f);\n"
+          "    float hs = hdrc[3].x;\n"
+          "    vec3 cc = hs >= 0.5f ? mix(cv, cl, (hs - 0.5f) * 2.0f * w) : mix(cv, vec3(1.0f), (0.5f - hs) * 2.0f * w);\n"
+          "    o = cc * (T / max(dot(cc, W), 1e-6f));\n"
+          "    if (hdrc[3].y > 0.0f) o = mix(o, vec3(dot(o, W)), hdrc[3].y * smoothstep(1.0f, P, T));\n"
+          "  }\n"
+          "  float Yo = dot(o, W);\n"
+          "  if (Yo > 1e-6f) {\n"
+          "    float Yc = 0.18f * pow(Yo / 0.18f, hdrc[2].z);\n"
+          "    Yc = Yc < 0.18f ? 0.18f * pow(Yc / 0.18f, hdrc[2].y) : 0.18f * pow(Yc / 0.18f, hdrc[2].x);\n"
+          "    if (hdrc[3].z > 0.0f) Yc = Yc * Yc / (Yc + hdrc[3].z);\n"
+          "    o *= Yc / Yo;\n"
+          "    o = max(mix(vec3(dot(o, W)), o, hdrc[2].w), vec3(0.0f));\n"
+          "  }\n"
+          "  c0 = vec4(o * hdrc[0].z, a[0].a);\n"
+          "}\n");
 }
 
 ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, const ShaderKey *key) {
@@ -2733,6 +2909,13 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             for (size_t i = 0x30; i < ext; i++) hash = (hash ^ blob[i]) * 1099511628211ull;
             // (the composite itself is found by the draw, key->glow_comp: by its hash only 2 of its dozen versions were)
             c->bloom_smooth = key->glow_comp;
+            c->glow_chain = key->glow_chain && !key->glow_comp;
+            c->soft_shadow = key->soft_shadow != 0;
+            {   // ODYSSEY_HDR_COMP=0 (tests): the composite as before, without the HDR / grading main
+                static int on = -1;
+                if (on < 0) { const char *e = getenv("ODYSSEY_HDR_COMP"); on = !e || atoi(e) != 0; }
+                c->comp_hdr = key->glow_comp && on;
+            }
             {   // ODYSSEY_LOG_FS_HASH=1 (finding a shader for a flag like these): each fragment shader's hash and size
                 static int lg = -1;
                 if (lg < 0) lg = getenv("ODYSSEY_LOG_FS_HASH") != NULL;

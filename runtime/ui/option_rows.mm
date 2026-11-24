@@ -23,6 +23,17 @@ static std::string g_desc_hover, g_desc_focus, g_desc_shown;  // this frame's ho
 static std::string g_desc_first;  // the page's first row (shown until a row is selected or hovered)
 static std::string g_title_hover, g_title_focus, g_title_shown, g_title_first;  // their rows' labels (the card's title)
 static int g_row_toggle = -1;  // (opt_toggle -> row: the toggle's state)
+static float g_row_slider = -1;  // (opt_int_slider -> row: the value's place on its track, 0..1; -1 not a slider)
+static bool g_next_dropdown;     // (opt_next_dropdown -> the next opt_choice / opt_choice_avail: a dropdown list)
+static std::string g_row_note;   // (opt_next_note -> the next row: a line under its description, already in the menu's language)
+void opt_next_note(const char *note) { g_row_note = note ? note : ""; }
+static bool g_row_chevron;       // (-> row: a dropdown's chevron in the box instead of the arrows)
+static const char *g_row_seg[2]; // (opt_choice with two choices -> row: drawn as a switch with their names, like On | Off)
+static ImVec2 g_row_min, g_row_max;  // (the last row's rectangle, before the gap under it: dropdown_list)
+static int g_dropdown_frame = -10;   // (the last frame a dropdown's list was open)
+// (B / Esc closing a dropdown's list closes it before the menu looks: the menu leaves that B / Esc alone)
+bool opt_dropdown_recent(void) { return ImGui::GetFrameCount() - g_dropdown_frame <= 2; }
+static float g_slider_drag = -1;  // (row -> opt_int_slider: where the mouse holds the track, 0..1; -1 not dragged)
 static std::string g_page, g_page_shown;  // this page's id, and the page g_desc_shown belongs to
 static bool g_next_disabled;
 void opt_disable_next(void) { g_next_disabled = true; }
@@ -33,7 +44,11 @@ static bool g_held;  // the last row's left / right has been held a while (stepp
 void opt_indent(int step) { g_indent = g_indent + step < 0 ? 0 : g_indent + step; }
 
 static int g_lr_block_until = -1;  // (frame count) left / right don't change a row until then
-static bool g_last_row_focused;  // (row) the row drawn last has the cursor: after a page's rows, its last one
+static ImGuiID g_down_from;      // (opt_end) Down pressed on this item of the page, in this window, at this frame:
+static ImGuiWindow *g_down_win;   // opt_begin puts the cursor back on it if the move left the page
+static int g_down_frame = -10;
+static bool g_last_row_focused;
+static ImGuiID g_row_focus_id;    // (row) the row with the cursor  // (row) the row drawn last has the cursor: after a page's rows, its last one
 void opt_begin(const char *id, float scale) {
     g_scale = scale;
     g_take_first = g_focus_req;
@@ -43,6 +58,19 @@ void opt_begin(const char *id, float scale) {
         // (the Right / A that came into the page from the sidebar isn't also the first row's change - it flipped
         // "Early frame hand-off" when entering Performance)
         g_lr_block_until = ImGui::GetFrameCount() + 1;
+    }
+    {   // (opt_end) a Down that took the cursor out of the page (to the tab bar): back to where it was
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        int age = ImGui::GetFrameCount() - g_down_frame;
+        bool inside = false;  // (the new place in the page or a child of it: an ordinary move)
+        for (ImGuiWindow *w = g->NavWindow; w; w = w->ParentWindow) if (w == g_down_win) inside = true;
+        if (age >= 1 && age <= 3 && g_down_win && g->NavWindow && !inside &&
+            g->NavWindow->RootWindow == g_down_win->RootWindow && g->NavId != g_down_from) {
+            ImGui::SetFocusID(g_down_from, g_down_win);
+            ImGui::SetNavCursorVisible(true);
+            g_down_frame = -10;
+            menu_rec("Down at the page's end: the cursor stays");
+        }
     }
     g_indent = 0;
     g_desc_hover.clear(), g_desc_focus.clear(), g_title_hover.clear(), g_title_focus.clear();
@@ -79,6 +107,12 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     ImGui::PushID(label_en);  // (the English one: the same row whatever the menu's language)
     // (the menu's language: runtime/ui/i18n.h - label, value and description as shown)
     const char *label = tr(label_en), *desc = tr(desc_en);
+    static std::string with_note;  // (opt_next_note: a live line under the description - the memory a choice takes)
+    if (!g_row_note.empty()) {
+        with_note = g_row_note + (desc && *desc ? std::string("\n\n") + desc : std::string());  // (first: long ones scroll)
+        desc = with_note.c_str();
+        g_row_note.clear();
+    }
     // (the option's plain-English note on top: what it does, what is recommended - option_notes.h)
     std::string noted;
     if (const OptionNote *n = option_note(label_en)) {
@@ -108,7 +142,8 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     bool off = g_next_disabled;  // (greyed out: still selectable, so its description shows, but it can't change)
     g_next_disabled = false;
     bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
-    g_last_row_focused = ImGui::IsItemFocused();  // (opt_end: the page's last row - Down stops there)
+    g_last_row_focused = ImGui::IsItemFocused();
+    if (g_last_row_focused) g_row_focus_id = ImGui::GetItemID();  // (opt_end's recorder: a row logs itself)
     bool blocked = ImGui::GetFrameCount() <= g_lr_block_until;
     int step = clicked && !off && !blocked ? 2 : 0;
     g_held = false;
@@ -148,6 +183,11 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     // one band across.
     int tog = g_row_toggle;  // (opt_toggle: 1 On, 0 Off; -1 not a toggle)
     g_row_toggle = -1;
+    bool chev = g_row_chevron;  // (a dropdown: a chevron at the box's right end)
+    g_row_chevron = false;
+    float sl = g_row_slider;  // (opt_int_slider: a track filled to the value, dragged with the mouse)
+    g_row_slider = -1;
+    g_slider_drag = -1;
     bool has_box = tog >= 0 || !value.empty();
     float r = 5 * g_scale, pad = 18 * g_scale, fs = ImGui::GetFontSize(), gapx = 6 * g_scale;
     float split = has_box ? floorf(w * 0.54f) : w;  // (the band's width; the box takes the rest)
@@ -157,7 +197,7 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     dl->AddRectFilled(p, ImVec2(p.x + split, p.y + h), theme_u32(lit ? kSurfaceHoverV : kSurfaceV), r);
     if (changed && !off) {  // (not the default)
         float t = fs * 0.42f;
-        dl->AddTriangleFilled(ImVec2(p.x + 1, p.y + 1), ImVec2(p.x + 1 + t, p.y + 1), ImVec2(p.x + 1, p.y + 1 + t), kGold);
+        dl->AddTriangleFilled(ImVec2(p.x + 1, p.y + 1), ImVec2(p.x + 1 + t, p.y + 1), ImVec2(p.x + 1, p.y + 1 + t), theme_u32(kTextV, 0.55f));
     }
     std::string t = label;
     if (upper)
@@ -178,6 +218,8 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
     if (tog >= 0) {  // On | Off: a segmented control - the chosen half lighter with a short red line under its word
         float hw = bw * 0.5f;
         const char *names[2] = {tr("On"), tr("Off")};
+        if (g_row_seg[0]) names[0] = tr(g_row_seg[0]), names[1] = tr(g_row_seg[1]);  // (a two-choice row: its names)
+        g_row_seg[0] = g_row_seg[1] = NULL;
         dl->AddRectFilled(b0, b1, theme_u32(kSidebarV), r);
         for (int k = 0; k < 2; k++) {
             ImVec2 a(b0.x + k * hw, b0.y), z(b0.x + (k + 1) * hw, b1.y);
@@ -190,13 +232,30 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
             if (chosen && !off) {
                 float lw2 = fmaxf(ts.x, fs * 1.2f), ly = b1.y - fmaxf(3, 4 * g_scale);
                 float lx0 = (a.x + z.x - lw2) * 0.5f;
-                dl->AddRectFilled(ImVec2(lx0, ly), ImVec2(lx0 + lw2, ly + fmaxf(2, 2.5f * g_scale)), kAccent, 2 * g_scale);
+                dl->AddRectFilled(ImVec2(lx0, ly), ImVec2(lx0 + lw2, ly + fmaxf(2, 2.5f * g_scale)), theme_u32(kGoldV), 2 * g_scale);
             }
         }
         if (clicked && !off && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {  // (a click on the chosen half: nothing)
             float mx = ImGui::GetIO().MousePos.x;
             if (mx >= b0.x && ((mx < b0.x + hw) == (tog == 1))) step = 0;
         }
+    } else if (has_box && sl >= 0) {  // a slider: the box a track, filled up to the value, a handle there, the value on it
+        dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kBoxHotV : kBoxV), r);
+        float m = fs * 0.5f, x0 = b0.x + m, x1 = b1.x - m, f = fminf(fmaxf(sl, 0), 1), hx = x0 + (x1 - x0) * f;
+        float ty = p.y + h * 0.74f, th = fmaxf(3, 4 * g_scale);
+        dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(x1, ty + th * 0.5f), theme_u32(kSidebarV), th);
+        if (!off) dl->AddRectFilled(ImVec2(x0, ty - th * 0.5f), ImVec2(hx, ty + th * 0.5f), theme_u32(kGoldV, lit ? 1.0f : 0.85f), th);
+        dl->AddCircleFilled(ImVec2(hx, ty), fs * 0.32f, off ? kTextOff : kText);
+        ImVec2 vs = ImGui::CalcTextSize(value.c_str());
+        float vx = (b0.x + b1.x - vs.x) * 0.5f, vy = p.y + h * 0.08f;
+        dl->AddText(font, fs * 0.8f, ImVec2(vx + vs.x * 0.1f, vy), off ? kTextOff : kText, value.c_str());
+        dl->AddCircle(ImVec2(hx, ty), fs * 0.32f, theme_u32(kSidebarV), 0, fmaxf(1, 1.5f * g_scale));
+        // the mouse: held on the track, the value follows it (a press or a drag; the keys and the controller step)
+        if (!off && ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            float mx = ImGui::GetIO().MousePos.x, cx = ImGui::GetIO().MouseClickedPos[ImGuiMouseButton_Left].x;
+            if (cx >= b0.x) g_slider_drag = fminf(fmaxf((mx - x0) / fmaxf(x1 - x0, 1), 0), 1);
+        }
+        if (clicked && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) step = 0;  // (the mouse set it already)
     } else if (has_box) {
         dl->AddRectFilled(b0, b1, off ? theme_u32(kSurfaceV) : theme_u32(lit ? kBoxHotV : kBoxV), r);  // (charcoal; red only for the arrows)
         float aw = fs * 0.36f, agap = fs * 0.5f, cy = p.y + h * 0.5f;
@@ -206,8 +265,14 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         float tagw = tag ? ImGui::CalcTextSize(tag).x * tag_s + fs * 0.35f : 0;
         if (tag && vw0 + tagw > inner) tag = NULL, tagw = 0;  // (no room: the value keeps its size)
         if (vw0 > inner && vw0 > 0) vs = fmaxf(0.7f, inner / vw0);
+        if (chev) {  // (a dropdown: the list opens with a click or A; left / right still step)
+            ImU32 ac = off ? kTextOff : theme_u32(kTextV, lit ? 0.95f : 0.7f);
+            float cx = b1.x - agap - aw;
+            dl->AddTriangleFilled(ImVec2(cx - aw * 0.9f, cy - aw * 0.45f), ImVec2(cx + aw * 0.9f, cy - aw * 0.45f),
+                                  ImVec2(cx, cy + aw * 0.6f), ac);
+        }
         if (arrows) {
-            ImU32 ac = off ? kTextOff : theme_u32(kAccentV, lit ? 1.0f : 0.85f);  // (the red accent)
+            ImU32 ac = off ? kTextOff : theme_u32(kTextV, lit ? 0.95f : 0.7f);  // (the red accent)
             float lx = b0.x + agap, rx = b1.x - agap - aw;
             dl->AddTriangleFilled(ImVec2(lx, cy), ImVec2(lx + aw, cy - aw * 0.8f), ImVec2(lx + aw, cy + aw * 0.8f), ac);
             dl->AddTriangleFilled(ImVec2(rx + aw, cy), ImVec2(rx, cy - aw * 0.8f), ImVec2(rx, cy + aw * 0.8f), ac);
@@ -228,11 +293,13 @@ static int row(const char *label_en, const std::string &value_en, bool changed, 
         }
         dl->PopClipRect();
     }
-    if (foc) {  // the cursor: coin gold around the box (or the band, for a button)
-        float th = fmaxf(2, 2.5f * g_scale);
+    if (foc) {  // the cursor: a thin white outline around the box (or the band, for a button)
+        float th = fmaxf(1, 1.5f * g_scale);
         if (has_box) dl->AddRect(ImVec2(b0.x - 1, b0.y - 1), ImVec2(b1.x + 1, b1.y + 1), off ? theme_u32(kGoldV, 0.4f) : kGold, r + 1, 0, th);
         else dl->AddRect(ImVec2(p.x - 1, p.y - 1), ImVec2(p.x + w + 1, p.y + h + 1), off ? theme_u32(kGoldV, 0.4f) : kGold, r + 1, 0, th);
     }
+    g_row_min = p, g_row_max = ImVec2(p.x + w, p.y + h);  // (the row's rectangle: a dropdown opens under it)
+    ImGui::Dummy(ImVec2(w, 4 * g_scale));  // (a gap between rows: their boxes read as separate, owner 2026-11-23)
     ImGui::PopID();
     if (step || (clicked && (off || blocked)))  // (the menu recorder: what a press did to this row)
         menu_rec("row \"%s\" (value \"%s\"): %s%s", label_en, value_en.c_str(),
@@ -248,9 +315,100 @@ bool opt_toggle(const char *label, bool *v, bool def, const char *desc) {
     return true;
 }
 
+void opt_next_dropdown(void) { g_next_dropdown = true; }
+
+// A dropdown row's list, under its value box (the row is the last item): open = a click or A on the row this frame.
+// The mouse or up / down and A choose, B / Esc closes it; avail (may be NULL) greys choices this PC can't use.
+// Returns the chosen index, or -1.
+static int dropdown_list(const char *label, int cur, const char *const *names, int n, const bool *avail, bool open) {
+    ImVec2 r0 = g_row_min, r1 = g_row_max;
+    float w = r1.x - r0.x, bx = r0.x + floorf(w * 0.54f) + 6 * g_scale, bw = r1.x - bx;
+    ImGui::PushID(label);
+    if (open) ImGui::OpenPopup("##dropdown");
+    int pick = -1;
+    // (its own look, owner 2026-11-23: a charcoal panel the value box's width just under it, a thin border, the
+    // choices centred as in the box, the hovered one lighter, the current one marked with a red bar)
+    // (each choice a small rounded box with a gap under it, as the rows are; owner 2026-11-23: better spacing)
+    float rowh = (r1.y - r0.y) * 0.85f, pad = 6 * g_scale, gap = 4 * g_scale, igap = 3 * g_scale;
+    float avail_h = ImGui::GetIO().DisplaySize.y - r1.y - gap - 48 * g_scale;  // (above the hint bar)
+    float list_h = fminf((rowh + igap) * n - igap + 2 * pad, fmaxf(avail_h, (rowh + igap) * 4 + 2 * pad));
+    bool above = avail_h < rowh * fminf((float)n, 4.0f);  // (no room below: it opens upward)
+    ImGui::SetNextWindowPos(above ? ImVec2(bx, r0.y - list_h - gap) : ImVec2(bx, r1.y + gap));
+    ImGui::SetNextWindowSize(ImVec2(bw, list_h));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, theme_u32(kBoxV));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 40));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));  // (the choices' boxes are drawn below, rounded)
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, theme_u32(kGoldV));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 5 * g_scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, fmaxf(1, g_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, igap));
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopup("##dropdown")) {
+        g_dropdown_frame = ImGui::GetFrameCount();
+        for (int i = 0; i < n; i++) {
+            bool en = !avail || avail[i];
+            if (!en) ImGui::BeginDisabled();
+            ImGui::PushID(i);
+            {   // (its box: rounded, lighter under the mouse, the current one lighter still)
+                ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + ImGui::GetContentRegionAvail().x, a.y + rowh);
+                bool hov = en && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(a, b);
+                ImU32 bg = i == cur ? theme_u32(kBoxHotV) : hov ? theme_u32(kSurfaceHoverV) : theme_u32(kSurfaceV);
+                ImGui::GetWindowDrawList()->AddRectFilled(a, b, bg, 4 * g_scale);
+            }
+            if (ImGui::Selectable(tr(names[i]), i == cur, 0, ImVec2(0, rowh))) pick = i;
+            if (i == cur) {  // (the current choice: a short red bar at its left)
+                ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+                float bh = (b.y - a.y) * 0.5f;
+                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + 2 * g_scale, a.y + bh * 0.5f),
+                                                          ImVec2(a.x + 5 * g_scale, b.y - bh * 0.5f), theme_u32(kGoldV), 2 * g_scale);
+            }
+            if (i == cur && ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus(), ImGui::SetScrollHereY(0.5f);
+            ImGui::PopID();
+            if (!en) ImGui::EndDisabled();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar(5);
+    ImGui::PopStyleColor(6);
+    ImGui::PopID();
+    if (pick >= 0) menu_rec("dropdown \"%s\": chose \"%s\"", label, names[pick]);
+    return pick;
+}
+
+// (a two-choice row is a switch unless asked to be a dropdown, or a name doesn't fit its half of the value box - two
+// graphics cards' names overlapped there)
+static bool seg_fits(const char *const *names) {
+    float half = ImGui::GetContentRegionAvail().x * 0.46f * 0.5f - 16 * g_scale;
+    return ImGui::CalcTextSize(tr(names[0])).x <= half && ImGui::CalcTextSize(tr(names[1])).x <= half;
+}
+
+// (owner 2026-11-23: no left / right rows - two choices are a switch like On | Off, more are a dropdown)
 bool opt_choice(const char *label, int *v, const char *const *names, int n, int def, const char *desc, bool wrap) {
     int cur = *v >= 0 && *v < n ? *v : 0;
-    int step = row(label, names[cur], cur != def, desc, false, true);
+    bool want_dd = g_next_dropdown;
+    g_next_dropdown = false;
+    if (n == 2 && !want_dd && seg_fits(names)) {  // (a switch: a click on the other half, A, left / right choose the other)
+        g_row_toggle = cur == 0 ? 1 : 0;
+        g_row_seg[0] = names[0], g_row_seg[1] = names[1];
+        if (!row(label, names[cur], cur != def, desc)) return false;
+        *v = 1 - cur;
+        return true;
+    }
+    bool dd = n >= 2;  // (two only when it isn't a switch: above)
+    g_row_chevron = dd;
+    int step = row(label, names[cur], cur != def, desc, false, !dd);
+    if (dd) {
+        int pick = dropdown_list(label, cur, names, n, NULL, step == 2);
+        if (step == 2) return false;  // (the list opened instead)
+        if (pick >= 0) {
+            if (pick == cur) return false;
+            *v = pick;
+            return true;
+        }
+    }
     if (!step) return false;
     int nv = cur + (step == 2 ? 1 : step);
     nv = wrap ? (nv + n) % n : nv < 0 ? 0 : nv >= n ? n - 1 : nv;
@@ -269,7 +427,27 @@ bool opt_choice_avail(const char *label, int *v, const char *const *names, int n
     for (int i = 0; i < n; i++)
         if (!avail[i]) missing += (missing.empty() ? "" : ", ") + std::string(tr(names[i]));
     if (!missing.empty()) d += "\n\n" + std::string(tr("Not available on this PC (greyed out):")) + " " + missing + ".";
-    int step = row(label, names[cur], cur != def, d.c_str(), false, true);
+    bool want_dd = g_next_dropdown;
+    g_next_dropdown = false;
+    if (n == 2 && !want_dd && seg_fits(names)) {  // (a switch, as opt_choice: only to an available choice)
+        g_row_toggle = cur == 0 ? 1 : 0;
+        g_row_seg[0] = names[0], g_row_seg[1] = names[1];
+        if (!row(label, names[cur], cur != def, d.c_str()) || !avail[1 - cur]) return false;
+        *v = 1 - cur;
+        return true;
+    }
+    bool dd = n >= 2;  // (two only when it isn't a switch: above)
+    g_row_chevron = dd;
+    int step = row(label, names[cur], cur != def, d.c_str(), false, !dd);
+    if (dd) {
+        int pick = dropdown_list(label, cur, names, n, avail, step == 2);
+        if (step == 2) return false;  // (the list opened instead)
+        if (pick >= 0) {
+            if (pick == cur || !avail[pick]) return false;
+            *v = pick;
+            return true;
+        }
+    }
     if (!step) return false;
     int dir = step == 2 ? 1 : step, nv = cur;
     for (int k = 0; k < n; k++) {  // (the next available one that way, wrapping)
@@ -282,26 +460,52 @@ bool opt_choice_avail(const char *label, int *v, const char *const *names, int n
 }
 
 bool opt_slider(const char *label, float *v, float lo, float hi, float step, float def, const char *fmt, const char *desc) {
+    // (a slider, as every number row: the mouse drags the track, left / right step, A resets)
     char buf[32];
     snprintf(buf, sizeof buf, fmt, *v);
-    int s = row(label, buf, fabsf(*v - def) > step * 0.01f, desc, false, true, true);
-    if (!s) return false;
-    float eps = step * 0.01f, n = roundf(*v / step) * step + (s == 2 ? step : s * step);
-    if (s == 2 && n > hi + eps) n = lo;  // (A / click past the top wraps to the bottom; left / right stop at the ends)
-    *v = n < lo ? lo : n > hi ? hi : n;
+    g_row_slider = hi > lo ? (*v - lo) / (hi - lo) : 0;
+    int s = row(label, buf, fabsf(*v - def) > step * 0.01f, desc, false, false, true);
+    float n = *v;
+    if (g_slider_drag >= 0) n = lo + roundf(g_slider_drag * (hi - lo) / step) * step;
+    else if (s == 1 || s == -1) n = roundf(*v / step) * step + s * step;
+    else if (s == 2) n = def;
+    n = n < lo ? lo : n > hi ? hi : n;
+    if (fabsf(n - *v) < step * 0.01f) return false;
+    *v = n;
     return true;
 }
 
 bool opt_int(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc,
              const char *lo_name) {
+    // (a slider, as every number row: lo_name, when given, is shown at the lowest value)
     char buf[48];
     if (lo_name && *v == lo) snprintf(buf, sizeof buf, "%s", lo_name);
     else snprintf(buf, sizeof buf, fmt, *v);
-    int s = row(label, buf, *v != def, desc, false, true, true);
-    if (!s) return false;
-    int d = s == 2 ? step : s * step * (g_held && hi - lo > 40 * step ? 10 : 1);
-    int n = *v + d;
-    if (s == 2 && n > hi) n = lo;  // (A / click past the top wraps; left / right stop at the ends)
+    g_row_slider = hi > lo ? (float)(*v - lo) / (float)(hi - lo) : 0;
+    int s = row(label, buf, *v != def, desc, false, false, true);
+    int n = *v;
+    if (g_slider_drag >= 0) n = lo + (int)lroundf(g_slider_drag * (hi - lo) / step) * step;
+    else if (s == 1 || s == -1) n = *v + s * step * (g_held && hi - lo > 40 * step ? 10 : 1);
+    else if (s == 2) n = def;
+    n = n < lo ? lo : n > hi ? hi : n;
+    if (n == *v) return false;
+    *v = n;
+    return true;
+}
+
+bool opt_int_slider(const char *label, int *v, int lo, int hi, int step, int def, const char *fmt, const char *desc) {
+    char buf[48];
+    snprintf(buf, sizeof buf, fmt, *v);
+    g_row_slider = hi > lo ? (float)(*v - lo) / (float)(hi - lo) : 0;
+    int s = row(label, buf, *v != def, desc, false, false, true);
+    int n = *v;
+    if (g_slider_drag >= 0) {  // (the mouse on the track: the nearest step there)
+        n = lo + (int)lroundf(g_slider_drag * (hi - lo) / step) * step;
+    } else if (s == 1 || s == -1) {
+        n = *v + s * step * (g_held && hi - lo > 40 * step ? 10 : 1);
+    } else if (s == 2) {  // (A on a controller: back to the default)
+        n = def;
+    }
     n = n < lo ? lo : n > hi ? hi : n;
     if (n == *v) return false;
     *v = n;
@@ -313,7 +517,7 @@ bool opt_button(const char *label, const char *desc) { return row(label, "", fal
 bool opt_radio(const char *label, bool selected, const char *desc) {
     bool off = g_next_disabled;
     bool chosen = row(label, "", false, desc) == 2;
-    ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    ImVec2 a = g_row_min, b = g_row_max;  // (the row, not the gap under it)
     float r = ImGui::GetFontSize() * 0.32f, cx = b.x - 16 * g_scale - r, cy = (a.y + b.y) * 0.5f;
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImU32 col = off ? kTextOff : selected ? kText : theme_u32(kTextV, 0.78f);
@@ -348,13 +552,27 @@ bool opt_text(const char *label, char *buf, size_t cap, const char *hint, const 
 }
 
 void opt_end(void) {
-    // Down on a page's last row stays there. With nothing below it, ImGui's navigation took the nearest item in any
+    // Down never leaves the page. With nothing below the cursor, ImGui's navigation took the nearest item in any
     // direction - the first category tab - and held Down at the end of Performance switched to Display (owner's
-    // recording, 2026-11-22)
-    if (g_last_row_focused && ImGui::GetCurrentContext()->NavCursorVisible &&
-        (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown) ||
-         ImGui::IsKeyPressed(ImGuiKey_DownArrow)))
-        ImGui::NavMoveRequestCancel();
+    // recording, 2026-11-22). That was stopped on the page's last row, which on Controls (rows, then the binding grids)
+    // trapped the cursor above the grids (owner 2026-11-24). Now Down goes wherever ImGui finds, and opt_begin puts the
+    // cursor back if that was outside the page.
+    {
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        if (g->NavCursorVisible && g->NavWindow == ImGui::GetCurrentWindow() &&
+            (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown) ||
+             ImGui::IsKeyPressed(ImGuiKey_DownArrow)))
+            g_down_from = g->NavId, g_down_win = g->NavWindow, g_down_frame = ImGui::GetFrameCount();
+    }
+    {   // (the recorder) the cursor on something that isn't a row - a binding cell, a button: its id and place
+        static ImGuiID last;
+        ImGuiContext *g = ImGui::GetCurrentContext();
+        if (g->NavId != last) {
+            last = g->NavId;
+            if (g->NavId && g->NavWindow == ImGui::GetCurrentWindow() && g->NavId != g_row_focus_id)
+                menu_rec("cursor on item %08x at y %.0f", (unsigned)g->NavId, g->NavWindow->NavRectRel[0].Min.y);
+        }
+    }
     g_last_row_focused = false;
     ImGui::PopStyleVar();
     if (const char *t = getenv("ODYSSEY_OPT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(t));  // (test)

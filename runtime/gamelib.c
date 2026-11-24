@@ -120,12 +120,51 @@ static int candidates(const char *game_dir, char out[3][1100]) {
     return n;
 }
 
+// The library file whole: its headers, and every section's data inside the file (#152: a damaged odyssey_game.dll -
+// "can't load ... (error 193)", not a valid program - had a matching .id, so setup wasn't run and the game stopped at
+// every start). Damaged: as not built - setup builds it again.
+static bool lib_file_ok(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    uint8_t h[4096];
+    size_t n = fread(h, 1, sizeof h, f);
+    fseek(f, 0, SEEK_END);
+    long long size = ftell(f);
+    fclose(f);
+    bool ok = false;
+#ifdef _WIN32
+    if (n >= 0x40 && h[0] == 'M' && h[1] == 'Z') {
+        uint32_t pe = h[0x3c] | h[0x3d] << 8 | h[0x3e] << 16 | (uint32_t)h[0x3f] << 24;
+        if (pe + 24 <= n && !memcmp(h + pe, "PE\0\0", 4) && (h[pe + 4] | h[pe + 5] << 8) == 0x8664) {
+            unsigned nsec = h[pe + 6] | h[pe + 7] << 8, opt = h[pe + 20] | h[pe + 21] << 8;
+            size_t sec = pe + 24 + opt;
+            ok = nsec > 0 && sec + 40 * (size_t)nsec <= n;
+            for (unsigned i = 0; ok && i < nsec; i++) {
+                const uint8_t *e = h + sec + 40 * i;
+                uint32_t raw_size = e[16] | e[17] << 8 | e[18] << 16 | (uint32_t)e[19] << 24;
+                uint32_t raw_ptr = e[20] | e[21] << 8 | e[22] << 16 | (uint32_t)e[23] << 24;
+                if ((long long)raw_ptr + raw_size > size) ok = false;
+            }
+        }
+    }
+#else
+    if (n >= 64 && !memcmp(h, "\x7f" "ELF", 4) && h[4] == 2) {  // (64-bit, little-endian on every target)
+        uint64_t shoff = 0;
+        memcpy(&shoff, h + 0x28, 8);
+        uint16_t shentsize = h[0x3a] | h[0x3b] << 8, shnum = h[0x3c] | h[0x3d] << 8;
+        ok = shoff && (long long)(shoff + (uint64_t)shentsize * shnum) <= size;
+    }
+#endif
+    if (!ok) LOG("[gamelib] %s is damaged (%lld bytes): built again\n", path, size);
+    return ok;
+}
+
 bool gamelib_present(const char *game_dir) {
     if (g_tables) return true;
     char c[3][1100];
     int n = candidates(game_dir, c);
     for (int i = 0; i < n; i++)
-        if (exists(c[i]) && id_matches(c[i])) return true;
+        if (exists(c[i]) && id_matches(c[i]) && lib_file_ok(c[i])) return true;
     return false;
 }
 

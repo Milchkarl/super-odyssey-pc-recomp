@@ -22,6 +22,7 @@
 #include "../kernel.h"
 #include "../nvn/kbprompts.h"
 #include "motion_gate.h"
+#include "../switch2.h"
 
 enum {
     BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
@@ -302,7 +303,9 @@ bool input_pointer_layout(float *x, float *y) {
 // draws its own pointer regardless (runtime/ui/menu.mm).
 static _Atomic bool pointer_pad_last = true;
 static _Atomic uint64_t pointer_mode_ns;  // when the pointer was last held / freed (the warp back isn't a mouse use)
+static _Atomic uint64_t pointer_used_ns;  // the mouse's last move / click / wheel (#109: idle, the pointer hides)
 static void pointer_note_device(bool is_pad) {
+    if (!is_pad) atomic_store(&pointer_used_ns, plat_now_ns());
     if (atomic_load(&pointer_pad_last) == is_pad) return;
     atomic_store(&pointer_pad_last, is_pad);
     static int lm = -1;
@@ -310,9 +313,16 @@ static void pointer_note_device(bool is_pad) {
     if (lm) LOG("[input] menu pointer: %s\n", is_pad ? "hidden (controller / keys)" : "shown (mouse)");
 }
 // The system pointer shown over the game (runtime/ui/menu.mm): in its menus, where the pointer isn't held, and only
-// while the mouse is the device in use
+// while the mouse is the device in use - moved, clicked or scrolled in the last 3 s. (#109: the game doesn't ask for
+// the camera in a cutscene either, which counts as a menu; the pointer showed over cutscenes.)
+#define POINTER_IDLE_NS 3000000000ull
 bool input_pointer_visible(void) {
-    return !atomic_load(&mouse_held) && !atomic_load(&pointer_pad_last) && in_game_menu();
+    bool v = !atomic_load(&mouse_held) && !atomic_load(&pointer_pad_last) && in_game_menu() &&
+             plat_now_ns() - atomic_load(&pointer_used_ns) < POINTER_IDLE_NS;
+    static int lm = -1, was = -1;
+    if (lm < 0) lm = getenv("ODYSSEY_LOG_MOUSE") != NULL;
+    if (lm && v != was) LOG("[input] game menu pointer %s\n", v ? "visible" : "hidden"), was = v;
+    return v;
 }
 // A wheel notch (0 up, 1 down): one D-pad step in a menu, if the wheel isn't bound to anything
 static void menu_wheel_notch(int down) {
@@ -328,7 +338,13 @@ static uint64_t menu_mouse_bits(void) {
             bool focus_click = now - atomic_load(&window_focus_ns) < 300000000ull;
             extern bool odyssey_map_open(void);  // (runtime/hle/odyssey_pointer.c: on the map a binding stays)
             bool keep = k_menu_mouse[i].code == BIND_MOUSE_LEFT && mouse_code_bound(BIND_MOUSE_LEFT) && odyssey_map_open();
-            *l = !focus_click && !keep && in_game_menu() ? (uint8_t)(k_menu_mouse[i].bit + 1) : 0xff;
+            // (#151: a mouse button bound to the game's A or B is that in the menus and on the map too - as the game's
+            // button prompts show it. Mouse Right bound to A was B here: it closed the map instead of travelling, and
+            // the prompts asked for the right button while the left one confirmed.)
+            int code = k_menu_mouse[i].code;
+            int bit = g_bind_key[BIND_A] == code ? BIND_A : g_bind_key[BIND_B] == code ? BIND_B : k_menu_mouse[i].bit;
+            if (bit != k_menu_mouse[i].bit) keep = false;
+            *l = !focus_click && !keep && in_game_menu() ? (uint8_t)(bit + 1) : 0xff;
         }
         if (*l && *l != 0xff) b |= 1ull << (*l - 1);
     }
@@ -985,7 +1001,11 @@ HLE_FUNC("_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19
     mot.last_read_ns = now;
     // No sensor sending (no gyro, the motion setting off, a still controller's quiet sensor): the 5 ms states at the
     // game's own clock since the last one (at most the 16 it reads)
-    bool sensor_live = live && mot.has_gyro && mot.last_push_ns && now - mot.last_push_ns < 20000000ull;
+    // (A Switch 2 controller over Bluetooth sends a report every 8-30 ms, by the link Windows gives it, often a few
+    // in one burst: within 20 ms these states were filled at the game's clock between its reports, a repeat of the
+    // last reading, and aiming with it stuttered. Its reports carry their own times, so it gets 60 ms.)
+    uint64_t live_ns = motion_src_id && switch2_owns(motion_src_id) ? 60000000ull : 20000000ull;
+    bool sensor_live = live && mot.has_gyro && mot.last_push_ns && now - mot.last_push_ns < live_ns;
     if (!sensor_live) {
         uint64_t due = mot.last_push_ns && now > mot.last_push_ns ? (now - mot.last_push_ns) / MOTION_TICK_NS : 1;
         if (due > 16) due = 16;
@@ -1058,6 +1078,7 @@ void input_handle_event(const SDL_Event *e) {
     static bool scanned;  // pads present at startup: their ADDED event may have gone to the start screen's loop
     if (!scanned) {
         scanned = true;
+        switch2_start();  // Switch 2 controllers over Bluetooth (settings.ini `switch2`): virtual gamepads, from their own thread
         int n = 0;
         SDL_JoystickID *ids = SDL_GetGamepads(&n);
         for (int i = 0; i < n; i++) {
@@ -1282,12 +1303,16 @@ static void host_test_frame(uint64_t frame) {
     static const char *hspec, *bspec;
     static int init;
     if (!init) { init = 1; hspec = getenv("ODYSSEY_HOST_INPUT"); bspec = getenv("ODYSSEY_BIND_TEST"); host_test = hspec; }
-    char buf[2048];
+    static char *buf;  // (the whole list: a 2 KB copy dropped every entry after about the hundredth)
+    static size_t cap;
     if (hspec) {
         uint8_t keys[BIND_KEY_CODE_COUNT] = {0};
         uint32_t padm = 0;
         int32_t sx = 0, sy = 0;
-        snprintf(buf, sizeof buf, "%s", hspec);
+        size_t need = strlen(hspec) + 1;
+        if (need > cap) { free(buf); buf = malloc(need); cap = buf ? need : 0; }
+        if (!buf) return;
+        memcpy(buf, hspec, need);
         char *save = NULL;
         for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             unsigned long start = 0, len = 10;
@@ -1327,9 +1352,10 @@ static void host_test_frame(uint64_t frame) {
         if (pch) recompute_pad();
     }
     if (bspec) {
-        snprintf(buf, sizeof buf, "%s", bspec);
+        char bbuf[2048];
+        snprintf(bbuf, sizeof bbuf, "%s", bspec);
         char *save = NULL;
-        for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        for (char *tok = strtok_r(bbuf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             unsigned long start = 0;
             char dev[8] = "", in[16] = "", host[40] = "";
             if (sscanf(tok, "%lu:%7[a-z]:%15[a-z_]:%39[^:]", &start, dev, in, host) < 3) continue;
@@ -1605,6 +1631,16 @@ static void fill_state(Cpu *c) {
         static uint64_t spin_at;  // (the update it started at, + 1)
         uint64_t tick = odyssey_stage_ticks();
         bool spin_press = atomic_exchange(&spin_pad_pressed, false) | atomic_exchange(&spin_key_pressed, false);
+        // (#154: turning the left stick moved and turned Mario - he drifted right - and the throw pressed near its end
+        // could come out as a plain throw before the spin. A shake with Cappy on Mario's head is the game's own spin
+        // throw, as the controller's motion gives it: the press shakes for 250 ms instead, the stick untouched.
+        // ODYSSEY_SPIN_STICK=1: the stick's two circles and the throw, as before.)
+        static int spin_stick = -1;
+        if (spin_stick < 0) spin_stick = getenv("ODYSSEY_SPIN_STICK") && atoi(getenv("ODYSSEY_SPIN_STICK"));
+        if (spin_press && !menu && !spin_stick) {
+            atomic_store(&shake_inject_until_ns, plat_now_ns() + 250000000ull);
+            spin_press = false;
+        }
         if (spin_press && !menu && (!spin_at || tick + 1 - spin_at > 24)) spin_at = tick + 1;
         uint64_t dt = spin_at ? tick + 1 - spin_at : UINT64_MAX;
         if (dt < 18 && !menu) {  // two full turns, 45 degrees an update, then two updates more
@@ -1736,8 +1772,13 @@ HLE_FUNC("_ZN2nn3hid27BindNpadStyleSetUpdateEventERKjPNS_2os15SystemEventTypeENS
 // through the hid service (services/hid_set.c: SendVibrationValue(s)) to here: onto the gamepad's two motors, the
 // stronger side per band (low band: the low-frequency motor). Sent again while it lasts, so a value runs 250 ms at most:
 // a game that stops sending stops the rumble. Controls tab "Vibration" (`vibration` in settings.ini).
-void input_vibration(uint32_t handle, float amp_low, float amp_high) {
+// A Switch 2 controller over Bluetooth (runtime/switch2.c, settings.ini `switch2`) takes the value itself instead: both
+// bands' amplitude and frequency for each side, every value as the game sets it, played on its actuators at their 5 ms
+// sample rate - the HD rumble as on the console. value: the VibrationValue (low amplitude, low frequency, high
+// amplitude, high frequency).
+void input_vibration(uint32_t handle, const float value[4]) {
     static float lo[2][2], hi[2][2];
+    static float hd[2][2][4] = {{{0, 160, 0, 320}, {0, 160, 0, 320}}, {{0, 160, 0, 320}, {0, 160, 0, 320}}};
     static uint16_t last_l[2], last_h[2];
     static uint64_t last_ns[2];
     static int log = -1;  // ODYSSEY_LOG_RUMBLE=1: each change sent to the gamepad
@@ -1745,7 +1786,25 @@ void input_vibration(uint32_t handle, float amp_low, float amp_high) {
     int side = handle & 1;
     unsigned player = (handle >> 8) & 0xff;
     if (player > 1) return;
+    float amp_low = value[0], amp_high = value[2];
     lo[player][side] = isfinite(amp_low) ? amp_low : 0, hi[player][side] = isfinite(amp_high) ? amp_high : 0;
+    {   // (a Switch 2 controller over Bluetooth: the game's own values, both sides, as they come)
+        uint32_t id = player == 1 ? input_cappy_id() : input_primary_id();
+        if (id && switch2_owns(id)) {
+            float *o = hd[player][side];
+            float strength = g_settings.rumble_strength > 0 && g_settings.rumble_strength <= 100 ? g_settings.rumble_strength / 100.0f : 1.0f;
+            if (!g_settings.rumble) strength = 0;
+            for (int b = 0; b < 2; b++) {
+                float a = value[2 * b], f = value[2 * b + 1];
+                o[2 * b] = isfinite(a) ? fminf(fmaxf(a, 0), 1) * strength : 0;
+                o[2 * b + 1] = isfinite(f) && f > 0 ? f : b ? 320 : 160;  // (the bands' neutral frequencies)
+            }
+            if (log) LOG("[input] rumble player %u side %d: %.2f @ %.0f Hz, %.2f @ %.0f Hz (Switch 2 controller)\n", player + 1,
+                         side, o[0], o[1], o[2], o[3]);
+            switch2_rumble_hd(id, (const float (*)[4])hd[player]);
+            return;
+        }
+    }
     float l = fmaxf(lo[player][0], lo[player][1]), h = fmaxf(hi[player][0], hi[player][1]);
     if (!g_settings.rumble) l = h = 0;
     // (the Joy-Cons' actuators are strong: the game's amplitudes are mostly 0.02-0.2, which an Xbox-style gamepad's

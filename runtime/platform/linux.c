@@ -142,6 +142,7 @@ void plat_thread_realtime(uint64_t period_ns) {
 // (runtime/paths.h; rt_paths_init runs later, so the same rule is applied here). Processes started by this one (the
 // re-exec for a fresh address layout) append to the same log.
 static char g_log_path[1024];
+static int g_parent_stdout = -1;  // (the stdout this process was given, before it went into the log)
 const char *plat_log_path(void) { return g_log_path; }
 
 static void log_to_file_without_terminal(void) {
@@ -160,8 +161,24 @@ static void log_to_file_without_terminal(void) {
     snprintf(g_log_path, sizeof g_log_path, "%s/SuperOdysseyRecomp.log", dir);
     bool append = getenv("ODYSSEY_LOG_APPEND") != NULL;
     if (!freopen(g_log_path, append ? "a" : "w", stderr)) { g_log_path[0] = 0; return; }
+    fflush(stdout);
+    g_parent_stdout = dup(STDOUT_FILENO);  // (plat_parent_line: RecompLauncher reads the setup step's lines there)
+    if (g_parent_stdout >= 0) fcntl(g_parent_stdout, F_SETFD, FD_CLOEXEC);
     dup2(STDERR_FILENO, STDOUT_FILENO);
     setenv("ODYSSEY_LOG_APPEND", "1", 1);
+}
+
+void plat_parent_line(const char *line) {
+    if (g_parent_stdout < 0) {  // (stdout as given: a terminal, or not moved)
+        printf("%s\n", line);
+        fflush(stdout);
+        return;
+    }
+    fprintf(stderr, "%s\n", line);  // (the log)
+    char buf[1100];
+    int n = snprintf(buf, sizeof buf, "%s\n", line);
+    if (n > (int)sizeof buf - 1) n = (int)sizeof buf - 1;
+    if (n > 0 && write(g_parent_stdout, buf, (size_t)n) < 0) {}
 }
 
 #if defined(__x86_64__)

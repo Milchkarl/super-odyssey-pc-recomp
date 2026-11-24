@@ -55,6 +55,11 @@ typedef struct {
     uint8_t glow_comp;      // (fragment, GLSL) the game's HDR composite (exec.c draw_: scene + glow into the picture
                             // and its luma): its 2D textures read through bloomUp, which the draw's rscale steers per
                             // texture (translate.c). In the padding, as hud_filter.
+    uint8_t glow_chain;     // (fragment, GLSL) a draw into one of the glow chain's targets drawn larger than the game's
+                            // (#102): its 2D textures read through glowTap - the area of one game texel - so the
+                            // game's blur keeps its shape at the larger size (translate.c). In the padding, as above.
+    uint8_t soft_shadow;    // (fragment, GLSL) Shadow edges Soft: each 2D (array) shadow-map compare averaged over a
+                            // small disc (translate.c softShadow). In the padding, as above.
 } ShaderKey;
 
 typedef struct {
@@ -105,6 +110,8 @@ typedef struct {
 // (GLSL compute, Vulkan) the fast copy of a dispatch's storage buffers: its address table and its data
 #define GMAP_BUFFER_INDEX 20
 #define GFAST_BUFFER_INDEX 21
+// (GLSL fragment, Vulkan) the HDR composite's settings: translate.c comp_main, exec.c comp_hdr_params
+#define HDRC_BUFFER_INDEX 22
 #define GMAP_MAX 16  // ranges in the table (GMap { uvec4 gmap[GMAP_MAX + 1]; }: [i] = addr lo, addr hi, size, word offset;
                      // [GMAP_MAX].x = count)
 extern uint64_t maxwell_gmem_base, maxwell_gmem_size;

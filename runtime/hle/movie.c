@@ -20,6 +20,7 @@
 
 #include "../hle.h"
 #include "../settings.h"
+#include "movie_blank.h"
 
 #define MOVIE_EOS 4u
 
@@ -204,7 +205,49 @@ typedef struct {
     AVPacket *pkt;
     bool have_pkt, eof;
     bool skippable;  // the launch opening (forced on the first launch, no save yet): A / B / + ends it
+    AVIOContext *blank_io;  // reading k_blank_movie (a video missing from the install), else NULL
+    int64_t blank_pos;
 } Extractor;
+
+// k_blank_movie read from memory, for a video the install lacks
+static int blank_read(void *o, uint8_t *buf, int n) {
+    Extractor *e = o;
+    int64_t left = (int64_t)sizeof k_blank_movie - e->blank_pos;
+    if (left <= 0) return AVERROR_EOF;
+    if (n > left) n = (int)left;
+    memcpy(buf, k_blank_movie + e->blank_pos, n);
+    e->blank_pos += n;
+    return n;
+}
+static int64_t blank_seek(void *o, int64_t off, int whence) {
+    Extractor *e = o;
+    if (whence & AVSEEK_SIZE) return sizeof k_blank_movie;
+    whence &= ~AVSEEK_FORCE;
+    int64_t to = whence == SEEK_SET ? off : whence == SEEK_CUR ? e->blank_pos + off
+               : whence == SEEK_END ? (int64_t)sizeof k_blank_movie + off : -1;
+    if (to < 0 || to > (int64_t)sizeof k_blank_movie) return -1;
+    return e->blank_pos = to;
+}
+static void ex_close(Extractor *e) {
+    if (e->fmt) avformat_close_input(&e->fmt);
+    if (e->blank_io) { av_freep(&e->blank_io->buffer); avio_context_free(&e->blank_io); }
+}
+static bool ex_open_blank(Extractor *e) {
+    ex_close(e);
+    uint8_t *buf = av_malloc(4096);
+    e->blank_pos = 0;
+    e->blank_io = buf ? avio_alloc_context(buf, 4096, 0, e, blank_read, NULL, blank_seek) : NULL;
+    if (!e->blank_io) { av_free(buf); return false; }
+    e->fmt = avformat_alloc_context();
+    if (!e->fmt) { ex_close(e); return false; }
+    e->fmt->pb = e->blank_io;
+    e->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    if (avformat_open_input(&e->fmt, NULL, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
+        ex_close(e);
+        return false;
+    }
+    return true;
+}
 
 static bool g_skip_held;           // ex_fill: A / B held at the last look
 static double g_skip_pressed_at;    // when they were pressed (0 = not yet)
@@ -253,10 +296,19 @@ static void ex_set_data_source(Cpu *c) {
     char host[1024];
     snprintf(host, sizeof host, "%s/%s", g_romfs_dir, rel ? rel : "");
     LOG("[movie] open %s -> %s\n", path ? path : "(null)", host);
-    if (avformat_open_input(&e->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
-        LOG("[movie] cannot open %s\n", host);
-        c->x[0] = 1;
-        return;
+    // ODYSSEY_MOVIE_MISSING=<part of a name> (tests): that video acts as missing from the install (#124)
+    const char *miss = getenv("ODYSSEY_MOVIE_MISSING");
+    bool fake_missing = miss && *miss && rel && strstr(rel, miss);
+    if (fake_missing || avformat_open_input(&e->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
+        // (the game's player crashes on a video it can't open, #124: a second of black instead)
+        static int warned;
+        if (!ex_open_blank(e)) {
+            LOG("[movie] cannot open %s\n", host);
+            c->x[0] = 1;
+            return;
+        }
+        LOG("[movie] cannot open %s: black instead%s\n", host,
+            warned++ ? "" : " (this install has none of the game's videos: delete the extracted folder and start again with your game files)");
     }
     e->pkt = av_packet_alloc();
     e->ntracks = 0;
@@ -381,7 +433,7 @@ static void movie_track(int kind, void *p, bool add) {
 
 static void ex_dtor(Cpu *c) {
     Extractor *e = self_state(c);
-    if (e && e->fmt) avformat_close_input(&e->fmt);
+    if (e) ex_close(e);
     if (e) movie_track(0, e, false);
     c->x[0] = 0;
 }
@@ -820,7 +872,7 @@ static uint64_t g_ex_vt2, g_dec_vt2;  // (Odyssey's library version, below)
 RT_ON_RESET(movie_reset) {
     for (int i = 0; i < MAX_MOVIE_OBJS; i++) {
         Extractor *e = g_movie_objs[0][i];
-        if (e && e->fmt) avformat_close_input(&e->fmt);
+        if (e) ex_close(e);
         Decoder *d = g_movie_objs[1][i];
         if (d && d->ctx) avcodec_free_context(&d->ctx);
         g_movie_objs[0][i] = g_movie_objs[1][i] = NULL;

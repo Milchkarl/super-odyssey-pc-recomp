@@ -72,6 +72,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_cb(VkDebugUtilsMessageSeverityFlagBi
     return VK_FALSE;
 }
 
+static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name);
+
 // ODYSSEY_VK_VALIDATION=1: Khronos validation layer (MSYS2 package vulkan-validation-layers)
 static void create_instance(void) {
     Uint32 n_sdl = 0;
@@ -85,6 +87,15 @@ static void create_instance(void) {
 #endif
     bool validate = getenv("ODYSSEY_VK_VALIDATION") != NULL;
     if (validate) ext[n_ext++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    {   // HDR output (settings hdr): the HDR10 colour space for the window, where the driver has it
+        uint32_t ne = 0;
+        vkEnumerateInstanceExtensionProperties(NULL, &ne, NULL);
+        VkExtensionProperties *ie = calloc(ne ? ne : 1, sizeof *ie);
+        vkEnumerateInstanceExtensionProperties(NULL, &ne, ie);
+        if (has_ext(ie, ne, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) && n_ext < SDL_arraysize(ext) - 1)
+            ext[n_ext++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, g_vk.colorspace_ext = true;
+        free(ie);
+    }
     const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "SuperOdysseyRecomp",
                              .pEngineName = "SuperOdysseyRecomp", .apiVersion = VK_API_VERSION_1_3};
@@ -132,7 +143,25 @@ static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name) {
 static void *vk_dlss_probe_thread(void *arg) { (void)arg; vk_dlss_probe_run(); return NULL; }
 #endif
 
-// Discrete GPU first (ODYSSEY_GPU=<index> picks one), needs Vulkan 1.3 and a queue that can present.
+// Which graphics card: the menu's choice by its name (settings gpu), else discrete first, then integrated;
+// ODYSSEY_GPU=<index> overrides both. Vulkan 1.3 only. Also used for the shader preparation's identity (prep_identity).
+static int gpu_score(uint32_t i, const VkPhysicalDeviceProperties *p) {
+    if (p->apiVersion < VK_API_VERSION_1_3) return -1;
+    const char *env = getenv("ODYSSEY_GPU");
+    if (env && *env) { if (atoi(env) == (int)i) return 100; }
+    else if (g_settings.gpu[0] && !strcmp(g_settings.gpu, p->deviceName)) return 100;
+    return p->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+}
+// (the menu's Graphics card list: the Vulkan 1.3 cards found at start, by name)
+static char g_gpu_names[8][VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+static int g_gpu_count;
+int vk_gpu_list(const char *names[8]) {
+    for (int i = 0; i < g_gpu_count; i++) names[i] = g_gpu_names[i];
+    return g_gpu_count;
+}
+const char *vk_gpu_in_use(void) { return g_vk.props.deviceName; }
+
+// Discrete GPU first (or the one chosen: gpu_score), needs Vulkan 1.3 and a queue that can present.
 static void pick_device(void) {
     uint32_t n = 0;
     PFN_vkEnumeratePhysicalDevices enumerate = vkEnumeratePhysicalDevices;
@@ -146,18 +175,23 @@ static void pick_device(void) {
     if (!n) FATAL("no Vulkan device\n");
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     enumerate(g_vk.inst, &n, pd);
-    int want = getenv("ODYSSEY_GPU") ? atoi(getenv("ODYSSEY_GPU")) : -1, best = -1, best_score = -1;
+    int best = -1, best_score = -1;
+    g_gpu_count = 0;
     for (uint32_t i = 0; i < n; i++) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(pd[i], &p);
         LOG("[vk] gpu %u: %s (api %u.%u.%u)\n", i, p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
             VK_API_VERSION_MINOR(p.apiVersion), VK_API_VERSION_PATCH(p.apiVersion));
-        if (p.apiVersion < VK_API_VERSION_1_3) continue;
-        int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
-        if ((int)i == want) score = 100;
+        int score = gpu_score(i, &p);
+        if (score < 0) continue;
+        bool listed = false;  // (one entry per name: a card can be listed twice, e.g. by two Vulkan drivers)
+        for (int k = 0; k < g_gpu_count; k++) listed |= !strcmp(g_gpu_names[k], p.deviceName);
+        if (!listed && g_gpu_count < 8) snprintf(g_gpu_names[g_gpu_count++], sizeof g_gpu_names[0], "%s", p.deviceName);
         if (score > best_score) { best_score = score; best = (int)i; }
     }
     if (best < 0) FATAL("no Vulkan 1.3 device\n");
+    if (g_settings.gpu[0] && best_score < 100)
+        LOG("[vk] the chosen graphics card \"%s\" isn't there: picked automatically\n", g_settings.gpu);
     g_vk.phys = pd[best];
     free(pd);
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
@@ -446,13 +480,14 @@ static void create_device(void) {
     b->depthClamp = h->depthClamp;
     g_vk.features_depth_clamp = h->depthClamp;
 #ifdef _WIN32
-    // Intel's legacy Windows driver (UHD 620 etc., 31.0.101.2xxx, Vulkan 1.3.215) offers depth clamp but crashes in
-    // igvk64.dll (exception at 0x298) the first time a pipeline uses it - the game's sun shadow map, at the first
-    // gameplay frame (#122). Left off there: the shadow map clips casters past its range instead, as before 0.3.1.
+    // Intel's Windows drivers offer depth clamp but crash in igvk64.dll (+0x5cfab2, exception at 0x298) the first
+    // time a pipeline uses it - the game's sun shadow map, at the first gameplay frame: the legacy driver (UHD 620,
+    // Vulkan 1.3.215: #122) and the current one too (0.9.0 had it off on the legacy one only: #148, same address).
+    // Left off on every Intel Windows driver: the shadow map clips casters past its range instead, as before 0.3.1.
     // ODYSSEY_DEPTH_CLAMP=1 / =0 still forces it on / off (exec.c).
-    if (g_vk.props.vendorID == 0x8086 && g_vk.props.apiVersion < VK_MAKE_API_VERSION(0, 1, 3, 250) && !getenv("ODYSSEY_DEPTH_CLAMP")) {
+    if (g_vk.props.vendorID == 0x8086 && !getenv("ODYSSEY_DEPTH_CLAMP")) {
         g_vk.features_depth_clamp = false;
-        LOG("[vk] depth clamp: off on this Intel driver (Vulkan %u.%u.%u; its legacy driver crashes with it)\n",
+        LOG("[vk] depth clamp: off on this Intel driver (Vulkan %u.%u.%u; Intel's Windows drivers crash with it)\n",
             VK_API_VERSION_MAJOR(g_vk.props.apiVersion), VK_API_VERSION_MINOR(g_vk.props.apiVersion), VK_API_VERSION_PATCH(g_vk.props.apiVersion));
     }
 #endif
@@ -819,6 +854,10 @@ static VkPresentModeKHR present_mode(void) {
     return got;
 }
 
+// (the menu's HDR row: whether this display offers HDR10, and whether the window is)
+static bool g_hdr10_offered;
+int vk_hdr_state(void) { return g_vk.sc_hdr ? 2 : g_hdr10_offered ? 1 : 0; }
+
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
@@ -835,6 +874,32 @@ static void create_swapchain(void) {
     VkSurfaceFormatKHR sf = fmts[0];
     for (uint32_t i = 0; i < nf; i++)
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
+    g_vk.ui_format = sf.format;  // (the menu's: SDR)
+    {   // HDR output (settings hdr): a 10-bit HDR10 window (PQ, BT.2020), where the display offers one; else SDR as above
+        static uint64_t logged;
+        uint64_t sig = nf;
+        for (uint32_t i = 0; i < nf; i++) sig = sig * 31 + (uint64_t)fmts[i].format * 7 + fmts[i].colorSpace;
+        if (sig != logged) {
+            logged = sig;
+            char list[1024] = "";
+            for (uint32_t i = 0; i < nf; i++) {
+                size_t l = strlen(list);
+                snprintf(list + l, sizeof list - l, "%s%d/%d", i ? " " : "", (int)fmts[i].format, (int)fmts[i].colorSpace);
+            }
+            LOG("[hdr] window formats (format/colour space): %s\n", list);
+        }
+        bool want = g_settings.hdr && g_vk.colorspace_ext && !g_vk.headless;
+        bool got = false;
+        g_hdr10_offered = false;
+        for (uint32_t i = 0; i < nf; i++) g_hdr10_offered |= fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
+        for (uint32_t i = 0; want && i < nf; i++)
+            if ((fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
+                fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) { sf = fmts[i]; got = true; break; }
+        if (got != g_vk.sc_hdr || (want && !got))
+            LOG("[hdr] output %s\n", got ? "HDR10 (PQ, BT.2020)" : want ? "SDR: this display offers no HDR10 (turn HDR on in the "
+                                                                          "system's display settings)" : "SDR");
+        g_vk.sc_hdr = got;
+    }
     uint32_t count = caps.minImageCount + 1;
     if (getenv("ODYSSEY_VK_IMAGES") && atoi(getenv("ODYSSEY_VK_IMAGES")) > 0) count = (uint32_t)atoi(getenv("ODYSSEY_VK_IMAGES"));  // (tests)
     if (count < caps.minImageCount) count = caps.minImageCount;
@@ -962,6 +1027,7 @@ void vk_request_swapchain_remake(void) { g_need_recreate = true; }  // (the menu
 // Composing a window image ahead (frame interpolation, compose below): vk_present_draw renders into it as into the
 // window's (its post passes suspend and resume that rendering: vk_frame_suspend / vk_frame_resume)
 static struct { bool on; VkImageView view; VkExtent2D ext; } comp;
+extern int g_present_out;  // (exec.c present_colour: 0 SDR, 1 HDR10, 2 as it is)
 
 // Acquire the next window image and begin rendering into it (cleared to `clear`). Returns false when there is
 // nothing to draw into (minimised window).
@@ -1051,6 +1117,67 @@ static void save_window_image(VkCommandBuffer cb, VkSpan *out) {
     image_barrier(cb, g_vk.sc_images[cur_frame.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 }
 
+// A window image read back for a shot (4 bytes a pixel) into RGBA bytes. An HDR10 window (10-bit PQ, BT.2020) is
+// decoded to nits and shown as SDR at UI brightness (what is brighter clips white), and its highlights are logged:
+// the brightest pixel's nits and the share of the picture above the game's white - the tests' view of HDR.
+static void shot_to_rgba(uint8_t *px, uint32_t w, uint32_t h, const char *path) {
+    uint64_t n = (uint64_t)w * h;
+    if (!g_vk.sc_hdr) {
+        bool bgr = g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB;
+        for (uint64_t i = 0; i < n; i++) {
+            if (bgr) { uint8_t t = px[i * 4]; px[i * 4] = px[i * 4 + 2]; px[i * 4 + 2] = t; }
+            px[i * 4 + 3] = 255;
+        }
+        return;
+    }
+    static float lut[1024];  // (PQ code -> nits)
+    if (!lut[1023]) {
+        for (int c = 0; c < 1024; c++) {
+            double e = pow(c / 1023.0, 1.0 / 78.84375), y = fmax(e - 0.8359375, 0) / (18.8515625 - 18.6875 * e);
+            lut[c] = (float)(10000.0 * pow(y, 1.0 / 0.1593017578125));
+        }
+    }
+    bool argb = g_vk.sc_format == VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+    float ui = (float)g_settings.hdr_ui_white, game = (float)g_settings.hdr_game_white, top = 0;
+    uint64_t above = 0;
+    // (a heat map beside it, <shot>.nits.png: grey below the game's white, then yellow -> red up to the peak)
+    uint8_t *map = path ? malloc(n * 4) : NULL;
+    float peak = (float)g_settings.hdr_peak;
+    for (uint64_t i = 0; i < n; i++) {
+        uint32_t v;
+        memcpy(&v, px + i * 4, 4);
+        float r = lut[(v >> (argb ? 20 : 0)) & 1023], g = lut[(v >> 10) & 1023], b = lut[(v >> (argb ? 0 : 20)) & 1023];
+        float c[3] = {1.6604910f * r - 0.5876411f * g - 0.0728499f * b,  // (BT.2020 -> BT.709)
+                      -0.1245505f * r + 1.1328999f * g - 0.0083494f * b,
+                      -0.0181508f * r - 0.1005789f * g + 1.1187297f * b};
+        float y = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+        if (y > top) top = y;
+        if (y > game * 1.05f) above++;
+        if (map) {
+            float f = y <= game ? 0 : fminf((y - game) / fmaxf(peak - game, 1), 1);
+            uint8_t gr = (uint8_t)lrintf(fminf(y / game, 1) * 160);
+            map[i * 4 + 0] = f > 0 ? 255 : gr;
+            map[i * 4 + 1] = f > 0 ? (uint8_t)lrintf(255 * (1 - f)) : gr;
+            map[i * 4 + 2] = f > 0 ? 0 : gr;
+            map[i * 4 + 3] = 255;
+        }
+        for (int k = 0; k < 3; k++) {
+            float l = fminf(fmaxf(c[k] / ui, 0), 1);
+            float e = l <= 0.0031308f ? l * 12.92f : 1.055f * powf(l, 1 / 2.4f) - 0.055f;
+            px[i * 4 + k] = (uint8_t)lrintf(e * 255);
+        }
+        px[i * 4 + 3] = 255;
+    }
+    LOG("[hdr] shot: brightest %.0f nits, %.2f%% of the picture above the game's white (%.0f nits)\n", top,
+        n ? 100.0 * above / n : 0, game);
+    if (map) {
+        char mp[1100];
+        snprintf(mp, sizeof mp, "%s.nits.png", path);
+        vk_save_png(mp, map, w, h);
+        free(map);
+    }
+}
+
 // End rendering into the window image and present it. shot_path: also save the window image as PNG.
 void vk_frame_end(const char *shot_path) {
     if (!cur_frame.ok) return;
@@ -1082,9 +1209,7 @@ void vk_frame_end(const char *shot_path) {
         vk_wait_seq(seq);
         uint32_t w = g_vk.sc_extent.width, h = g_vk.sc_extent.height;
         uint8_t *px = shot.ptr;
-        bool bgr = g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB;
-        for (uint64_t i = 0; bgr && i < (uint64_t)w * h; i++) { uint8_t t = px[i * 4]; px[i * 4] = px[i * 4 + 2]; px[i * 4 + 2] = t; }
-        for (uint64_t i = 0; i < (uint64_t)w * h; i++) px[i * 4 + 3] = 255;
+        shot_to_rgba(px, w, h, shot_path);
         vk_save_png(shot_path, px, w, h);
     }
     present_unlock();  // (vk_frame_begin's)
@@ -1219,6 +1344,7 @@ static bool compose(TexBackend *w, TexBackend *src, const float v[4], const floa
     vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &sc);
     comp.on = true, comp.view = view, comp.ext = ext;
+    g_present_out = g_vk.sc_hdr ? 1 : 0;
     vk_present_draw(cb, src, v[0], v[1], v[2], v[3], pv);
     comp.on = false;
     cb = vk_cmd();
@@ -1227,15 +1353,60 @@ static bool compose(TexBackend *w, TexBackend *src, const float v[4], const floa
     return true;
 }
 
+// The menu and overlays over the window, inside its rendering (vk_frame_begin's). With HDR output they are drawn into
+// an SDR image of their own first (ImGui's colours are sRGB) and put over the HDR10 window at UI brightness
+// (exec.c vk_ui_hdr_draw); the window's rendering is open again afterwards, as the caller expects.
+extern int g_present_out;  // (exec.c present_colour: 0 SDR, 1 HDR10, 2 as it is)
+extern void vk_ui_hdr_prepare(void);
+extern void vk_ui_hdr_draw(VkCommandBuffer cb, VkImageView ui, uint32_t w, uint32_t h);
+static void overlay_draw(VkCommandBuffer cb) {
+    VkExtent2D e = g_vk.sc_extent;
+    if (!g_vk.sc_hdr) { menu_render((void *)cb, e.width, e.height); return; }
+    static TexBackend ui;
+    vkCmdEndRendering(cb);
+    if (!ui.image || ui.width != e.width || ui.height != e.height || ui.format != g_vk.ui_format) {
+        if (ui.image) { vk_views_forget(&ui); vk_defer_image(ui.image, ui.mem); }
+        VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = g_vk.ui_format,
+                                .extent = {e.width, e.height, 1}, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                                .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+        ui = (TexBackend){.format = g_vk.ui_format, .base_type = VK_IMAGE_VIEW_TYPE_2D, .width = e.width, .height = e.height,
+                          .depth = 1, .layers = 1, .levels = 1, .samples = 1, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .sx = 1, .sy = 1,
+                          .gpu_owned = true, .uploaded = true};
+        VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &ui.image, &ui.mem, NULL));
+        vk_image_init_layout(cb, ui.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+    vk_ui_hdr_prepare();
+    vk_full_barrier(cb);
+    VkImageView view = vk_image_view(&ui, VK_IMAGE_VIEW_TYPE_2D, ui.format, 0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
+    VkRenderingAttachmentInfo ca = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = view,
+                                    .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .clearValue.color.float32 = {0, 0, 0, 0}};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, e}, .layerCount = 1,
+                          .colorAttachmentCount = 1, .pColorAttachments = &ca};
+    vkCmdBeginRendering(cb, &ri);
+    VkViewport vp = {0, 0, (float)e.width, (float)e.height, 0, 1};
+    VkRect2D sc = {{0, 0}, e};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    menu_render((void *)cb, e.width, e.height);
+    vkCmdEndRendering(cb);
+    vk_full_barrier(cb);
+    vk_frame_resume();
+    vk_ui_hdr_draw(cb, view, e.width, e.height);
+}
+
 // (render lock) the usual way: a window image over the whole window, the overlay (the menu) over it
 static bool present_full(TexBackend *w) {
     static const float black[4] = {0, 0, 0, 1}, pv[8] = {0, 0, 0, 0, 0, 0, 1, 1};  // (composed: no flip, no crop)
     vk_end_pass();
     if (!vk_frame_begin(black)) return false;
     VkCommandBuffer cb = vk_cmd();
+    g_present_out = 2;  // (a composed window image: already in the window's form)
     vk_present_draw(cb, w, 0, 0, (float)g_vk.sc_extent.width, (float)g_vk.sc_extent.height, pv);
+    g_present_out = g_vk.sc_hdr ? 1 : 0;
     vk_queue_lock();  // (ImGui's first frame uploads its fonts through the queue)
-    menu_render((void *)cb, g_vk.sc_extent.width, g_vk.sc_extent.height);
+    overlay_draw(cb);
     vk_queue_unlock();
     vk_frame_end(NULL);
     return true;
@@ -1251,6 +1422,7 @@ static VkSemaphore fast_acq[FAST_N];
 static int fast_i;
 static bool present_fast(TexBackend *w) {
     if (!menu_overlay_lockfree() || g_need_recreate || !g_vk.swapchain) return false;
+    if (g_vk.sc_hdr && menu_stats_visible()) return false;  // (HDR: the overlay needs its own pass - the usual way)
     int ww, wh;
     SDL_GetWindowSizeInPixels(window, &ww, &wh);
     VkExtent2D e = g_vk.sc_extent;
@@ -1370,11 +1542,7 @@ static bool present_fast(TexBackend *w) {
     if (sbuf) {
         vkWaitForFences(g_vk.dev, 1, &fast_fence[k], VK_TRUE, UINT64_MAX);
         uint8_t *px = sinfo.pMappedData;
-        bool bgr = g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB;
-        for (uint64_t i = 0; i < (uint64_t)e.width * e.height; i++) {
-            if (bgr) { uint8_t t = px[i * 4]; px[i * 4] = px[i * 4 + 2]; px[i * 4 + 2] = t; }
-            px[i * 4 + 3] = 255;
-        }
+        shot_to_rgba(px, e.width, e.height, NULL);
         char path[1024];
         if (req[0]) snprintf(path, sizeof path, "%s", req);
         else if (ws_n > 1) snprintf(path, sizeof path, "build/window_%02d.png", ws_i);
@@ -1898,7 +2066,17 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     if (have) {
         VkCommandBuffer cb = vk_cmd();
         vk_checkpoint(cb, "present draw %p %ux%u -> window %.0fx%.0f", (void *)b->image, b->width, b->height, v[2], v[3]);
-        vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+        g_present_out = g_vk.sc_hdr ? 1 : 0;
+        {   // (the settings menu open: it covers the whole window but its live picture, drawn below from the same
+            // finished picture - the picture's draw across the window would only be painted over; skipped, its
+            // post-processing still made for the live picture. owner 2026-11-23)
+            extern bool menu_live_picture_px(float r[4]);
+            extern bool g_present_hidden;
+            float lp[4];
+            g_present_hidden = menu_live_picture_px(lp) && lp[2] > lp[0] + 4 && lp[3] > lp[1] + 4;
+            vk_present_draw(cb, b, v[0], v[1], v[2], v[3], pv);
+            g_present_hidden = false;
+        }
         g_picture_aspect = v[3] > 0 ? v[2] / v[3] : 0;
         {   // the settings menu's live picture (branch menu-odyssey-look): the game's picture - as placed in the window,
             // without the window's bars - smaller, filling the rectangle the menu leaves open in its shape (16:9, or
@@ -1920,7 +2098,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
         }
         vk_checkpoint(cb, "menu overlay");
         vk_queue_lock();  // (ImGui's first frame uploads its fonts through the queue)
-        menu_render((void *)cb, g_vk.sc_extent.width, g_vk.sc_extent.height);
+        overlay_draw(cb);
         vk_queue_unlock();
         static long win_shot = -1, shot_count = 1, shot_index;
         if (win_shot < 0) {
@@ -2277,13 +2455,12 @@ static void prep_identity(char out[128]) {
                 VkPhysicalDevice pd[16];
                 if (n > 16) n = 16;
                 vkEnumeratePhysicalDevices(inst, &n, pd);
-                int want = getenv("ODYSSEY_GPU") ? atoi(getenv("ODYSSEY_GPU")) : -1, best_score = -1;
+                int best_score = -1;
                 for (uint32_t i = 0; i < n; i++) {
                     VkPhysicalDeviceProperties p;
                     vkGetPhysicalDeviceProperties(pd[i], &p);
-                    if (p.apiVersion < VK_API_VERSION_1_3) continue;
-                    int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
-                    if ((int)i == want) score = 100;
+                    int score = gpu_score(i, &p);
+                    if (score < 0) continue;
                     if (score > best_score) best_score = score, best = p;
                 }
                 vkDestroyInstance(inst, NULL);

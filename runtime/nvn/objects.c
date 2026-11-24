@@ -331,6 +331,26 @@ static bool fog_f16_map_reader(uint64_t lr) {
     return main && !memcmp(main->build_id, v100, sizeof v100);
 }
 
+// al::DepthShadowMapDirector::findIsInShade reads its R16F shade map (a linear texture the GPU draws) with its own
+// halfword load, right after nvnMemoryPoolMap: is a point in a shadow. Its memory was never written by the GPU here, so
+// every point read as shaded - on the Moon (TemperatureArea -4: cold in the shade only, PlayerStateWait) Mario shivered
+// in full sunlight (#124). Its texel comes from the GPU copy like the fog map's. The registers at that call: x, y, the
+// row's elements, the texture's offset in the pool. 0: not that reader.
+static int shade_map_reader(uint64_t lr, uint32_t *x, uint32_t *y, uint32_t *row, uint32_t *off, const Cpu *c) {
+    static const uint8_t v100[8] = {0x3c, 0xa1, 0x2d, 0xfa, 0xaf, 0x9c, 0x82, 0xda};
+    if (lr == 0x7000a19be4ull) {  // 1.0.0: madd w9, w23 (y), w27 (row), w28 (x); offset w21
+        const Module *main = loader_module("main");
+        if (!main || memcmp(main->build_id, v100, sizeof v100)) return 0;
+        *x = (uint32_t)c->x[28], *y = (uint32_t)c->x[23], *row = (uint32_t)c->x[27], *off = (uint32_t)c->x[21];
+        return 1;
+    }
+    if (lr == 0x7000799298ull && loader_main_is_v141()) {  // 1.4.1: madd w9, w26 (row), w28 (y), w27 (x); offset w21
+        *x = (uint32_t)c->x[27], *y = (uint32_t)c->x[28], *row = (uint32_t)c->x[26], *off = (uint32_t)c->x[21];
+        return 1;
+    }
+    return 0;
+}
+
 // ODYSSEY_PAINT_PRIO=0: paint map asks and CPU-edit hand-backs wait behind everything queued, as before (rqueue.c rq_ask)
 static bool paint_prio_on(void) {
     static int on = -1;
@@ -530,11 +550,14 @@ NVN(nvnMemoryPoolMap) {
     static int feedback = -1;
     // On by default (the reactive Cap Kingdom fog needs it); ODYSSEY_FOG_CPU_READBACK=0 switches it off.
     if (feedback < 0) { const char *e = getenv("ODYSSEY_FOG_CPU_READBACK"); feedback = !e || atoi(e) != 0; }
-    if ((trace || feedback) && fog_f16_map_reader(c->x[30])) {
-        uint32_t nc = c->x[19], comp = c->x[20], y = c->x[21], x = c->x[22];
-        uint64_t off = (uint32_t)c->x[23];
+    uint32_t sx = 0, sy = 0, srow = 0, soff = 0;
+    bool shade = feedback && shade_map_reader(c->x[30], &sx, &sy, &srow, &soff, c);
+    if ((trace || feedback) && (shade || fog_f16_map_reader(c->x[30]))) {
+        uint32_t nc = shade ? 1 : c->x[19], comp = shade ? 0 : c->x[20], y = shade ? sy : c->x[21], x = shade ? sx : c->x[22];
+        uint64_t off = shade ? soff : (uint32_t)c->x[23];
+        uint32_t row = shade ? srow : (uint32_t)c->x[24];
         // Match the reader's 32-bit madd/mul before its signed halfword indexing.
-        int64_t index = (int32_t)(((uint32_t)c->x[24] * y + x) * nc);
+        int64_t index = (int32_t)((row * y + x) * nc);
         int64_t byte = (int64_t)off + index * 2 + (int32_t)comp * 2;
         uint16_t value = 0;
         bool valid = byte >= 0 && (uint64_t)byte < p->size && p->size - (uint64_t)byte >= 2;
@@ -548,7 +571,9 @@ NVN(nvnMemoryPoolMap) {
         extern bool renderer_fog_texel_cached(uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint16_t *);
         // (no finished copy yet - a map's first frames: the request below without waiting for it, and the guest's own
         // memory read meanwhile; waiting for the render thread and the GPU there was a ~50 ms stage-entry hitch)
-        if (feedback && valid && !fog_sync && rq_enabled() && !rq_on_thread()) {
+        // (the shade map is asked about rarely - when Mario's idle starts - so the first, and often only, ask found no
+        // finished copy and got the game's own never-written memory: always "shaded". It waits for the copy instead.)
+        if (feedback && valid && !fog_sync && !shade && rq_enabled() && !rq_on_thread()) {
             if (renderer_fog_texel_cached(p->storage + off, x, y, comp, nc, &cached))
                 memcpy((void *)(uintptr_t)(p->storage + byte), &cached, 2);
             static struct { RqCpuTexel q; uint64_t ticket, frame; } kick[4];  // (one per map: Cap Kingdom reads two)
@@ -563,6 +588,31 @@ NVN(nvnMemoryPoolMap) {
                 kick[k].ticket = rq_push(RQ_CPU_TEXEL, &kick[k].q, 0);
                 kick[k].frame = now;
             }
+        } else if (feedback && valid && shade) {
+            // The shade map: the newest published copy, and a fresh copy asked for in the background. With none yet (the
+            // stage's first ask) the asks repeat until the copy lands - the first ask only issues it; at most ~50 ms,
+            // once a stage.
+            uint64_t at = p->storage + off;
+            bool got = renderer_fog_texel_cached(at, x, y, comp, nc, &cached);
+            int tries = 0;
+            for (; !got && tries < 50; tries++) {
+                RqCpuTexel q = {.addr = at, .x = x, .y = y, .component = comp, .components = nc};
+                if (rq_enabled() && !rq_on_thread()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
+                else { extern void renderer_cpu_texel(RqCpuTexel *); renderer_cpu_texel(&q); }
+                if (q.valid) cached = (uint16_t)q.value, got = true;
+                else plat_sleep_until_ns(plat_now_ns() + 1000000);
+            }
+            if (got) memcpy((void *)(uintptr_t)(p->storage + byte), &cached, 2);
+            static RqCpuTexel kq;
+            static uint64_t kt;
+            if (got && !tries && rq_enabled() && !rq_on_thread() && (!kt || rq_is_done(kt))) {
+                kq = (RqCpuTexel){.addr = at, .x = x, .y = y, .component = comp, .components = nc};
+                kt = rq_push(RQ_CPU_TEXEL, &kq, 0);
+            }
+            if (trace) {
+                static int nq;
+                if (nq++ < 10) LOG("[shade-map] from the GPU copy: %d after %d waits, half %04x\n", got, tries, cached);
+            }
         } else if (feedback && valid) {
             RqCpuTexel q = {.addr = p->storage + off, .x = x, .y = y, .component = comp, .components = nc};
             if (rq_enabled() && !rq_on_thread()) rq_wait(rq_push(RQ_CPU_TEXEL, &q, 0));
@@ -572,6 +622,16 @@ NVN(nvnMemoryPoolMap) {
 #endif
         if (valid) memcpy(&value, (void *)(uintptr_t)(p->storage + byte), 2);
         ++count;
+        if (shade && trace) {
+            static int ns;
+            if (ns < 3) {
+                extern void nvn_log_overlapping_textures(const NvnTexture *, uint64_t, uint64_t);
+                nvn_log_overlapping_textures(NULL, p->storage + off, (uint64_t)row * 2 * (y + 1));
+            }
+            if (ns++ < 40)
+                LOG("[shade-map] storage %llx offset %llx xy %u %u row %u half %04x valid %d\n", (unsigned long long)p->storage,
+                    (unsigned long long)off, x, y, row, value, valid);
+        }
         if (trace) {  // (what the game was given: half floats that are no number - a map's memory never written by its GPU copy)
             static uint64_t bad, bad_logged;
             if (valid && (value & 0x7c00) == 0x7c00 && ++bad - bad_logged >= 500) {
@@ -583,7 +643,7 @@ NVN(nvnMemoryPoolMap) {
         if (trace && (count <= 64 || !(count % 2000)))
         LOG("[linread-map] #%llu storage %llx size %llx offset %llx xy %u %u nc %u comp %u row-elements %u byte %lld half %04x valid %d\n",
             (unsigned long long)count, (unsigned long long)p->storage, (unsigned long long)p->size,
-            (unsigned long long)off, x, y, nc, comp, (unsigned)c->x[24], (long long)byte, value, valid);
+            (unsigned long long)off, x, y, nc, comp, row, (long long)byte, value, valid);
     }
     RET(p->storage);
 }

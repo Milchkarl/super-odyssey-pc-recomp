@@ -80,6 +80,9 @@ void plat_fatal_notice(void);  // a fatal error is about to end the process: tel
 void plat_error_box(const char *text);  // an error message box that never waits on a hung zenity
 #endif
 const char *plat_log_path(void); // current file log, or "" when output goes to a terminal/pipe
+// A line for the program that started this one, on the stdout it gave (a launcher reading RecompLauncher's "progress"
+// lines), also when stdout was moved into the log file; and in the log.
+void plat_parent_line(const char *line);
 void plat_crash_handler_install(void);  // per thread where the OS needs it (alternate signal stack)
 // Called by the crash handler (runtime/dispatch.c): true = fault handled (watchpoint), resume.
 bool rt_fault_watch(uint64_t fault_addr, uint64_t host_pc);

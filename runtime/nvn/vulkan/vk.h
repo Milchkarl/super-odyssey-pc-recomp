@@ -57,6 +57,9 @@ typedef struct {
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     VkFormat sc_format;
+    VkFormat ui_format;   // the SDR window format (ImGui draws in it; = sc_format unless the window is HDR)
+    bool colorspace_ext;  // VK_EXT_swapchain_colorspace enabled: HDR10 windows can be asked for
+    bool sc_hdr;          // the window is HDR10 (PQ, BT.2020): settings hdr and the display offers it
     VkExtent2D sc_extent;
     uint32_t sc_count;
     VkImage sc_images[8];
@@ -118,7 +121,11 @@ typedef struct TexBackend {
     VkFormat format;
     VkFormat guest_format;  // the format of the game's bytes when the image stores another (textures.c "Banding": half
                             // floats for its RGB10A2 screen targets): uploads and readbacks convert through a blit. 0: format
-    bool debandable;        // one of those targets: half floats while vk_deband()
+    bool debandable;        // one of those targets: half floats while vk_deband() (or the HDR picture: vk_hdr_picture)
+    bool hdr_able;          // the game's window texture, which can take half floats for HDR (textures.c create_image)
+    bool hdr_window;        // ... and has them: the highlights above white reach the window (translate.c rt_kind 4)
+    uint64_t mem_bytes;     // its memory, counted in vk_tex_memory by kind (mem_kind: 0 scaled targets, 1 shadow maps,
+    uint8_t mem_kind;       // 2 the rest: the menu's memory estimates)
     VkImageViewType base_type;
     uint32_t width, height, depth, layers, levels, samples;
     VkImageAspectFlags aspect;
@@ -148,6 +155,9 @@ typedef struct TexBackend {
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 bool vk_deband(void);  // smooth gradients (textures.c "Banding"): the menu's setting, ODYSSEY_DEBAND=0|1 overrides it
+bool vk_hdr_picture(void);  // HDR output: the game's picture kept above white to the window (textures.c)
+VmaMemoryUsage vk_tex_memory_usage(void);  // the game's textures: GPU memory, or the system's (small-heap iGPUs: textures.c)
+void vk_tex_memory(uint64_t out[3]);  // the game's textures' bytes: [0] internal-resolution targets, [1] shadow maps, [2] rest
 VkFormat vk_format(uint32_t nvn_format);
 bool vk_format_alpha_one(uint32_t nvn_format);
 // View of t (optionally through an NVN texture view) for rendering or sampling.

@@ -4,6 +4,7 @@
 #include <float.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -179,10 +180,16 @@ uint64_t renderer_present_count(void);
 
 static bool tex_scalable(const NvnTexture *t) {
     if (t->flags & 0x4) return false;  // NVN_TEXTURE_FLAGS_IMAGE: compute uses the guest's integer texel coordinates.
-    // Odyssey's quarter-resolution R11G11B10F bloom chain uses taps spaced for the guest texel grid.
-    // Enlarging these targets separates the taps around small highlights and produces visible grids.
-    static int bloom_full = -1;  // (experiment) ODYSSEY_BLOOM_SCALE=1: the bloom chain at the internal resolution too
-    if (bloom_full < 0) bloom_full = getenv("ODYSSEY_BLOOM_SCALE") && atoi(getenv("ODYSSEY_BLOOM_SCALE"));
+    // Odyssey's quarter- and eighth-size R11G11B10F glow chain (bloom, glare) has taps spaced for the game's texels:
+    // enlarged on its own, its blur lost its reach and showed grids around small highlights. Bloom quality High
+    // (#102) enlarges it with the picture, and its draws read through glowTap (exec.c glow_chain, translate.c) - each
+    // read the area of one game texel - so the glow keeps its shape, computed per output pixel. Decided as each target
+    // is made (the game makes them at each area load). ODYSSEY_BLOOM_SCALE=0/1 overrides (tests).
+    static int bloom_env = -2;
+    if (bloom_env == -2) bloom_env = getenv("ODYSSEY_BLOOM_SCALE") ? atoi(getenv("ODYSSEY_BLOOM_SCALE")) : -1;
+    // (only when the picture is larger than the game's: smaller - a Steam Deck in Handheld mode, a low internal
+    // resolution - keeps the chain at the game's size, as before)
+    bool bloom_full = (bloom_env >= 0 ? bloom_env != 0 : g_settings.bloom_quality == 1) && g_rs_x > 1.01f && g_rs_y > 1.01f;
     if (!bloom_full && t->format == 0x3f && t->width <= 400 && t->height <= 228) return false;
     return output_scale_texture(t);
 }
@@ -197,12 +204,23 @@ static float shadow_factor(void) {
     int q = env > 0 ? env : g_settings.shadow_quality == 2 ? 4 : g_settings.shadow_quality == 1 ? 2 : 1;
     return q >= 4 ? 4.0f : q >= 2 ? 2.0f : 1.0f;
 }
+// Half-size effects (tests): the game draws some effects into half-size (800x450) targets - Sand's dust and sand clouds
+// over a half-size copy of the depth, the Wooded Kingdom's light shafts' source - and lays them over its picture.
+// ODYSSEY_HALF_FULL=1 draws those at the picture's full size. Tried as a setting for 1.0.0 and left out: in Sand,
+// Wooded, Seaside, Metro, Snow and Cap it made no visible difference (ODYSSEY_LOG_SMALL_TARGETS lists such passes).
+static float half_effects_factor(const NvnTexture *t) {
+    static int env = -2;
+    if (env == -2) env = getenv("ODYSSEY_HALF_FULL") ? atoi(getenv("ODYSSEY_HALF_FULL")) : 0;
+    return env && t && t->width == 800 && t->height == 450 ? 2.0f : 1.0f;
+}
+
 static bool tex_shadow_map(const NvnTexture *t) {
     return (t->target == 1 || t->target == 4) && t->samples <= 1 && !(t->flags & 0x4) && renderer_format_is_depth(t->format) &&
            t->width == t->height && t->width >= 256 && !nvn_flags_linear(t->flags);
 }
+static float half_effects_factor(const NvnTexture *t);
 static float tex_factor(const TexBackend *b, const NvnTexture *t, bool y) {
-    if (!b->shadow) return y ? g_rs_y : g_rs_x;
+    if (!b->shadow) return (y ? g_rs_y : g_rs_x) * half_effects_factor(t);
     float f = shadow_factor();
     while (f > 1 && t->width * f > 8192) f *= 0.5f;
     return f;
@@ -293,6 +311,7 @@ void vk_collect_dead(void) {
 }
 
 static __thread bool t_prefetch;  // (vk_tex_prefetch, below) uploading ahead of a first use
+static void count_image(TexBackend *b);  // (the menu's memory estimates: below)
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->sx = b->scalable ? tex_factor(b, t, false) : 1;
@@ -352,7 +371,19 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         b->debandable = b->scalable && vf == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && type == VK_IMAGE_TYPE_2D && layers == 1 &&
                         levels == 1 && samples == 1 && format_supports(vf, blit) &&
                         format_supports(VK_FORMAT_R16G16B16A16_SFLOAT, need | blit | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        if (b->debandable && vk_deband()) {
+        if (b->debandable && (vk_deband() || vk_hdr_picture())) {
+            b->guest_format = vf;
+            vf = VK_FORMAT_R16G16B16A16_SFLOAT;
+        }
+        // HDR output: the window texture (the game's last copy of its picture, 8-bit sRGB) in half floats too, so the
+        // highlights its HDR composite keeps above white reach the window (translate.c rt_kind 4 writes them sRGB-
+        // encoded and unclamped; present.frag decodes them). Re-made when HDR switches (tex_backend).
+        b->hdr_able = t->window && type == VK_IMAGE_TYPE_2D && layers == 1 && levels == 1 && samples == 1 &&
+                      (vf == VK_FORMAT_R8G8B8A8_UNORM || vf == VK_FORMAT_R8G8B8A8_SRGB || vf == VK_FORMAT_B8G8R8A8_UNORM ||
+                       vf == VK_FORMAT_B8G8R8A8_SRGB) &&
+                      format_supports(VK_FORMAT_R16G16B16A16_SFLOAT, need | blit | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        b->hdr_window = b->hdr_able && vk_hdr_picture();
+        if (b->hdr_window) {
             b->guest_format = vf;
             vf = VK_FORMAT_R16G16B16A16_SFLOAT;
         }
@@ -372,9 +403,17 @@ static void create_image(NvnTexture *t, TexBackend *b) {
                             .extent = {tw, th, depth}, .mipLevels = levels, .arrayLayers = layers,
                             .samples = (VkSampleCountFlagBits)samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    VmaAllocationCreateInfo ai = {.usage = vk_tex_memory_usage()};
     b->shared = !b->scalable && vk_image_share_small(&ci);  // (small: the compute queue's dispatches may read / write it)
     VkResult r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
+    if ((r == VK_ERROR_OUT_OF_DEVICE_MEMORY || r == VK_ERROR_OUT_OF_HOST_MEMORY) && ai.usage != VMA_MEMORY_USAGE_AUTO_PREFER_HOST) {
+        // (the GPU's own memory is full: the system's instead - slower for a dedicated card, the same RAM on integrated
+        // graphics - rather than ending the game; #147)
+        static int nlog;
+        if (nlog++ < 5) LOG("[vk] texture %ux%u: GPU memory full, placed in system memory\n", t->width, t->height);
+        ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        r = vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL);
+    }
     if (getenv("ODYSSEY_LOG_IMAGES"))
         LOG("[img] %p: nvn %p fmt %#x target %u %ux%ux%u (guest %ux%ux%u) layers %u levels %u samples %u flags %#x usage %#x vk fmt %d -> %d nvn flags %#x%s (frame %llu%s%s)\n",
             (void *)b->image, (void *)t, t->format, t->target, tw, th, depth, t->width, t->height, t->depth, layers, levels, samples,
@@ -407,6 +446,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         VK_CHECK(r2);
         depthfmt = false;
     }
+    count_image(b);
     b->storage = (ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
     b->format = vf;
     b->width = tw; b->height = th; b->depth = depth; b->layers = layers; b->levels = levels; b->samples = samples;
@@ -425,6 +465,20 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         VkClearDepthStencilValue zero = {0.0f, 0};
         VkImageSubresourceRange rg = {b->aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
         vkCmdClearDepthStencilImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rg);
+        VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                               .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                               .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+        vkCmdPipelineBarrier2(cb, &di);
+    } else if (b->scalable && t->format == 0x3f && t->width <= 400 && t->height <= 228 && (b->sx > 1.01f || b->sy > 1.01f)) {
+        // The glow chain drawn larger (Bloom quality High) starts black too: enlarged by a scale that isn't a power of
+        // two, its mip levels and the game's per-level blur targets no longer match texel for texel, so a row or
+        // column at their edges is never drawn - and kept whatever the memory held (at 4K, a value that turned the whole
+        // picture pure blue in the Sand Kingdom).
+        VkCommandBuffer cb = vk_upload_cmd();
+        VkClearColorValue zero = {{0, 0, 0, 0}};
+        VkImageSubresourceRange rg = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        vkCmdClearColorImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rg);
         VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT, .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
@@ -452,7 +506,24 @@ void vk_dl_note_upload(void *img, uint32_t w, uint32_t h, uint32_t lv);  // (exe
 static uint32_t level_w(const TexBackend *b, uint32_t lv) { uint32_t v = b->width >> lv; return v ? v : 1; }
 static uint32_t level_h(const TexBackend *b, uint32_t lv) { uint32_t v = b->height >> lv; return v ? v : 1; }
 
+// The game's textures' memory by kind (the menu's estimates: menu.mm mem_cost): 0 the targets drawn at the internal
+// resolution (scalable), 1 the shadow maps (Shadow quality), 2 everything else
+static _Atomic int64_t g_tex_bytes[3];
+void vk_tex_memory(uint64_t out[3]) {
+    for (int k = 0; k < 3; k++) { int64_t v = atomic_load(&g_tex_bytes[k]); out[k] = v > 0 ? (uint64_t)v : 0; }
+}
+static void count_image(TexBackend *b) {
+    if (!b->mem) return;
+    VmaAllocationInfo info;
+    vmaGetAllocationInfo(g_vk.vma, b->mem, &info);
+    b->mem_bytes = info.size;
+    b->mem_kind = b->shadow ? 1 : b->scalable ? 0 : 2;
+    atomic_fetch_add(&g_tex_bytes[b->mem_kind], (int64_t)b->mem_bytes);
+}
+
 static void destroy_image(TexBackend *b) {
+    if (b->mem && b->mem_bytes) atomic_fetch_sub(&g_tex_bytes[b->mem_kind], (int64_t)b->mem_bytes);
+    b->mem_bytes = 0;
     views_forget(b);
     if (b->image || b->mem) defer((Dead){.img = b->image, .mem = b->mem});  // (never the same allocation twice)
     b->image = VK_NULL_HANDLE;
@@ -476,6 +547,33 @@ static void live_remove(TexBackend *b) {
     b->reg = 0;
 }
 
+// Where the game's textures go. Integrated graphics with a small "GPU" heap (a BIOS carve-out: 256 MB on a Ryzen
+// 4600G, beside a 3.5 GB system heap - both the same RAM): the system heap. Every texture went to the 256 MB one, the
+// driver over-committed it to ~700 MB and then refused one more - "out of memory" with the system heap nearly unused
+// (#147). Otherwise the GPU's own memory, as before. ODYSSEY_VK_TEX_HOST=1 / =0 forces it (tests).
+VmaMemoryUsage vk_tex_memory_usage(void) {
+    static int host = -1;
+    if (host < 0) {
+        const char *e = getenv("ODYSSEY_VK_TEX_HOST");
+        VkPhysicalDeviceMemoryProperties pm;
+        vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &pm);
+        uint64_t local = 0, sys = 0;
+        for (uint32_t h = 0; h < pm.memoryHeapCount; h++) {
+            if (pm.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) { if (pm.memoryHeaps[h].size > local) local = pm.memoryHeaps[h].size; }
+            else if (pm.memoryHeaps[h].size > sys) sys = pm.memoryHeaps[h].size;
+        }
+        bool small = g_vk.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && local < (1ull << 30) && sys > local;
+        host = e && *e ? atoi(e) != 0 : small;
+        if (host) LOG("[vk] textures in system memory (integrated graphics, GPU heap %llu MB, system heap %llu MB)\n",
+                      (unsigned long long)(local >> 20), (unsigned long long)(sys >> 20));
+    }
+    return host ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+}
+
+// HDR output with the game's highlights (the window is HDR10: device.c g_vk.sc_hdr): its picture kept in floats to the
+// window (create_image)
+bool vk_hdr_picture(void) { return g_vk.sc_hdr; }
+
 bool vk_deband(void) {
     static int env = -2;
     if (env == -2) env = getenv("ODYSSEY_DEBAND") ? atoi(getenv("ODYSSEY_DEBAND")) != 0 : -1;
@@ -486,7 +584,9 @@ static TexBackend *tex_backend(NvnTexture *t) {
     TexBackend *b = t->backend;
     if (b) {
         // output resolution changed, or smooth gradients switched on / off (create_image "Banding"): reallocate
-        if (b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) || (b->debandable && !b->guest_format == vk_deband()))) {
+        if ((b->scalable && (b->sx != tex_factor(b, t, false) || b->sy != tex_factor(b, t, true) ||
+                             (b->debandable && !b->guest_format == (vk_deband() || vk_hdr_picture())))) ||
+            (b->hdr_able && b->hdr_window != vk_hdr_picture())) {
             // The old picture goes into the new image, scaled. Most of these targets are drawn anew every frame, but
             // not all: the HUD's "Menu / Map" guide has a 70x40 backdrop (16:9 enough to be scaled with the screen's
             // targets) that the game draws once and keeps. Re-created empty, it showed whatever the new memory held -

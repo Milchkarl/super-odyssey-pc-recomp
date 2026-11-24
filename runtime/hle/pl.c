@@ -128,8 +128,15 @@ static void load_fonts(void) {
                          "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc", "C:/Windows/Fonts/YuGothR.ttc",
                          "C:/Windows/Fonts/YuGothM.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf",
                          "C:/Windows/Fonts/arial.ttf",
-                         // Linux: DejaVu Sans (Debian / Ubuntu, Arch, Fedora). Not Noto Sans CJK: CFF outlines,
-                         // which the game's font engine crashes on (it wants TrueType)
+                         // Linux: first a TrueType Japanese gothic where the distribution has one - the console's
+                         // font is one (UD Shin Go): the map's brochure in DejaVu read as "a wrong font" (#146) -
+                         // IPAex Gothic, VL Gothic, Takao Gothic; then DejaVu Sans (Debian / Ubuntu, Arch, Fedora).
+                         // Not Noto Sans CJK: CFF outlines, which the game's font engine crashes on (it wants TrueType)
+                         "/usr/share/fonts/OTF/ipaexg.ttf", "/usr/share/fonts/TTF/ipaexg.ttf",
+                         "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf", "/usr/share/fonts/ipa-ex-gothic/ipaexg.ttf",
+                         "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf", "/usr/share/fonts/vl-gothic/VL-Gothic-Regular.ttf",
+                         "/usr/share/fonts/TTF/VL-Gothic-Regular.ttf",
+                         "/usr/share/fonts/truetype/takao-gothic/TakaoGothic.ttf", "/usr/share/fonts/TTF/TakaoGothic.ttf",
                          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
                          "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf",
                          // Noto Sans' static TrueType (Arch, Debian / Ubuntu, Fedora), Liberation Sans (Fedora, Debian)

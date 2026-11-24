@@ -26,7 +26,8 @@ extern "C" bool vk_imgui_backend_init(void) {
     ii.UseDynamicRendering = true;
     ii.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     ii.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-    ii.PipelineRenderingCreateInfo.pColorAttachmentFormats = &g_vk.sc_format;
+    ii.PipelineRenderingCreateInfo.pColorAttachmentFormats = &g_vk.ui_format;  // (the SDR window's: with HDR output the menu
+    // is drawn into an SDR image of its own, device.c overlay_draw)
     bool ok = ImGui_ImplVulkan_Init(&ii);
     if (!ok) LOG("[vk] ImGui Vulkan backend init failed\n");
     return ok;

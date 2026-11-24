@@ -25,6 +25,7 @@ static mach_timebase_info_data_t tb;
 #include <sys/stat.h>
 #include "../paths.h"
 static char g_log_path[1024];
+static int g_parent_stdout = -1;  // (the stdout this process was given, before it went into the log)
 const char *plat_log_path(void) { return g_log_path; }
 static void log_to_file_without_terminal(void) {
     if (isatty(STDERR_FILENO)) return;
@@ -41,8 +42,23 @@ static void log_to_file_without_terminal(void) {
     bool append = getenv("ODYSSEY_LOG_APPEND") != NULL;
     if (!freopen(path, append ? "a" : "w", stderr)) return;
     snprintf(g_log_path, sizeof g_log_path, "%s", path);
+    fflush(stdout);
+    g_parent_stdout = dup(STDOUT_FILENO);  // (plat_parent_line: RecompLauncher reads the setup step's lines there)
     dup2(STDERR_FILENO, STDOUT_FILENO);
     setenv("ODYSSEY_LOG_APPEND", "1", 1);
+}
+
+void plat_parent_line(const char *line) {
+    if (g_parent_stdout < 0) {  // (stdout as given: a terminal, or not moved)
+        printf("%s\n", line);
+        fflush(stdout);
+        return;
+    }
+    fprintf(stderr, "%s\n", line);  // (the log)
+    char buf[1100];
+    int n = snprintf(buf, sizeof buf, "%s\n", line);
+    if (n > (int)sizeof buf - 1) n = (int)sizeof buf - 1;
+    if (n > 0 && write(g_parent_stdout, buf, (size_t)n) < 0) {}
 }
 
 void plat_init(void) { log_to_file_without_terminal(); }

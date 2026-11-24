@@ -51,6 +51,7 @@ extern "C" {
 #include "../platform.h"
 #include "../romfs_build.h"
 #include "../rt.h"
+#include "../switch2.h"
 #include "../settings.h"
 #include "../version.h"
 #ifdef __APPLE__
@@ -362,6 +363,11 @@ static bool files_from_folder(const std::string &root, const std::string &src) {
     }
     uint64_t rbytes = romfs_dir_bytes(romfs.c_str());
     double need = (double)rbytes / 1e9 + 6, have = free_gb(rt_data_root());
+    if (!is_dir(romfs + "/MovieData")) {  // (#124: without them the game crashed where it plays one)
+        fail("Game files incomplete", "Its romfs has no MovieData folder (the game's videos). Extract the game files "
+                                      "again, with every folder.");
+        return false;
+    }
     if (rbytes < 4500000000ull) {
         char h[300];
         snprintf(h, sizeof h, "Its romfs holds %.1f GB, the base game's holds 5.5 GB: this is probably an update's romfs. "
@@ -381,7 +387,7 @@ static bool files_from_folder(const std::string &root, const std::string &src) {
     set_step("Copying the game code...");
     if (!romfs_copy_tree(exefs.c_str(), (root + "/exefs").c_str(), NULL)) { fail("Setup didn't finish", "Copying the game code failed."); return false; }
     mkdir((root + "/romfs").c_str(), 0755);
-    if (is_dir(romfs + "/MovieData") && !romfs_copy_tree((romfs + "/MovieData").c_str(), (root + "/romfs/MovieData").c_str(), NULL)) {
+    if (!romfs_copy_tree((romfs + "/MovieData").c_str(), (root + "/romfs/MovieData").c_str(), NULL)) {
         fail("Setup didn't finish", "Copying the videos failed.");
         return false;
     }
@@ -453,8 +459,9 @@ static void *work(void *) {
 // Done: a file in the launcher's data folder (recomplauncher.json prepare.done), wherever the game's data is.
 static void cli_progress_print(float f, const std::string &step) {
     if (!g_code_only && f < 1) f /= 0.55f;  // (the installer's bar: files and code up to 0.55, then shaders - not here)
-    printf("progress %.2f %s\n", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
-    fflush(stdout);
+    char line[600];
+    snprintf(line, sizeof line, "progress %.2f %s", f < 0 ? 0 : f > 1 ? 1 : f, step.c_str());
+    plat_parent_line(line);  // (the launcher's stdout, also when the log took ours)
 }
 static void *cli_progress_thread(void *) {  // (while the work runs: a line when the step or the bar moves)
     std::string last_step;
@@ -477,8 +484,7 @@ extern "C" int setup_prepare_cli(const char *game) {
         rt_data_root(), files_here ? "here" : "not here");
     if (!game || !*game) {
         if (!files_here) {
-            printf("No game files yet: choose your extracted game (the folder with exefs and romfs).\n");
-            fflush(stdout);
+            plat_parent_line("No game files yet: choose your extracted game (the folder with exefs and romfs).");
             return 2;
         }
         g_code_only = true;
@@ -499,8 +505,7 @@ extern "C" int setup_prepare_cli(const char *game) {
             pthread_mutex_lock(&g_lock);
             std::string head = g_fail_head, hint = g_fail_hint;
             pthread_mutex_unlock(&g_lock);
-            printf("%s: %s\n", head.empty() ? "Setup didn't finish" : head.c_str(), hint.c_str());
-            fflush(stdout);
+            plat_parent_line(((head.empty() ? std::string("Setup didn't finish") : head) + ": " + hint).c_str());
             return 1;
         }
         cli_progress_print(1, "Ready to play");
@@ -634,11 +639,11 @@ static void row(const char *label, const std::string &value, const char *empty, 
     float x0 = ImGui::GetCursorPosX();
     ImGui::PushTextWrapPos(x0 + leftw);
     ImGui::PushStyleColor(ImGuiCol_Text, off ? kTextOffV : kTextV);
-    ImGui::TextUnformatted(label);
+    ImGui::TextUnformatted(tr(label));  // (#153: the rows' labels and hints translated)
     ImGui::PopStyleColor();
     ImGui::PushStyleColor(ImGuiCol_Text, value.empty() ? kTextOffV : kTextDimV);
     ImGui::SetWindowFontScale(0.78f);
-    if (value.empty()) ImGui::TextWrapped("%s", empty);
+    if (value.empty()) ImGui::TextWrapped("%s", tr(empty));
     else ImGui::TextUnformatted(fit(value, leftw).c_str());
     ImGui::SetWindowFontScale(1);
     ImGui::PopStyleColor();
@@ -793,6 +798,7 @@ float menu_hint_bar_height(float scale);
 // for a bug report (on Linux / the Steam Deck the crash's own box can't have buttons, so this is where they are)
 static char g_crash_path[1200], g_crash_reason[256];
 static bool g_crash_notice;
+static bool g_videos_missing;  // this install has no game videos (#124): they show black; the Home view says so
 static int g_crash_action;  // 1 copied (see diagnostics_copy_status), 2 shown, 3 not shown
 static void crash_notice(float scale, float w) {
     if (!g_crash_notice) return;
@@ -850,6 +856,7 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
 #ifndef __APPLE__
     if (g_prep_due_home) stack += bh + 14 * scale + ImGui::GetFontSize() * 2.6f;
 #endif
+    if (g_videos_missing) stack += ImGui::GetFontSize() * 3.6f;
     float y0 = c0.y + fmaxf(pad * 3.2f, (cardh - stack) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(c0.x + pad * 1.6f, y0));
     ImGui::BeginGroup();
@@ -868,6 +875,13 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
         ImGui::Dummy(ImVec2(0, 6 * scale));
     }
 #endif
+    if (g_videos_missing) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + bw);
+        ImGui::TextColored(kTextDimV, "%s", tr("This install has none of the game's videos: they show black. To get them "
+                                               "back, delete the extracted folder and start again with your game files."));
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(0, 6 * scale));
+    }
     if (plain_button("Settings", scale, ImVec2(bw, bh))) { g_cfg_settings = true; menu_focus_sidebar(); }
     if (g_cfg_focus == 2) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); g_cfg_focus = 0; }
     if (plain_button("Exit", scale, ImVec2(bw, bh))) g_config_result = 2;
@@ -1088,6 +1102,9 @@ bool config_run(void) {
             diagnostics_last_crash_seen();
         }
     }
+    // (an install set up from a game folder without MovieData, before setup asked for it - #124)
+    g_videos_missing = setup_ready("extracted") && !is_dir("extracted/romfs/MovieData");
+    if (g_videos_missing) LOG("[config] this install has no game videos (extracted/romfs/MovieData): they show black\n");
     if (force ? atoi(force) == 0 : !g_settings.config_at_start && !prep_due && !g_crash_notice) {
         LOG("[config] page not shown (%s)\n", force ? "ODYSSEY_CONFIG=0" : "turned off, nothing to ask");
         return true;
@@ -1112,6 +1129,7 @@ bool config_run(void) {
     {   // controllers: SDL sends their buttons only for opened ones - the game's input (input.c) opens them later, so the
         // page answered only mouse and keyboard (owner 2026-11-16). input.c finds them open and takes them over.
         SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+        switch2_start();  // (Switch 2 controllers over Bluetooth: runtime/switch2.h)
         int n = 0;
         SDL_JoystickID *ids = SDL_GetGamepads(&n);
         for (int i = 0; ids && i < n; i++) SDL_OpenGamepad(ids[i]);
@@ -1252,12 +1270,12 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.55f), sz, IM_COL32(59, 196, 90, 255), 0);  // (the icon's pipe green)
         ImGui::Dummy(ImVec2(sz, lh));
         ImGui::SameLine(0, lh * 0.35f);
-        ImGui::TextUnformatted("Super Odyssey PC Recomp");
+        ImGui::TextUnformatted(tr("Super Odyssey PC Recomp"));
     }
     ImGui::PopFont();
     ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
     ImGui::SetWindowFontScale(0.86f);
-    ImGui::TextUnformatted("Super Mario Odyssey, recompiled to run natively on PC - from your own copy of the game.");
+    ImGui::TextUnformatted(tr("Super Mario Odyssey, recompiled to run natively on PC - from your own copy of the game."));
     ImGui::SetWindowFontScale(1);
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(0, 10 * scale));
@@ -1271,7 +1289,7 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
     pthread_mutex_unlock(&g_lock);
 
     if (st == ST_BUSY) {
-        ImGui::TextUnformatted(g_code_only ? "Getting the game code ready for this version." : "Installing.");
+        ImGui::TextUnformatted(tr(g_code_only ? "Getting the game code ready for this version." : "Installing."));
         ImGui::Dummy(ImVec2(0, 12 * scale));
         float f = g_frac.load();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1284,18 +1302,18 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         char line[240];
         double secs = (double)(plat_now_ns() - g_t0) / 1e9;
         int left = f > 0.04f ? (int)ceil(secs * (1 - f) / f / 60) : 0;
-        if (left > 0) snprintf(line, sizeof line, "%s   %.0f%%   about %d min left", step.c_str(), f * 100, left);
-        else snprintf(line, sizeof line, "%s   %.0f%%", step.c_str(), f * 100);
+        if (left > 0) snprintf(line, sizeof line, tr("%s   %.0f%%   about %d min left"), tr(step.c_str()), f * 100, left);
+        else snprintf(line, sizeof line, "%s   %.0f%%", tr(step.c_str()), f * 100);
         ImGui::TextUnformatted(line);
         ImGui::Dummy(ImVec2(0, 18 * scale));
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-        ImGui::TextUnformatted(g_code_only ? "This takes a few minutes, once."
-                                           : "This happens once: the game data is checked and written, the game code is "
-                                             "recompiled for this PC, and every shader is compiled ahead so the game "
-                                             "doesn't stutter later. You can keep using your PC meanwhile.");
+        ImGui::TextUnformatted(tr(g_code_only ? "This takes a few minutes, once."
+                                              : "This happens once: the game data is checked and written, the game code is "
+                                                "recompiled for this PC, and every shader is compiled ahead so the game "
+                                                "doesn't stutter later. You can keep using your PC meanwhile."));
         ImGui::PopStyleColor();
     } else if (st == ST_DONE) {
-        ImGui::TextUnformatted("All set. The game is installed and its shaders are compiled.");
+        ImGui::TextUnformatted(tr("All set. The game is installed and its shaders are compiled."));
         ImGui::Dummy(ImVec2(0, 24 * scale));
         if (accent_button("Play", scale)) g_want_play = true;
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
@@ -1303,9 +1321,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
     } else {
         if (st == ST_FAILED) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.6f, 0.55f, 1));
-            ImGui::TextUnformatted(head.c_str());
+            ImGui::TextUnformatted(tr(head.c_str()));
             ImGui::PopStyleColor();
-            ImGui::TextUnformatted(hint.c_str());
+            ImGui::TextUnformatted(tr(hint.c_str()));
             ImGui::Dummy(ImVec2(0, 6 * scale));
         }
         bool pkg = game_is_package(game);
@@ -1318,9 +1336,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
             ImGui::Dummy(ImVec2(0, 10 * scale));
             ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
             ImGui::SetWindowFontScale(0.7f);
-            ImGui::TextUnformatted("Nothing of the game is included, and nothing is uploaded anywhere: your game files are only "
-                                   "read on this PC. The install takes about the size of the game plus a few GB (the recompiled "
-                                   "code and the compiled shaders).");
+            ImGui::TextUnformatted(tr("Nothing of the game is included, and nothing is uploaded anywhere: your game files are only "
+                                      "read on this PC. The install takes about the size of the game plus a few GB (the recompiled "
+                                      "code and the compiled shaders)."));
             ImGui::SetWindowFontScale(1);
             ImGui::PopStyleColor();
         } else {
@@ -1343,9 +1361,9 @@ void setup_draw(float scale, void *font_v, void *font_big_v) {
         ImGui::Dummy(ImVec2(0, 10 * scale));
         ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
         ImGui::SetWindowFontScale(0.7f);
-        ImGui::TextUnformatted("Nothing of the game is included, and nothing is uploaded anywhere: your game file and keys are "
-                               "only read on this PC. The install takes about the size of the game plus a few GB "
-                               "(the recompiled code and the compiled shaders).");
+        ImGui::TextUnformatted(tr("Nothing of the game is included, and nothing is uploaded anywhere: your game file and keys are "
+                                  "only read on this PC. The install takes about the size of the game plus a few GB "
+                                  "(the recompiled code and the compiled shaders)."));
         ImGui::SetWindowFontScale(1);
         ImGui::PopStyleColor();
         }

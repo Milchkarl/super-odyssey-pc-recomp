@@ -1,7 +1,7 @@
 // Debug hooks in the game's code: `make gen` with ODYSSEY_HOOKS=<addr>[,<addr>...] (tools/odyssey_patches.py) makes
 // each listed instruction call odyssey_debug_hook first. What a hit logs: ODYSSEY_HOOK_LOG, per address
 //   <addr>=<item>[,<item>...][;<addr>=...]   items: x<n> / s<n> (a register), x<n>+<hex offset>:<f|w|x><count>
-// (floats / 32-bit / 64-bit words at that register plus offset), e.g.
+// (floats / 32-bit / 64-bit words at that register plus offset; p: a pointer there, the C string it points to), e.g.
 //   ODYSSEY_HOOK_LOG="7000a17770=s0,x0+150:f6,x0+168:f3;7000a17ab8=x19+f8:f6,x19+110:f16"
 // Without an entry for the address: x0-x3, x30, s0-s1. At most ODYSSEY_HOOK_MAX hits per address (default 50), only in
 // the frames ODYSSEY_HOOK_FRAMES=<from>:<to> if given.
@@ -183,7 +183,10 @@ void odyssey_debug_hook(Cpu *c, uint64_t pc) {
         uint64_t a = c->x[it->reg] + it->off;
         n += snprintf(line + n, sizeof line - n, " | [x%d+%llx]", it->reg, (unsigned long long)it->off);
         for (int j = 0; j < it->count && n < (int)sizeof line - 32; j++) {
-            if (it->fmt == 'f') { float f; memcpy(&f, (void *)(uintptr_t)(a + 4 * j), 4); n += snprintf(line + n, sizeof line - n, " %g", f); }
+            if (it->fmt == 'p') {  // (a pointer there, to a C string: a sead::SafeString's text at +8)
+                const char *str = *(const char **)(uintptr_t)(a + 8 * j);
+                n += snprintf(line + n, sizeof line - n, " \"%.60s\"", str ? str : "(null)");
+            } else if (it->fmt == 'f') { float f; memcpy(&f, (void *)(uintptr_t)(a + 4 * j), 4); n += snprintf(line + n, sizeof line - n, " %g", f); }
             else if (it->fmt == 'w') n += snprintf(line + n, sizeof line - n, " %x", *(uint32_t *)(uintptr_t)(a + 4 * j));
             else n += snprintf(line + n, sizeof line - n, " %llx", (unsigned long long)*(uint64_t *)(uintptr_t)(a + 8 * j));
         }

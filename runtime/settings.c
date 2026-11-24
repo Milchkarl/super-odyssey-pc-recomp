@@ -75,6 +75,7 @@ Settings g_settings = {
     .shot_pad = -1, .shot_key = 69,   // (SDL_SCANCODE_F12)
     .mouse_camera = true,
     .mouse_menus = true,
+    .fov = 100,
     // First start (owner, 2026-11-16): the Switch's docked setup (console_mode docked), its dynamic resolution off
     // (always the full resolution) and VSync off (owner 2026-11-20, after a day of Fast: Off again for new players).
     .game_dynres = false,
@@ -82,6 +83,18 @@ Settings g_settings = {
     .res_mode = RES_DISPLAY,  // (100%: the display's resolution - owner 2026-11-20)
     .memory = MEMORY_NORMAL,  // (owner 2026-11-20; Auto picked Low under 12 GB of RAM)
     .low_gpu_memory = false,  // (owner 2026-11-20: opt-in, not chosen by the GPU memory's size)
+    .hdr_peak = 1000,
+    .hdr_game_white = 203,
+    .hdr_ui_white = 203,
+    .hdr_eotf22 = true,
+    .hdr_tonemap = 1,
+    .grade_exposure = 100,
+    .grade_highlights = 50,
+    .grade_shadows = 50,
+    .grade_contrast = 50,
+    .grade_saturation = 50,
+    .grade_highlight_sat = 50,
+    .grade_bloom = 50,
     .mouse_sensitivity = 100,
     .mouse_sensitivity_y = 100,
     .stick_camera_x = 100, .stick_camera_y = 100,
@@ -166,6 +179,8 @@ static const char *const temporal_backends[TEMPORAL_BACKEND_COUNT] = {"dlss", "f
 static const char *const fsr3_modes[DLSS_MODE_COUNT] = {"off", "native", "quality", "balanced", "performance"};
 static const char *const window_modes[WINDOW_MODE_COUNT] = {"windowed", "borderless", "exclusive"};
 static const char *const display_modes[DISPLAY_MODE_COUNT] = {"auto", "1080p", "1440p", "2160p"};
+
+static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 static int named_option(const char *value, const char *const *options, int count) {
     for (int i = 0; i < count; i++) if (!strcmp(value, options[i])) return i;
@@ -310,6 +325,7 @@ void settings_load(void) {
         else if (!strcmp(key, "overlay_position")) g_settings.overlay_position = atoi(val) != 0;
         else if (!strcmp(key, "vibration")) g_settings.rumble = atoi(val) != 0;
         else if (!strcmp(key, "vibration_strength")) { int v = atoi(val); g_settings.rumble_strength = v >= 25 && v <= 100 ? v : 100; }
+        else if (!strcmp(key, "switch2")) { int v = atoi(val); g_settings.switch2 = v >= 0 && v <= 2 ? v : 0; }
         else if (!strcmp(key, "motion")) g_settings.motion = atoi(val) != 0;
         else if (!strcmp(key, "motion_invert_x")) g_settings.motion_invert_x = atoi(val) != 0;
         else if (!strcmp(key, "motion_invert_y")) g_settings.motion_invert_y = atoi(val) != 0;
@@ -390,6 +406,8 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "deband")) g_settings.deband = atoi(val) != 0;
         else if (!strcmp(key, "motion_blur")) g_settings.motion_blur = atoi(val) != 0;
+        else if (!strcmp(key, "fov")) g_settings.fov = atoi(val) < 100 ? 100 : atoi(val) > 150 ? 150 : atoi(val);
+        else if (!strcmp(key, "shadow_soft")) g_settings.shadow_soft = atoi(val) != 0;
         else if (!strcmp(key, "shadow_distance")) g_settings.shadow_distance = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "snapshot_full_rate")) g_settings.snapshot_full_rate = atoi(val) != 0;
         else if (!strcmp(key, "mouse_no_recenter")) g_settings.mouse_no_recenter = atoi(val) != 0;
@@ -420,6 +438,22 @@ void settings_load(void) {
         else if (!strcmp(key, "record_thread")) g_settings.record_thread = !strcmp(val, "on") ? 1 : !strcmp(val, "off") ? 0 : -1;
         else if (!strcmp(key, "texture_detail")) g_settings.texture_detail = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);
         else if (!strcmp(key, "low_gpu_memory")) g_settings.low_gpu_memory = atoi(val) != 0;
+        else if (!strcmp(key, "gpu")) snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", strcmp(val, "auto") ? val : "");
+        else if (!strcmp(key, "hdr")) g_settings.hdr = atoi(val) != 0;
+        else if (!strcmp(key, "hdr_peak")) g_settings.hdr_peak = clampi(atoi(val), 400, 10000);
+        else if (!strcmp(key, "hdr_game_white")) g_settings.hdr_game_white = clampi(atoi(val), 80, 500);
+        else if (!strcmp(key, "hdr_ui_white")) g_settings.hdr_ui_white = clampi(atoi(val), 80, 500);
+        else if (!strcmp(key, "hdr_eotf22")) g_settings.hdr_eotf22 = atoi(val) != 0;
+        else if (!strcmp(key, "hdr_tonemap")) g_settings.hdr_tonemap = !strcmp(val, "vanilla") ? 0 : 1;
+        else if (!strcmp(key, "grade_exposure")) g_settings.grade_exposure = clampi(atoi(val), 0, 200);
+        else if (!strcmp(key, "grade_highlights")) g_settings.grade_highlights = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_shadows")) g_settings.grade_shadows = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_contrast")) g_settings.grade_contrast = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_saturation")) g_settings.grade_saturation = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_highlight_saturation")) g_settings.grade_highlight_sat = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_blowout")) g_settings.grade_blowout = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_flare")) g_settings.grade_flare = clampi(atoi(val), 0, 100);
+        else if (!strcmp(key, "grade_bloom")) g_settings.grade_bloom = clampi(atoi(val), 0, 100);
         else if (!strcmp(key, "memory"))
             g_settings.memory = !strcmp(val, "normal") ? MEMORY_NORMAL : !strcmp(val, "low") ? MEMORY_LOW : MEMORY_AUTO;
         else if (!strcmp(key, "shader_wait")) g_settings.shader_wait = atoi(val) != 0;
@@ -513,6 +547,7 @@ void settings_save(void) {
             g_settings.overlay_render, g_settings.overlay_position);
     fprintf(f, "vibration = %d\n", g_settings.rumble);
     fprintf(f, "vibration_strength = %d\n", g_settings.rumble_strength);
+    fprintf(f, "switch2 = %d\n", g_settings.switch2);
     fprintf(f, "motion = %d\n", g_settings.motion);
     fprintf(f, "motion_invert_x = %d\n", g_settings.motion_invert_x);
     fprintf(f, "motion_invert_y = %d\n", g_settings.motion_invert_y);
@@ -528,6 +563,8 @@ void settings_save(void) {
     fprintf(f, "mouse_no_recenter = %d\n", g_settings.mouse_no_recenter);
     fprintf(f, "motion_blur = %d\n", g_settings.motion_blur);
     fprintf(f, "snapshot_full_rate = %d\n", g_settings.snapshot_full_rate);
+    fprintf(f, "fov = %d\n", g_settings.fov);
+    fprintf(f, "shadow_soft = %d\n", g_settings.shadow_soft);
     fprintf(f, "shadow_distance = %d\n", g_settings.shadow_distance);
     fprintf(f, "first_person_mario = %d\n", g_settings.first_person_mario);
     fprintf(f, "stick_deadzone_left = %d\n", g_settings.stick_deadzone_l);
@@ -578,6 +615,22 @@ void settings_save(void) {
     fprintf(f, "record_thread = %s\n", g_settings.record_thread > 0 ? "on" : g_settings.record_thread == 0 ? "off" : "auto");
     fprintf(f, "memory = %s\n", g_settings.memory == MEMORY_NORMAL ? "normal" : g_settings.memory == MEMORY_LOW ? "low" : "auto");
     fprintf(f, "low_gpu_memory = %d\n", g_settings.low_gpu_memory);
+    fprintf(f, "gpu = %s\n", g_settings.gpu[0] ? g_settings.gpu : "auto");
+    fprintf(f, "hdr = %d\n", g_settings.hdr);
+    fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
+    fprintf(f, "hdr_game_white = %d\n", g_settings.hdr_game_white);
+    fprintf(f, "hdr_ui_white = %d\n", g_settings.hdr_ui_white);
+    fprintf(f, "hdr_eotf22 = %d\n", g_settings.hdr_eotf22);
+    fprintf(f, "hdr_tonemap = %s\n", g_settings.hdr_tonemap ? "hdr" : "vanilla");
+    fprintf(f, "grade_exposure = %d\n", g_settings.grade_exposure);
+    fprintf(f, "grade_highlights = %d\n", g_settings.grade_highlights);
+    fprintf(f, "grade_shadows = %d\n", g_settings.grade_shadows);
+    fprintf(f, "grade_contrast = %d\n", g_settings.grade_contrast);
+    fprintf(f, "grade_saturation = %d\n", g_settings.grade_saturation);
+    fprintf(f, "grade_highlight_saturation = %d\n", g_settings.grade_highlight_sat);
+    fprintf(f, "grade_blowout = %d\n", g_settings.grade_blowout);
+    fprintf(f, "grade_flare = %d\n", g_settings.grade_flare);
+    fprintf(f, "grade_bloom = %d\n", g_settings.grade_bloom);
     fprintf(f, "shader_wait = %d\n", g_settings.shader_wait);
     fprintf(f, "fast_arrival = %d\n", g_settings.fast_arrival);
     fprintf(f, "arrival_mip_views = %d\n", g_settings.arrival_mip_views);

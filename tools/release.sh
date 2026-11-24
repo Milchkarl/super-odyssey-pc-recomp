@@ -55,12 +55,12 @@ probe() {  # url -> runs the catalog probe on it, fails unless both of its check
 }
 
 say "1/7  version $VERSION"
-git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' ':!recomplauncher.json' || { echo "commit or stash your changes first"; exit 1; }
+git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' || { echo "commit or stash your changes first"; exit 1; }
 sed -i "s/#define APP_VERSION \".*\"/#define APP_VERSION \"$VERSION\"/" runtime/version.h
 sed -i "s/VALUE \"FileVersion\", \".*\"/VALUE \"FileVersion\", \"$VERSION\"/;
         s/VALUE \"ProductVersion\", \".*\"/VALUE \"ProductVersion\", \"$VERSION\"/" runtime/platform/windows.rc
-# (RecompLauncher runs its setup step again - prepare.version: only the game code, and only if it changed)
-sed -i "s/^    \"version\": \"[^\"]*\"/    \"version\": \"$VERSION\"/" recomplauncher.json  # (prepare's own line; not system.windows.version)
+# (recomplauncher.json has no version of its own: RecompLauncher ignores prepare.version - "every new release of your
+# game builds again by itself", its Developer tab - so nothing there is bumped)
 git diff --quiet || git commit -qam "Super Odyssey PC Recomp $VERSION"  # (a rerun: already bumped)
 SHA=$(git rev-parse HEAD)
 
@@ -167,7 +167,7 @@ echo ok
 say "6/7  publishing v$VERSION"
 git push -q origin "$SHA:refs/heads/main"
 gh release create "v$VERSION" "$ZIP" "$APP" --repo "$REPO" --target "$SHA" \
-    --title "Super Odyssey PC Recomp $VERSION (preview)" --notes-file "$NOTES"
+    --title "$VERSION" --notes-file "$NOTES"
 
 say "7/7  the catalog's test on the published file"
 if probe "https://github.com/$REPO/releases/download/v$VERSION/$(basename "$APP" | tr ' ' '.')"; then

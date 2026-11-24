@@ -625,11 +625,52 @@ static const char *builtin_src(const char *name, int *stage) {
     }
     if (!strcmp(name, "present.frag")) {
         *stage = STAGE_FRAGMENT;
+        // The picture into the window (exec.c present_colour fills the constants). Its values are sRGB-encoded: 0..1
+        // as the game's 8-bit window, or above 1 for highlights when HDR keeps them (the window texture in half
+        // floats, translate.c rt_kind 4). c.y: 0 = SDR bytes (as before), 1 = HDR10 (decoded, x UI brightness in nits,
+        // BT.709 -> BT.2020, PQ), 2 = as it is (an already presented window image drawn again). c.w = 1: decoded with
+        // gamma 2.2 (what an SDR display does with the game's sRGB values) instead of the sRGB curve. e.x = UI
+        // brightness (nits).
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(push_constant) uniform P { layout(offset = 32) vec4 c; vec4 d; vec4 e; vec4 f; } pc;\n"
                "layout(location = 0) in vec2 uv;\n"
                "layout(location = 0) out vec4 o;\n"
-               "void main() { o = vec4(texture(t, uv).rgb, 1.0); }\n";
+               "vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }\n"
+               "vec3 enc(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }\n"
+               "vec3 pq(vec3 nits) {\n"
+               "  vec3 y = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3(0.1593017578125));\n"
+               "  return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375));\n"
+               "}\n"
+               "void main() {\n"
+               "  vec4 s4 = texture(t, uv);\n"
+               "  if (pc.c.y > 1.5) { o = s4; return; }\n"
+               "  vec3 s = max(s4.rgb, vec3(0.0));\n"
+               "  if (pc.c.y < 0.5) { o = vec4(min(s, vec3(1.0)), 1.0); return; }\n"
+               "  vec3 l = pc.c.w > 0.5 ? mix(pow(s, vec3(2.2)), dec(s), step(vec3(1.0), s)) : dec(s);\n"
+               "  vec3 n = l * pc.e.x;\n"
+               "  n = mat3(0.6274040, 0.0690970, 0.0163916, 0.3292820, 0.9195400, 0.0880132, 0.0433136, 0.0113612, 0.8955950) * n;\n"
+               "  o = vec4(pq(n), 1.0);\n"
+               "}\n";
+    }
+    // HDR output: the menu and overlays (ImGui, drawn into an SDR image of their own: premultiplied sRGB colour, alpha
+    // = coverage) over the HDR10 window, at UI brightness (a.x, nits; b.x = 1: gamma 2.2), blended in PQ (device.c
+    // overlay_draw; the "flush" blend: out = src + window x src.a, so src = (PQ x coverage, 1 - coverage)).
+    if (!strcmp(name, "ui_hdr.frag")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(binding=0) uniform sampler2D ui;\n"
+               "layout(push_constant) uniform P { vec4 a; vec4 b; } pc;\n"
+               "layout(location=0) out vec4 o;\n"
+               "vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }\n"
+               "void main() {\n"
+               "  vec4 u = texelFetch(ui, ivec2(gl_FragCoord.xy), 0);\n"
+               "  if (u.a <= 0.0) discard;\n"
+               "  vec3 n = (pc.b.x > 0.5 ? pow(clamp(u.rgb / u.a, 0.0, 1.0), vec3(2.2)) : dec(clamp(u.rgb / u.a, 0.0, 1.0))) * pc.a.x;\n"
+               "  n = mat3(0.6274040, 0.0690970, 0.0163916, 0.3292820, 0.9195400, 0.0880132, 0.0433136, 0.0113612, 0.8955950) * n;\n"
+               "  vec3 y = pow(clamp(n / 10000.0, 0.0, 1.0), vec3(0.1593017578125));\n"
+               "  o = vec4(pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375)) * u.a, 1.0 - u.a);\n"
+               "}\n";
     }
     // ---- post passes before the present (Video tab "Anti-aliasing" / "Upscaler"): exec.c vk_present_draw.
     // Each draws a fullscreen triangle into an image the size of its output; push constants: two vec4.
@@ -786,8 +827,8 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() {\n"
                "  vec2 uv = gl_FragCoord.xy * pc.a.xy;\n"
                "  vec4 h = texture(hud, uv);\n"
-               "  vec3 s = dec(clamp(texture(src, uv).rgb, 0.0, 1.0));\n"
-               "  o = vec4(enc(clamp(s * clamp(h.a, 0.0, 1.0) + h.rgb, 0.0, 1.0)), 1.0);\n"
+               "  vec3 s = dec(max(texture(src, uv).rgb, vec3(0.0)));\n"  // (HDR: highlights above 1 stay)
+               "  o = vec4(enc(max(s * clamp(h.a, 0.0, 1.0) + h.rgb, vec3(0.0))), 1.0);\n"
                "}\n";
     }
     // AMD FidelityFX CAS (MIT), sharpening only. Soften the local extrema with the diagonals,
