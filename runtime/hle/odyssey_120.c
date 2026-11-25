@@ -34,6 +34,7 @@ static uint64_t texture_allocator, texture_calc, prepare_graphics;
 static uint64_t last_logic_slot, logic_ticks, controller_ticks, draws, trace_ns;
 static uint64_t simulation_tick, camera_matrix;
 static float draw_lead;  // (90) this draw shows Mario this many ticks past the last tick: -1/6, 1/6 or 1/2
+static float lead_shift;  // (ODYSSEY_LEAD_SHIFT, tests: added to every draw's lead - -0.5: Mario at the camera's own time)
 static float player_step[3];  // (the last tick's movement, for ODYSSEY_LOG_CAMERA: where Mario is drawn between ticks)
 static uint64_t stage_draw_ns;
 static GameplayClock recovery_clock;
@@ -117,7 +118,7 @@ static bool camera_draw_90(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t s
         camera = source;
         tick = simulation_tick;
     } else if (draw_scene != scene || source != camera || simulation_tick != tick) return false;
-    float back = 0.5f - draw_lead;
+    float back = 0.5f - (draw_lead - lead_shift);
     if (!paired || back <= 0.001f) return false;
     if (back > 1.0f) back = 1.0f;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
@@ -521,6 +522,11 @@ static void framework_calc(Cpu *c) {
         float c0 = (float)(hz - g) / (float)hz - 0.5f;
         draw_lead = past - c0 > 0.5f ? 0.5f : past - c0;
     } else draw_lead = extra_draw ? 0.5f : 0.0f;
+    {
+        static int got;
+        if (!got) { got = 1; const char *e = getenv("ODYSSEY_LEAD_SHIFT"); lead_shift = e ? (float)atof(e) : 0.0f; }
+        if (enabled) draw_lead += lead_shift;
+    }
     // Private timing experiment, separate from the 90/120 rendering mode.
     // Repeat complete fixed updates, never a larger physics timestep. Keep
     // loading, non-stage scenes and the host settings menu on stock timing.
@@ -585,7 +591,7 @@ static void stage_draw(Cpu *c) {
     } else {
         last_stage = enabled ? c->x[0] : 0;
         // (90: the gameplay frames are between ticks too)
-        if (last_stage && odyssey_native_hz() != 120 && draw_lead != 0.0f && odyssey_pose_enabled()) odyssey_pose_draw(c, draw_lead);
+        if (last_stage && draw_lead != 0.0f && odyssey_pose_enabled()) odyssey_pose_draw(c, draw_lead);
     }
     // (the renderer is told which of the tick's draws this is: vulkan/exec.c renderer_extra_frame)
     if (rq_enabled()) rq_push(RQ_EXTRA_FRAME, NULL, enabled && extra_draw);
