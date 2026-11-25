@@ -524,7 +524,10 @@ static void framework_calc(Cpu *c) {
     } else draw_lead = extra_draw ? 0.5f : 0.0f;
     {
         static int got;
-        if (!got) { got = 1; const char *e = getenv("ODYSSEY_LEAD_SHIFT"); lead_shift = e ? (float)atof(e) : 0.0f; }
+        // (-1/2 since 2026-11-25: every draw shows Mario and the other characters at the camera's own time, between
+        // the last two ticks - interpolated (odyssey_pose.c blend), never ahead of the last tick. Before, they were
+        // drawn half a tick ahead of the camera by prediction. ODYSSEY_LEAD_SHIFT=0: as before.)
+        if (!got) { got = 1; const char *e = getenv("ODYSSEY_LEAD_SHIFT"); lead_shift = e ? (float)atof(e) : -0.5f; }
         if (enabled) draw_lead += lead_shift;
     }
     // Private timing experiment, separate from the 90/120 rendering mode.

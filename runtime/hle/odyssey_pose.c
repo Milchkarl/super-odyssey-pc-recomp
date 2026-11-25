@@ -10,7 +10,7 @@
 #include "../nvn/rqueue.h"
 
 enum {
-    MAX_MODELS = 128, MAX_TRACKS = 8, MAX_SAMPLES = 24, MAX_BONES = 512, MAX_SLOTS = 4,
+    MAX_MODELS = 512, MAX_TRACKS = 8, MAX_SAMPLES = 256, MAX_BONES = 512, MAX_SLOTS = 4,
     LOCAL_STRIDE = 0x60, WORLD_STRIDE = 0x40, PALETTE_STRIDE = 48,
     MAX_PALETTE_BYTES = MAX_BONES * PALETTE_STRIDE + 256,
 };
@@ -47,6 +47,37 @@ static __thread uint64_t previous_tick;
 static __thread bool capturing;
 static __thread uint64_t player_keeper;
 static uint64_t animation_calc, skeleton_world, skeleton_calc, palette_map;
+
+// The finished pose of each skeleton at the last two ticks - its world matrices as the game left them after the tick:
+// the animation, then everything the game adds to it (Mario's lean, joint controls, look-at), the model's place. A draw
+// between two ticks (lead < 0) shows their blend: an interpolation of what the game made, nothing evaluated again.
+// (Until 2026-11-25 such draws evaluated the animation clips again at their own time: without what the game adds after
+// the clips - at 120 FPS Mario's head went 3 px up, 7 px down, 3 up .. from one frame to the next in 16 captured
+// frames of a run, on every other frame the pose without his lean: "doubling", "shaking a lot".)
+// ODYSSEY_POSE_BLEND=0: the clips evaluated again, as before.
+enum { BLEND_SLOTS = 512 };
+typedef struct {
+    uint64_t skeleton, cur_tick, prev_tick;
+    unsigned bones;
+    float *cur, *prev;
+} Blend;
+static __thread Blend blends[BLEND_SLOTS];
+static bool blend_enabled(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("ODYSSEY_POSE_BLEND"); on = !e || atoi(e) != 0; }
+    return on;
+}
+static Blend *blend_slot(uint64_t skeleton, uint64_t tick, bool add) {
+    unsigned h = (unsigned)((skeleton >> 4) * 2654435761u) & (BLEND_SLOTS - 1);
+    Blend *old = NULL;
+    for (unsigned i = 0; i < 16; i++) {
+        Blend *b = &blends[(h + i) & (BLEND_SLOTS - 1)];
+        if (b->skeleton == skeleton) return b;
+        if (add && !old && (!b->skeleton || b->cur_tick + 600 < tick)) old = b;  // (free, or not seen for 10 s)
+    }
+    if (old) old->skeleton = skeleton, old->cur_tick = old->prev_tick = 0, old->bones = 0;
+    return old;
+}
 
 // Owned by the render thread until present, or the game thread with synchronous rendering.
 static OdysseyPoseFrame *render_frame;
@@ -87,6 +118,7 @@ void odyssey_pose_begin(void) {
     capturing = true;
 }
 
+static void pose_record(uint64_t tick);
 void odyssey_pose_end(uint64_t tick) {
     capturing = false;
     if (!odyssey_motion_enabled()) return;
@@ -114,6 +146,7 @@ void odyssey_pose_end(uint64_t tick) {
     memcpy(previous_models, models, model_count * sizeof *models);
     previous_count = model_count;
     previous_tick = tick;
+    if (blend_enabled()) pose_record(tick);
 }
 
 void odyssey_pose_player(uint64_t actor) {
@@ -132,7 +165,10 @@ void odyssey_pose_capture(Cpu *c) {
     uint64_t player = pointer_at(keeper + 0x20);
     static uint64_t skl_vtable;
     if (!skl_vtable) skl_vtable = loader_main_is_v141() ? ODYSSEY_V141_ANIMPLAYERSKL_VTABLE : 0x7001dd63f8ull;
-    if (!player || pointer_at(player) != skl_vtable) return;  // al::AnimPlayerSkl
+    // al::AnimPlayerSkl - or, blending finished poses, any model: one without a skeletal animation moves too (Mario's
+    // hat is a model of its own, carried by his head: left at the tick it sat half a tick off his head on every
+    // other frame)
+    if (!blend_enabled() && (!player || pointer_at(player) != skl_vtable)) return;
     unsigned i = keeper == player_keeper ? 0 : 1;
     while (i && i < model_count && models[i].keeper != keeper) i++;
     if (i == MAX_MODELS) return;
@@ -151,6 +187,43 @@ static bool find_pose(Pose *pose, Model model) {
     uint8_t *world = (void *)(uintptr_t)pointer_at(skeleton + 0x20);
     if (!local || !world || !bones || bones > MAX_BONES) return false;
     *pose = (Pose){.skeleton = skeleton, .player = model.player, .ctrl = ctrl, .bones = bones, .local = local, .world = world};
+    return true;
+}
+
+static void pose_record(uint64_t tick) {  // (the end of a tick) each captured skeleton's world matrices kept
+    for (unsigned i = 0; i < model_count; i++) {
+        Pose pose;
+        if (!find_pose(&pose, models[i])) continue;
+        Blend *b = blend_slot(pose.skeleton, tick, true);
+        if (!b) continue;
+        size_t size = pose.bones * WORLD_STRIDE;
+        if (b->bones != pose.bones) {
+            free(b->cur), free(b->prev);
+            b->cur = malloc(size), b->prev = malloc(size);
+            b->bones = b->cur && b->prev ? pose.bones : 0;
+            b->cur_tick = b->prev_tick = 0;
+            if (!b->bones) { free(b->cur), free(b->prev); b->cur = b->prev = NULL; b->skeleton = 0; continue; }
+        }
+        float *t = b->prev;
+        b->prev = b->cur, b->prev_tick = b->cur_tick;
+        b->cur = t, b->cur_tick = tick;
+        memcpy(b->cur, pose.world, size);
+    }
+}
+
+// The skeleton's pose `back` ticks before the last tick (0 < back <= 1), in its world matrices; false: not known for
+// both ticks, or it jumped (a teleport, a model swapped in) - shown as at the tick
+static bool blend_world(const Pose *pose, float back) {
+    Blend *b = blend_slot(pose->skeleton, previous_tick, false);
+    if (!b || b->bones != pose->bones || b->cur_tick != previous_tick || b->prev_tick + 1 != b->cur_tick) return false;
+    size_t n = (size_t)pose->bones * (WORLD_STRIDE / 4);
+    const float *cur = b->cur, *prev = b->prev;
+    float jump = 0.0f;
+    for (unsigned j = 12; j < 15; j++) jump += (cur[j] - prev[j]) * (cur[j] - prev[j]);  // (the root's translation)
+    if (!(jump <= 60.0f * 60.0f)) return false;
+    if (!memcmp(cur, prev, n * 4)) return false;  // (didn't move: the tick's own palette)
+    float *world = (float *)(void *)pose->world;
+    for (size_t j = 0; j < n; j++) world[j] = cur[j] + back * (prev[j] - cur[j]);
     return true;
 }
 
@@ -194,6 +267,8 @@ static void evaluate_world(Cpu *c, const Pose *pose) {
     guest_call(&sample, skeleton_world);
 }
 
+static Palette *sample_palette(Cpu *c, const Pose *pose);
+static bool blend_world(const Pose *pose, float back);
 static Palette *sample_palette(Cpu *c, const Pose *pose) {
     unsigned slots = *(const uint32_t *)(uintptr_t)(pose->ctrl + 0x158);
     uint64_t resource = pointer_at(pose->skeleton);
@@ -247,6 +322,17 @@ static Palette *sample_palette(Cpu *c, const Pose *pose) {
 static Palette *sample_model(Cpu *c, Model model, float lead) {
     Pose pose;
     if (!find_pose(&pose, model)) return NULL;
+    // (blending: never a pose past the last tick - at the tick it is the game's own; the models without a skeletal
+    // animation among these have no clips to evaluate)
+    if (blend_enabled() && lead >= 0.0f) return NULL;
+    if (lead < 0.0f && blend_enabled()) {  // (between the last two ticks: their blend)
+        uint8_t kept[MAX_BONES * WORLD_STRIDE];
+        size_t size = pose.bones * WORLD_STRIDE;
+        memcpy(kept, pose.world, size);
+        Palette *blended = blend_world(&pose, lead < -1.0f ? 1.0f : -lead) ? sample_palette(c, &pose) : NULL;
+        memcpy(pose.world, kept, size);
+        return blended;
+    }
     bool animate = advance_tracks(&pose, lead);
     bool move = lead != 0.0f && (model.step[0] != 0.0f || model.step[1] != 0.0f || model.step[2] != 0.0f);
     if (!animate && !move) return NULL;
@@ -308,7 +394,20 @@ void odyssey_pose_draw(Cpu *c, float lead) {
     } else odyssey_pose_render_frame(frame);
 }
 
+// ODYSSEY_LOG_POSE=1: every 120 pose frames - how many came with palettes, how many palettes, and how many buffer
+// binds the renderer answered from them (0: the in-between poses never reach a draw)
+static unsigned log_frames, log_palettes, log_hits, log_asks;
 void odyssey_pose_render_frame(OdysseyPoseFrame *frame) {
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ODYSSEY_LOG_POSE") != NULL;
+    if (lg && frame) {
+        log_palettes += frame->count;
+        if (++log_frames % 120 == 0) {
+            LOG("[pose] %u frames with poses: %u palettes, %u of %u vertex buffer binds answered from them; first palette %#llx + %u bytes\n",
+                log_frames, log_palettes, log_hits, log_asks, (unsigned long long)frame->palettes[0]->addresses[0], frame->palettes[0]->size);
+            log_palettes = log_hits = log_asks = 0;
+        }
+    }
     if (render_frame) {
         for (unsigned i = 0; i < render_frame->count; i++) free(render_frame->palettes[i]);
         free(render_frame);
@@ -318,13 +417,14 @@ void odyssey_pose_render_frame(OdysseyPoseFrame *frame) {
 
 const void *odyssey_pose_render_palette(uint64_t address, uint64_t size) {
     if (!render_frame) return NULL;
+    log_asks++;
     for (unsigned i = 0; i < render_frame->count; i++) {
         const Palette *p = render_frame->palettes[i];
         for (unsigned j = 0; j < MAX_SLOTS; j++) {
             uint64_t start = p->addresses[j];
             if (!start || address < start) continue;
             uint64_t offset = address - start;
-            if (offset <= p->size && size <= p->size - offset) return p->data + offset;
+            if (offset <= p->size && size <= p->size - offset) { log_hits++; return p->data + offset; }
         }
     }
     return NULL;
