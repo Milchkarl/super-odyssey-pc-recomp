@@ -1061,6 +1061,14 @@ static void mem_note_ram(void) {
              s.ram_total_mib / 1024.0);
     opt_next_note(b);
 }
+#else
+// macOS: the Metal backend has no Vulkan memory stats (vk_overlay_stats / vk_tex_memory), so the memory bars and
+// notes are skipped. The tabs below call them unconditionally (main builds only Linux/Windows).
+static void memory_bars(float scale) { (void)scale; }
+static void mem_note_resolution(void) {}
+static void mem_note_shadows(void) {}
+static void mem_note_pixels(const char *what, double bytes_per_px, bool output) { (void)what, (void)bytes_per_px, (void)output; }
+static void mem_note_ram(void) {}
 #endif
 
 // A choice whose stored value may be "Auto" (auto_v): the list holds only real values (vals / names), and Auto shows as
