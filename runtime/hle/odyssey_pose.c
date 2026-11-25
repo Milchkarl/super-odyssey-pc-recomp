@@ -1,6 +1,7 @@
 // Odyssey 1.0.0 and 1.4.1: evaluate skeletal clips between gameplay ticks for the native draws (120 FPS: the draw-only frame at
 // the half tick; 90 FPS: every draw at its own fraction of a tick, runtime/hle/odyssey_120.c)
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,10 +35,21 @@ typedef struct {
     uint8_t data[];
 } Palette;
 
+// A bone's matrix at the last tick as a shape block holds it (three rows of four: the 4x4's first three columns and
+// the translation), and what this draw shows in its place
+typedef struct { uint64_t hash; float key[12], val[12]; } Rigid;
 struct OdysseyPoseFrame {
     unsigned count;
     Palette *palettes[MAX_SAMPLES];
+    unsigned rigid_cap, rigid_count;  // (cap: a power of two, open addressing by hash)
+    Rigid *rigid;
 };
+static uint64_t rigid_hash(const void *m) {
+    const uint64_t *w = m;
+    uint64_t h = 0x9e3779b97f4a7c15ull;
+    for (int i = 0; i < 6; i++) h = (h ^ w[i]) * 0xff51afd7ed558ccdull, h ^= h >> 29;
+    return h ? h : 1;
+}
 
 static __thread Model models[MAX_MODELS];
 static __thread Model previous_models[MAX_MODELS];
@@ -119,6 +131,7 @@ void odyssey_pose_begin(void) {
 }
 
 static void pose_record(uint64_t tick);
+static _Atomic uint64_t time_record_ns, time_draw_ns, time_rigid_ns, time_draws;
 void odyssey_pose_end(uint64_t tick) {
     capturing = false;
     if (!odyssey_motion_enabled()) return;
@@ -146,7 +159,9 @@ void odyssey_pose_end(uint64_t tick) {
     memcpy(previous_models, models, model_count * sizeof *models);
     previous_count = model_count;
     previous_tick = tick;
+    uint64_t t0 = plat_now_ns();
     if (blend_enabled()) pose_record(tick);
+    time_record_ns += plat_now_ns() - t0;
 }
 
 void odyssey_pose_player(uint64_t actor) {
@@ -225,6 +240,48 @@ static bool blend_world(const Pose *pose, float back) {
     float *world = (float *)(void *)pose->world;
     for (size_t j = 0; j < n; j++) world[j] = cur[j] + back * (prev[j] - cur[j]);
     return true;
+}
+
+// Models drawn rigidly (no skinning: Mario's hat, platforms, coins) don't read the skeleton's palette: their shape
+// block starts with their bone's matrix, written when the tick's buffers were made. For a draw between two ticks the
+// renderer swaps it by what it holds: every moved bone's matrix at the last tick -> its blend, in the block's layout.
+// (2026-11-25: with only the palettes swapped, Mario's hat stayed at the tick while his head was drawn half a tick
+// back - the hat 3 px up, 7 px down from one 120 FPS frame to the next.)
+static void rigid_add(OdysseyPoseFrame *frame, const Pose *pose, float back) {
+    Blend *b = blend_slot(pose->skeleton, previous_tick, false);
+    if (!b || b->bones != pose->bones || b->cur_tick != previous_tick || b->prev_tick + 1 != b->cur_tick) return;
+    const float *cur = b->cur, *prev = b->prev;
+    float jump = 0.0f;
+    for (unsigned j = 12; j < 15; j++) jump += (cur[j] - prev[j]) * (cur[j] - prev[j]);
+    if (!(jump <= 60.0f * 60.0f)) return;
+    for (unsigned i = 0; i < pose->bones; i++, cur += 16, prev += 16) {
+        if (!memcmp(cur, prev, 64)) continue;
+        if ((frame->rigid_count + 1) * 2 > frame->rigid_cap) {  // (grown: rehashed)
+            unsigned cap = frame->rigid_cap ? frame->rigid_cap * 2 : 1024;
+            Rigid *t = calloc(cap, sizeof *t);
+            if (!t) return;
+            for (unsigned k = 0; k < frame->rigid_cap; k++) {
+                if (!frame->rigid[k].hash) continue;
+                unsigned at = (unsigned)frame->rigid[k].hash & (cap - 1);
+                while (t[at].hash) at = (at + 1) & (cap - 1);
+                t[at] = frame->rigid[k];
+            }
+            free(frame->rigid);
+            frame->rigid = t, frame->rigid_cap = cap;
+        }
+        Rigid r;
+        for (unsigned row = 0; row < 3; row++)
+            for (unsigned col = 0; col < 4; col++) {
+                r.key[row * 4 + col] = cur[col * 4 + row];
+                r.val[row * 4 + col] = cur[col * 4 + row] + back * (prev[col * 4 + row] - cur[col * 4 + row]);
+            }
+        r.hash = rigid_hash(r.key);
+        unsigned at = (unsigned)r.hash & (frame->rigid_cap - 1);
+        while (frame->rigid[at].hash && (frame->rigid[at].hash != r.hash || memcmp(frame->rigid[at].key, r.key, 48)))
+            at = (at + 1) & (frame->rigid_cap - 1);
+        if (!frame->rigid[at].hash) frame->rigid_count++;
+        frame->rigid[at] = r;
+    }
 }
 
 static bool advance_tracks(Pose *pose, float lead) {
@@ -377,6 +434,7 @@ static Palette *sample_model(Cpu *c, Model model, float lead) {
 
 void odyssey_pose_draw(Cpu *c, float lead) {
     OdysseyPoseFrame *frame = NULL;
+    uint64_t t0 = plat_now_ns();
     for (unsigned i = 0; i < model_count; i++) {
         Palette *palette = sample_model(c, models[i], lead);
         if (!palette) continue;
@@ -387,6 +445,28 @@ void odyssey_pose_draw(Cpu *c, float lead) {
         frame->palettes[frame->count++] = palette;
         if (frame->count == MAX_SAMPLES) break;
     }
+    uint64_t t1 = plat_now_ns();
+    static int rigid = -1;
+    if (rigid < 0) { const char *e = getenv("ODYSSEY_POSE_RIGID"); rigid = !e || atoi(e) != 0; }
+    if (rigid && lead < 0.0f && blend_enabled()) {
+        if (!frame) frame = calloc(1, sizeof *frame);
+        for (unsigned i = 0; frame && i < model_count; i++) {
+            Pose pose;
+            if (find_pose(&pose, models[i])) rigid_add(frame, &pose, lead < -1.0f ? 1.0f : -lead);
+        }
+        if (frame && !frame->count && !frame->rigid_count) { free(frame->rigid); free(frame); frame = NULL; }
+    }
+    {
+        uint64_t t2 = plat_now_ns();
+        time_draw_ns += t1 - t0, time_rigid_ns += t2 - t1;
+        static int lg = -1;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_POSE") != NULL;
+        if (++time_draws % 120 == 0) {
+            if (lg) LOG("[pose] time per in-between draw: palettes %.2f ms, rigid table %.2f ms; per tick: keeping the poses %.2f ms (%u models)\n",
+                        time_draw_ns / 120e6, time_rigid_ns / 120e6, time_record_ns / 120e6, model_count);
+            time_draw_ns = time_rigid_ns = time_record_ns = 0;
+        }
+    }
     if (!frame) return;
     if (rq_enabled() && !rq_on_thread()) {
         rq_push(RQ_ODYSSEY_POSE, frame, 0);
@@ -396,13 +476,19 @@ void odyssey_pose_draw(Cpu *c, float lead) {
 
 // ODYSSEY_LOG_POSE=1: every 120 pose frames - how many came with palettes, how many palettes, and how many buffer
 // binds the renderer answered from them (0: the in-between poses never reach a draw)
-static unsigned log_frames, log_palettes, log_hits, log_asks;
+static unsigned log_frames, log_palettes, log_hits, log_asks, log_rigid, log_rigid_asks, log_rigid_hits;
 void odyssey_pose_render_frame(OdysseyPoseFrame *frame) {
     static int lg = -1;
     if (lg < 0) lg = getenv("ODYSSEY_LOG_POSE") != NULL;
     if (lg && frame) {
         log_palettes += frame->count;
-        if (++log_frames % 120 == 0) {
+        log_rigid += frame->rigid_count;
+        if (log_frames % 120 == 119) {
+            LOG("[pose] rigid: %u moved bones offered, %u of %u vertex blocks started with one\n", log_rigid, log_rigid_hits,
+                log_rigid_asks);
+            log_rigid = log_rigid_asks = log_rigid_hits = 0;
+        }
+        if (++log_frames % 120 == 0 && frame->count) {
             LOG("[pose] %u frames with poses: %u palettes, %u of %u vertex buffer binds answered from them; first palette %#llx + %u bytes\n",
                 log_frames, log_palettes, log_hits, log_asks, (unsigned long long)frame->palettes[0]->addresses[0], frame->palettes[0]->size);
             log_palettes = log_hits = log_asks = 0;
@@ -410,9 +496,21 @@ void odyssey_pose_render_frame(OdysseyPoseFrame *frame) {
     }
     if (render_frame) {
         for (unsigned i = 0; i < render_frame->count; i++) free(render_frame->palettes[i]);
+        free(render_frame->rigid);
         free(render_frame);
     }
     render_frame = frame;
+}
+
+const float *odyssey_pose_render_rigid(const void *block, uint64_t size) {
+    if (!render_frame || !render_frame->rigid_count || size < 48) return NULL;
+    log_rigid_asks++;
+    uint64_t h = rigid_hash(block);
+    const Rigid *t = render_frame->rigid;
+    unsigned mask = render_frame->rigid_cap - 1;
+    for (unsigned at = (unsigned)h & mask; t[at].hash; at = (at + 1) & mask)
+        if (t[at].hash == h && !memcmp(t[at].key, block, 48)) { log_rigid_hits++; return t[at].val; }
+    return NULL;
 }
 
 const void *odyssey_pose_render_palette(uint64_t address, uint64_t size) {

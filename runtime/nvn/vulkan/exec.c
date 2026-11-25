@@ -7129,6 +7129,17 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     uint64_t src = r.addr;
     const void *pose = stage == 0 ? odyssey_pose_render_palette(src, size) : NULL;
     if (pose) return ubo_span(vk_transient_copy(pose, size, 256), size);
+    {   // (a draw between two ticks, runtime/hle/odyssey_pose.c: a rigidly drawn model's block starts with its bone's
+        // matrix at the tick - bound with the matrix of the draw's own time in its place)
+        extern const float *odyssey_pose_render_rigid(const void *block, uint64_t size);
+        const float *m = stage == 0 && size <= 0x1000 ? odyssey_pose_render_rigid((const void *)(uintptr_t)src, size) : NULL;
+        if (m) {
+            uint8_t block[0x1000];
+            memcpy(block, (const void *)(uintptr_t)src, size);
+            memcpy(block, m, 48);
+            return ubo_span(vk_transient_copy(block, size, 256), size);
+        }
+    }
     if (g_interp_log && stage < 2) src = (uint64_t)(uintptr_t)interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, si->cbuf_size[k]);
     // snapshot: later CPU writes must not leak in. Shared by the draws of one submission binding the same range:
     // within a command list nothing writes guest memory (no inline UpdateUniformBuffer: that writes through below
