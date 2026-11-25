@@ -48,7 +48,7 @@ cp -R "$L/helper/odysseygen" build/zig "$U/"
 mkdir "$U/gamelib-src"
 cp "$P/bin/bsdtar" "$U/"
 cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-   "$U/gamelib-src/"
+   runtime/hle/hot_functions.txt "$U/gamelib-src/"
 cp tools/linux/AppRun "$APPDIR/" && chmod +x "$APPDIR/AppRun"
 cp recomplauncher.json "$APPDIR/"  # (RecompLauncher reads /recomplauncher.json from the AppImage)
 cp tools/linux/superodysseyrecomp.desktop "$APPDIR/"

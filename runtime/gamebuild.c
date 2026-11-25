@@ -126,6 +126,7 @@ typedef struct {
     char cc[1100];                     // compiler: zig (as `zig cc`), or ODYSSEY_CC (a source checkout: MSYS2's clang)
     bool zig;
     char inc[1100], entry[1100], hle[1100];  // headers the game code includes, tools/gamelib_entry.c, HLE names
+    char hot[1100];  // runtime/hle/hot_functions.txt (the game functions that run: below), "" = none
 #ifdef _WIN32
     char implib[1100];  // the .exe's import library (the runtime functions the game code calls)
     char zig_rt[1100];  // the release's zig: its runtime built ahead of time (zig/rt, tools/zig_slim.sh), "" = none
@@ -162,6 +163,7 @@ static bool find_tools(Tools *t) {
         !rt_resource("gamelib-src" SEP "gamelib_entry.c", "tools/gamelib_entry.c", t->entry, sizeof t->entry) ||
         !rt_resource("gamelib-src" SEP "hle_symbols.txt", "runtime/hle/hle_symbols.txt", t->hle, sizeof t->hle))
         return false;
+    if (!rt_resource("gamelib-src" SEP "hot_functions.txt", "runtime/hle/hot_functions.txt", t->hot, sizeof t->hot)) t->hot[0] = 0;
     char *s = strrchr(t->inc, '/'), *b = strrchr(t->inc, '\\');
     if (b > s) s = b;
     if (s) *s = 0;
@@ -263,12 +265,80 @@ static void log_tail(const char *path, char *out, size_t n) {  // the last line 
 }
 
 // ------------------------------------------------------------------ compiling
+// The game functions that run (runtime/hle/hot_functions.txt, tools/hot_functions.py: every function entered while
+// playing through every kingdom with the function profiler, per module and game version - addresses only, no game
+// code). A generated file holding none of them is compiled without optimization: ~0.4 s instead of up to 100 s, the
+// code there runs several times slower but isn't run in play. Most of the system libraries and nearly all the video
+// library (our videos play through FFmpeg) are such code: a new player's build -46% (PC, 8 jobs; 2026-11-24). A
+// module of a game version the list doesn't name is built optimized throughout, as before; so is everything with
+// ODYSSEY_GAME_ALL_OPT=1 (tests). The list is part of GAMELIB_ID (Makefile).
+typedef struct { uint64_t *a; size_t n; bool known; } HotSet;
+static HotSet g_hot[3];  // (MODULES order)
+
+static int cmp_u64(const void *x, const void *y) {
+    uint64_t a = *(const uint64_t *)x, b = *(const uint64_t *)y;
+    return a < b ? -1 : a > b;
+}
+static bool hot_has(const HotSet *h, uint64_t a) { return h->n && bsearch(&a, h->a, h->n, sizeof a, cmp_u64); }
+
+// The module's build id as the generator names it (tools/nso.py: header bytes 0x40.., the first 8 as hex)
+static bool nso_build_id(const char *nso, char out[17]) {
+    FILE *f = fopen(nso, "rb");
+    unsigned char b[8];
+    bool ok = f && fseek(f, 0x40, SEEK_SET) == 0 && fread(b, 1, 8, f) == 8;
+    if (f) fclose(f);
+    if (ok) for (int i = 0; i < 8; i++) snprintf(out + 2 * i, 3, "%02x", b[i]);
+    return ok;
+}
+
+// "# <module> <build id>" starts a module's section; each line after it a function's address in hex
+static void hot_load(HotSet *h, const char *list, const char *module, const char *build) {
+    free(h->a);
+    memset(h, 0, sizeof *h);
+    if (!list[0] || getenv("ODYSSEY_GAME_ALL_OPT")) return;
+    FILE *f = fopen(list, "r");
+    if (!f) return;
+    char line[256], want[128];
+    snprintf(want, sizeof want, "# %s %s", module, build);
+    bool in = false;
+    size_t cap = 0;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] == '#') { in = !strcmp(line, want); h->known |= in; continue; }
+        if (!in || !line[0]) continue;
+        if (h->n == cap) { cap = cap ? cap * 2 : 4096; h->a = (uint64_t *)realloc(h->a, cap * sizeof *h->a); }
+        h->a[h->n++] = strtoull(line, NULL, 16);
+    }
+    fclose(f);
+    if (h->n) qsort(h->a, h->n, sizeof *h->a, cmp_u64);
+}
+
+// Whether a generated file defines none of the functions that run ("void f_<addr>(Cpu *c) {", gen.py's layout)
+static bool file_cold(const char *path, const HotSet *h) {
+    if (!h->known) return false;
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    char line[4096];
+    bool hot = false;
+    while (!hot && fgets(line, sizeof line, f)) {
+        const char *p = strstr(line, " f_");
+        if (!p || line[0] == ' ' || line[0] == '\t' || !strstr(line, ") {")) continue;
+        hot = hot_has(h, strtoull(p + 3, NULL, 16));
+    }
+    fclose(f);
+    return !hot;
+}
+
 typedef struct {
     char src[1100], obj[1100], log[1100];
     unsigned long long bytes;
     bool generated;  // (deleted once compiled; the entry file is the shipped one)
     bool started;
+    bool cold;       // (defines no function that runs: compiled without optimization)
+    bool hit;        // (its object reused from the last build: obj is in .gamecache)
+    char key[40];    // (what its object is made from, hashed: the cache's name for it; "" = not cached)
     int longest;     // its longest function, in lines (generated files; 0 otherwise)
+    uint64_t t_start;  // (ODYSSEY_LOG_GAMEBUILD: when its compile started)
 } Unit;
 
 typedef struct {
@@ -291,11 +361,26 @@ static void add_unit(Units *us, const char *src, const char *work, const char *s
     struct stat st;
     u->bytes = stat(src, &st) == 0 ? (unsigned long long)st.st_size : 0;
     u->longest = generated ? longest_function(src) : 0;
+    u->cold = u->hit = false;
+    u->key[0] = 0;
+    u->t_start = 0;
+    for (int i = 0; generated && i < 3; i++) {
+        size_t l = strlen(MODULES[i].name);
+        if (!strncmp(stem, MODULES[i].name, l) && stem[l] == '_' && stem[l + 1] >= '0' && stem[l + 1] <= '9')
+            u->cold = file_cold(src, &g_hot[i]);  // (not the tables: modname_table)
+    }
+    // ODYSSEY_GAME_COLD=<stem>[,<stem>...] (tests): those files without optimization too (e.g. main_092)
+    const char *force = getenv("ODYSSEY_GAME_COLD");
+    if (generated && force && *force) {
+        size_t l = strlen(stem);
+        for (const char *p = strstr(force, stem); p; p = strstr(p + 1, stem))
+            if ((p == force || p[-1] == ',') && (p[l] == 0 || p[l] == ',')) u->cold = true;
+    }
 }
 
 // The flags the game code was built with (GAMELIB_CFLAGS, part of its id). zig cc reads -march=<cpu> with its own CPU
 // names (x86_64_v3) and takes "-<feature>" off the end, so x86-64-v3 would be CPU "x86": the same CPU as -mcpu there.
-static void add_cflags(Args *a, const Tools *t) {
+static void add_cflags(Args *a, const Tools *t, bool cold) {
     char buf[1024];
     snprintf(buf, sizeof buf, "%s", GAMELIB_CFLAGS);
     char *save = NULL;
@@ -325,7 +410,7 @@ static void add_cflags(Args *a, const Tools *t) {
     // (ODYSSEY_GAME_OPT=2 / 3, tests: the game code at that level instead - a run-time comparison)
     static const char *opt;
     if (!opt) { const char *e = getenv("ODYSSEY_GAME_OPT"); opt = e && (!strcmp(e, "2") || !strcmp(e, "3")) ? (!strcmp(e, "2") ? "-O2" : "-O3") : "-O1"; }
-    if (t->zig) add(a, "-Xclang"), add(a, opt);
+    if (t->zig) add(a, "-Xclang"), add(a, cold ? "-O0" : opt);
 }
 
 // The longest function in a generated C file, in lines: a function starts at a line that begins with a name and ends
@@ -352,10 +437,108 @@ static int longest_function(const char *path) {
 
 static char g_modules_def[200];  // -DGAMELIB_MODULES=X(main) X(subsdk0) X(sdk): the modules this build has
 
+static void compile_args(const Tools *t, const Unit *u, bool entry, Args *out);
 static PlatProc start_compile(const Tools *t, const Unit *u, bool entry) {
     Args a = {0};
+    compile_args(t, u, entry, &a);
+    PlatProc p = spawn(a.v, u->log);
+    args_free(&a);
+    return p;
+}
+
+// ------------------------------------------------------------------ compiled files kept between builds
+// An update that changes the game code (its generator, the patches) leaves almost every generated file as it was:
+// 0.9.0 -> 1.0.1, 506 of the 509 objects came out byte for byte the same, and the whole build ran again (~2.5 min on a
+// fast PC, ~16 on a Steam Deck). The objects of the last build are kept in <game files>/.gamecache, each named by a
+// hash of what it is made from - its C source, the compile command (the build's id and the paths left out: generated
+// files never use the id, and the objects didn't change with it), the headers it includes and the compiler's version -
+// and a build takes an object from there instead of compiling a file whose hash it has. After a build that worked,
+// .gamecache holds exactly that build's objects (~150 MB). ODYSSEY_GAME_NO_CACHE=1: everything compiled (tests).
+static char g_cache[1100], g_cache_new[1100];
+static uint64_t g_cache_salt[2];
+static bool g_cache_on;
+
+static void hash2(uint64_t h[2], const void *p, size_t n) {  // (two FNV-1a 64 lanes with different seeds: 128 bits)
+    const unsigned char *b = (const unsigned char *)p;
+    for (size_t i = 0; i < n; i++) {
+        h[0] = (h[0] ^ b[i]) * 0x100000001b3ull;
+        h[1] = (h[1] ^ b[i]) * 0x100000001b3ull + 0x9e37;
+    }
+}
+static bool hash2_file(uint64_t h[2], const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    static char buf[1 << 16];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) hash2(h, buf, n);
+    fclose(f);
+    return true;
+}
+// what every object depends on besides its own file and command: the compiler (its version) and the headers
+static void cache_init(const Tools *t, const char *game_dir, const char *work) {
+    g_cache_on = t->zig && !getenv("ODYSSEY_GAME_NO_CACHE");
+    snprintf(g_cache, sizeof g_cache, "%s" SEP ".gamecache", game_dir);
+    snprintf(g_cache_new, sizeof g_cache_new, "%s" SEP ".gamecache.new", game_dir);
+    rt_remove_game_file(game_dir, ".gamecache.new");  // (a build that stopped half-way)
+    g_cache_salt[0] = 0xcbf29ce484222325ull, g_cache_salt[1] = 0x84222325cbf29ce4ull;
+    char p[1200];
+    snprintf(p, sizeof p, "%s" SEP "zig-version.log", work);
+    if (!hash2_file(g_cache_salt, p)) g_cache_on = false;
+    static const char *const hdr[] = {"cpu.h", "simd.h", "simd_fp.h", "gamelib.h"};
+    for (int i = 0; i < 4; i++) {
+        snprintf(p, sizeof p, "%s" SEP "%s", t->inc, hdr[i]);
+        if (!hash2_file(g_cache_salt, p)) g_cache_on = false;
+    }
+    hash2(g_cache_salt, ZIG_TARGET GAMELIB_CFLAGS, sizeof(ZIG_TARGET GAMELIB_CFLAGS));
+}
+static bool unit_key(const Tools *t, Unit *u) {
+    u->key[0] = 0;
+    if (!g_cache_on || !u->generated) return false;
+    uint64_t h[2] = {g_cache_salt[0], g_cache_salt[1]};
+    Args a = {0};
+    compile_args(t, u, false, &a);
+    for (int i = 1; i < a.n; i++) {  // (not the compiler's path: its version is in the salt)
+        const char *s = a.v[i];
+        if (!strncmp(s, "-I", 2) || !strncmp(s, "-DGAMELIB_ID=", 13) || !strcmp(s, u->src) || !strcmp(s, u->obj)) continue;
+        hash2(h, s, strlen(s) + 1);
+    }
+    args_free(&a);
+    if (!hash2_file(h, u->src)) return false;
+    snprintf(u->key, sizeof u->key, "%016llx%016llx", (unsigned long long)h[0], (unsigned long long)h[1]);
+    if (getenv("ODYSSEY_LOG_GAMEBUILD")) {  // (what went into the key: the cache's misses explained)
+        Args b = {0};
+        compile_args(t, u, false, &b);
+        char cmd[2048] = "";
+        size_t o = 0;
+        for (int i = 1; i < b.n && o < sizeof cmd - 200; i++)
+            o += snprintf(cmd + o, sizeof cmd - o, " %s", b.v[i]);
+        args_free(&b);
+        LOG("[gamebuild] key %s %s (salt %016llx):%s\n", u->key, u->src, (unsigned long long)g_cache_salt[0], cmd);
+    }
+    return true;
+}
+// After a build that worked: its objects become the cache (moved, not copied), the last build's go
+static void cache_keep(Units *us, const char *game_dir) {
+    if (!g_cache_on) return;
+    mkdir(g_cache_new, 0755);
+    int kept = 0;
+    for (int k = 0; k < us->n; k++) {
+        Unit *u = &us->u[k];
+        if (!u->key[0]) continue;
+        char to[1200];
+        snprintf(to, sizeof to, "%s" SEP "%s.o", g_cache_new, u->key);
+        remove(to);  // (Windows' rename doesn't replace: two files with the same source and command share one)
+        if (rename(u->obj, to) == 0) kept++;
+    }
+    rt_remove_game_file(game_dir, ".gamecache");
+    if (rename(g_cache_new, g_cache) != 0) rt_remove_game_file(game_dir, ".gamecache.new");
+    LOG("[gamebuild] %d compiled files kept for the next build (%s)\n", kept, g_cache);
+}
+
+static void compile_args(const Tools *t, const Unit *u, bool entry, Args *out) {
+    Args a = {0};
     compiler(&a, t);
-    add_cflags(&a, t);
+    add_cflags(&a, t, u->cold);
     // A file holding a giant function (over 3,000 lines: about 60 of the ~500, mostly system codecs and the video
     // decoder) without LICM's promotion: on those it alone took many minutes per file (sdk_053: 13 min, 104 s
     // without it, on a Steam Deck). The rest keep it - it keeps guest registers in host ones in loops.
@@ -367,7 +550,7 @@ static PlatProc start_compile(const Tools *t, const Unit *u, bool entry) {
     // ODYSSEY_GAME_SLOW_FLAGS=1: without the two (tests).
     static int slow_flags = -1;
     if (slow_flags < 0) slow_flags = getenv("ODYSSEY_GAME_SLOW_FLAGS") != NULL;
-    if (t->zig && u->generated && u->longest > 3000) {
+    if (t->zig && u->generated && u->longest > 3000 && !u->cold) {
         add(&a, "-mllvm"), add(&a, "-disable-licm-promotion");
         if (!slow_flags) add(&a, "-mllvm"), add(&a, "-join-globalcopies=false"), add(&a, "-fno-slp-vectorize");
     }
@@ -382,9 +565,7 @@ static PlatProc start_compile(const Tools *t, const Unit *u, bool entry) {
     add(&a, u->src);
     add(&a, "-o");
     add(&a, u->obj);
-    PlatProc p = spawn(a.v, u->log);
-    args_free(&a);
-    return p;
+    *out = a;
 }
 
 // ------------------------------------------------------------------ the build
@@ -435,6 +616,8 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         setenv("ZIG_LOCAL_CACHE_DIR", zc, 1);
 #endif
     }
+    cache_init(&t, game_dir, work);  // (after `zig version`: its answer is part of every object's key)
+    int reused = 0;
     LOG("[gamebuild] generator %s%s%s, compiler %s%s, %d jobs, for a CPU with %s%s%s\n", t.gen, t.gen_script[0] ? " " : "",
         t.gen_script, t.cc, t.zig ? " cc" : "", o->jobs, gamelib_cpu_name(), gamelib_cpu_march() ? ": -march=" : "",
         gamelib_cpu_march() ? gamelib_cpu_march() : "");
@@ -451,6 +634,12 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
             snprintf(why, why_size, "the game files have no exefs/%s", MODULES[i].name);
             ok = false;
             break;
+        }
+        {   // the functions of this module and game version that run (above: cold files)
+            char id[17] = "";
+            if (nso_build_id(nso, id)) hot_load(&g_hot[i], t.hot, MODULES[i].name, id);
+            LOG("[gamebuild] %s (build %s): %s\n", MODULES[i].name, id[0] ? id : "?", g_hot[i].known
+                ? "files without a function that runs are compiled without optimization" : "every file optimized");
         }
         Gen *g = &gens[ngen++];
         memset(g, 0, sizeof *g);
@@ -483,6 +672,7 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
     int queued[NMOD] = {0};  // chunk files of each module put in units so far
     bool tables[NMOD] = {false};
     int next = 0, jobs = o->jobs < 1 ? 1 : o->jobs > 64 ? 64 : o->jobs;
+    if (getenv("ODYSSEY_GAME_JOBS")) jobs = atoi(getenv("ODYSSEY_GAME_JOBS")) < 1 ? 1 : atoi(getenv("ODYSSEY_GAME_JOBS")) > 64 ? 64 : atoi(getenv("ODYSSEY_GAME_JOBS"));  // (tests: a Steam Deck's 8)
     struct { PlatProc p; int unit; } run[64];
     int nrun = 0;
     unsigned long long done_bytes = 0;
@@ -501,6 +691,8 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
                 if (r >= 0) {
                     g->exit = r;
                     read_gen_log(g);
+                    if (getenv("ODYSSEY_LOG_GAMEBUILD"))
+                        LOG("[gamebuild] generator (%s) ended at %.1f s, %d files\n", g->m->name, (plat_now_ns() - t0) / 1e9, g->files);
                     if (r != 0) {
                         char last[300];
                         log_tail(g->log, last, sizeof last);
@@ -549,9 +741,22 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
                 if (gk != gp ? gk > gp : units.u[k].bytes > units.u[pick].bytes) pick = k;
             }
             if (pick < 0) break;
+            {   // made before from the same source and command: the last build's object (above: .gamecache)
+                Unit *pu = &units.u[pick];
+                char c[1200];
+                if (unit_key(&t, pu) && (snprintf(c, sizeof c, "%s" SEP "%s.o", g_cache, pu->key), file_exists(c))) {
+                    snprintf(pu->obj, sizeof pu->obj, "%s", c);
+                    pu->hit = pu->started = true;
+                    next++, reused++;
+                    done_bytes += pu->bytes;
+                    if (!getenv("ODYSSEY_LOG_GAMEBUILD")) remove(pu->src);
+                    continue;
+                }
+            }
             PlatProc p = start_compile(&t, &units.u[pick], false);
             if (!p) { snprintf(why, why_size, "the compiler didn't start"); ok = false; break; }
             units.u[pick].started = true;
+            units.u[pick].t_start = plat_now_ns();
             run[nrun].p = p, run[nrun].unit = pick;
             nrun++, next++;
         }
@@ -567,11 +772,25 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
                 ok = false;
             }
             done_bytes += u->bytes;
-            if (u->generated) remove(u->src);  // (generated C, done with: not kept)
+            // ODYSSEY_LOG_GAMEBUILD=1 (measurements): each file's compile - when it started and ended in the build, its
+            // size and its longest function - and the generated C kept (for reading what a slow file holds)
+            static int log_units = -1;
+            if (log_units < 0) log_units = getenv("ODYSSEY_LOG_GAMEBUILD") != NULL;
+            if (log_units)
+                LOG("[gamebuild] unit %s: %.1f s (from %.1f to %.1f s), %llu KB, longest function %d lines\n",
+                    u->src, (plat_now_ns() - u->t_start) / 1e9, (u->t_start - t0) / 1e9, (plat_now_ns() - t0) / 1e9,
+                    u->bytes / 1024, u->longest);
+            if (u->generated && !log_units) remove(u->src);  // (generated C, done with: not kept)
             run[k--] = run[--nrun];
         }
         if (!ok) break;
-        if (gens_done && next == units.n - 1 && nrun == 0) break;  // (all but the entry, unit 0, done)
+        if (gens_done && next == units.n - 1 && nrun == 0) {  // (all but the entry, unit 0, done)
+            int cold = 0;
+            for (int k = 0; k < units.n; k++) cold += units.u[k].cold;
+            LOG("[gamebuild] %d files: %d compiled (%d without optimization: no function that runs), %d reused from the "
+                "last build; by %.0f s\n", units.n - 1, units.n - 1 - reused, cold, reused, (plat_now_ns() - t0) / 1e9);
+            break;
+        }
 
         // progress: the generator's share (its functions written), the compiler's (bytes of C compiled, of an
         // estimate of all of it while the generator still writes)
@@ -665,6 +884,8 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         }
         if (f) fclose(f);
     }
+    if (ok) cache_keep(&units, game_dir);
+    else if (reused) rt_remove_game_file(game_dir, ".gamecache");  // (a failed build that used it: the next one compiles all)
     free(units.u);
     if (!getenv("ODYSSEY_KEEP_GAMEBUILD")) rt_remove_game_file(game_dir, ".gamebuild");  // the C, the objects, the logs
     LOG("[gamebuild] %s in %.0fs\n", ok ? "done" : "failed", (double)(plat_now_ns() - t0) / 1e9);

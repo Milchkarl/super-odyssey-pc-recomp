@@ -111,7 +111,7 @@ endif
 # flags, and on Windows releases the compiler runtime it is linked with: tools/zig_slim.sh). A library with another id
 # is never loaded (`make gen`, then `make` again; players' setup builds it again).
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/analyze.py tools/nso.py tools/passes.py tools/odyssey_patches.py \
-                tools/simd_c.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
+                tools/simd_c.py tools/gamelib_entry.c runtime/hle/hle_symbols.txt runtime/hle/hot_functions.txt \
                 runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h
 # (the compiler runtime's script only where it is used: its change for #87 made every Linux / Steam Deck player's
 # game code rebuild too - about 25 minutes on a Deck - for a library that was the same. runtime/gamelib.c same_as
@@ -324,7 +324,7 @@ dist:
 	cp -R build/helper/odysseygen "$(DIST)/"
 	cp -R build/zig-slim "$(DIST)/zig"
 	cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-	    "$(DIST)/gamelib-src/"
+	    runtime/hle/hot_functions.txt "$(DIST)/gamelib-src/"
 	cp runtime/nvn/vulkan/known_programs.txt third_party/imgui/misc/fonts/Roboto-Medium.ttf data/pipeline-seed.bin.zst 	    README.md LICENSE recomplauncher.json "$(DIST)/"  # (recomplauncher.json: RecompLauncher's setup, next to the exe)
 	mkdir -p "$(DIST)/lang" && cp runtime/ui/lang/*.txt "$(DIST)/lang/"  # (the menu's translations: runtime/ui/i18n.mm)
 	mkdir -p "$(DIST)/fsr2" && cp third_party/fsr2/shaders/* third_party/fsr2/LICENSE.txt "$(DIST)/fsr2/"  # (FSR 2: runtime/nvn/vulkan/fsr2.c)

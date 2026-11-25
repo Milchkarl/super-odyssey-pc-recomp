@@ -1756,6 +1756,10 @@ static Job *jobq_pop(JobQ *q) {
 #else
 #define RT_THREAD_NAME(...) do { } while (0)
 #endif
+// The game's shader jobs queued or running (builds and translations): the start-up warm-up's background part waits
+// while there are any (exec.c warm_worker)
+static _Atomic int g_shader_jobs;
+static bool sync_shaders(void);
 static void *worker(void *a) {
     (void)a;
     RT_THREAD_NAME("shader worker");
@@ -1769,11 +1773,13 @@ static void *worker(void *a) {
             pthread_cond_wait(&jobs_cond, &jobs_lock);
         }
         pthread_mutex_unlock(&jobs_lock);
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        bool lowered = low && !sync_shaders();  // (see the translator)
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
         j->fn(j->arg);
         free(j);
+        atomic_fetch_sub(&g_shader_jobs, 1);
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
         if (low) {
-            SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
             pthread_mutex_lock(&jobs_lock);
             jobs_low_running--;
             pthread_cond_signal(&jobs_cond);
@@ -1874,10 +1880,14 @@ static void *translator(void *a) {
         // Programs set up ahead translate at low priority, as the workers build them (a Steam Deck's 4 cores: two
         // translators at normal priority for minutes after a stage load, every program it set up, took the game
         // thread from 24 to 38 ms a frame). Urgent ones - a draw waits - stay at normal priority.
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        // While builds block (a scene warming up: its draws wait for them) not even those: on a 4-thread CPU the game's
+        // own loading threads kept low-priority builds from running and the first frame came after 40-100 s.
+        bool lowered = low && !sync_shaders();
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
         j->fn(j->arg);
         free(j);
-        if (low) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+        atomic_fetch_sub(&g_shader_jobs, 1);
+        if (lowered) SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
     }
     return NULL;
 }
@@ -1915,6 +1925,7 @@ static void queue_translate(void (*fn)(void *), void *arg, int q) {
     pthread_once(&once, translator_start);
     Job *j = malloc(sizeof *j);
     j->fn = fn; j->arg = arg;
+    atomic_fetch_add(&g_shader_jobs, 1);
     pthread_mutex_lock(&tjobs_lock);
     jobq_push(&tjobs_q[q], j);
     pthread_cond_signal(&tjobs_cond);
@@ -1926,6 +1937,7 @@ static void queue_job(void (*fn)(void *), void *arg, int q) {
     pthread_once(&once, workers_start);
     Job *j = malloc(sizeof *j);
     j->fn = fn; j->arg = arg;
+    atomic_fetch_add(&g_shader_jobs, 1);
     pthread_mutex_lock(&jobs_lock);
     jobq_push(&jobs_q[q], j);
     pthread_cond_signal(&jobs_cond);
@@ -3958,6 +3970,10 @@ void vk_census_report(void) {
     for (int i = 0; i < 3; i++)
         LOG("[census] %-10s: not prepared %u (%.0f ms), output version %u (%.0f ms), other %u (%.0f ms)\n", k[i],
             census_n[i][0], census_us[i][0] / 1e3, census_n[i][1], census_us[i][1] / 1e3, census_n[i][2], census_us[i][2] / 1e3);
+    extern _Atomic uint32_t g_lib_hits, g_lib_miss;
+    extern _Atomic uint64_t g_lib_miss_us;
+    LOG("[census] libraries : %u from the game's pipeline cache, %u made by the driver (%.0f ms)\n", atomic_load(&g_lib_hits),
+        atomic_load(&g_lib_miss), atomic_load(&g_lib_miss_us) / 1e3);
 }
 
 void vk_drawn_programs_save(void) {
@@ -4477,6 +4493,7 @@ static const VkDynamicState DYN_FO[] = {VK_DYNAMIC_STATE_BLEND_CONSTANTS};
 #define DYN_INFO(a) {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = sizeof a / sizeof a[0], .pDynamicStates = a}
 
 static __thread VkResult t_lib_result;  // (the last create_lib_in's on this thread)
+static __thread bool t_lib_hit;  // (the last library this thread made came from the game's pipeline cache)
 static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryFlagsEXT part) {
     const void *next = pi->pNext;
     VkPipelineCreateFlags flags = pi->flags;
@@ -4498,8 +4515,25 @@ static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateI
         return VK_NULL_HANDLE;
     }
     if (cache) pcache_note(&fb);
+    {   // ODYSSEY_LOG_LIBCACHE=1: each library made - from the game's pipeline cache (hit) or compiled by the driver -,
+        // its part, flags and time; the totals with the census
+        static int lc = -1;
+        if (lc < 0) lc = getenv("ODYSSEY_LOG_LIBCACHE") != NULL;
+        bool valid = fb.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
+        bool hit = valid && (fb.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT);
+        extern _Atomic uint32_t g_lib_hits, g_lib_miss;
+        extern _Atomic uint64_t g_lib_miss_us;
+        t_lib_hit = hit;
+        if (hit) atomic_fetch_add(&g_lib_hits, 1);
+        else atomic_fetch_add(&g_lib_miss, 1), atomic_fetch_add(&g_lib_miss_us, fb.duration / 1000);
+        if (lc)
+            LOG("[libcache] %s part %#x flags %#x cache %s: %s, %.1f ms\n", hit ? "hit " : "miss", part, flags,
+                cache ? "game" : "none", valid ? "" : "(no feedback)", fb.duration / 1e6);
+    }
     return lib;
 }
+_Atomic uint32_t g_lib_hits, g_lib_miss;
+_Atomic uint64_t g_lib_miss_us;
 // (the setup's shader pass, pm_worker) a program compiled only for the driver's own disk cache: not into the game's
 // pipeline cache, which the game loads whole at every start - see pc_worker
 static __thread bool t_driver_cache_only;
@@ -4918,7 +4952,9 @@ static VkPipeline shader_lib_make(Prog *p, bool frag, int fill, bool cached_only
     }
     shader_time_log(cached_only ? (frag ? "cached library fs" : "cached library vs") : frag ? "library fs" : "library vs",
                     p->code[1], t0);
-    if (!capture_only) build_census(p, cached_only ? 2 : 1, t0);
+    // (a library the driver found in the game's pipeline cache counts as "from cache", as a cached_only one: they were all
+    // "compiled" before - 1,456 in a new player's opening that were cache hits, 2026-11-24)
+    if (!capture_only) build_census(p, cached_only || (lib && t_lib_hit) ? 2 : 1, t0);
     return lib;
 }
 
@@ -5577,6 +5613,24 @@ int vk_prepare_main(const char *list) {
 // whole pipelines)
 #define LIB_TAB 8192
 static struct { uint64_t key; VkPipeline lib; } vi_tab[LIB_TAB], fo_tab[LIB_TAB];
+// (the warm-up's threads build pipelines too - at start and, since 2026-11-24, in the background while the game draws:
+// a slot found free by two threads at once could pair one's key with the other's library - a wrong vertex layout or
+// blend for that pipeline. Only a new pipeline's link comes here, not each draw.)
+static pthread_mutex_t lib_lock = PTHREAD_MUTEX_INITIALIZER;
+static VkPipeline vertex_input_lib_(const PipeKey *k);
+static VkPipeline fragment_output_lib_(const PipeKey *k);
+static VkPipeline vertex_input_lib(const PipeKey *k) {
+    pthread_mutex_lock(&lib_lock);
+    VkPipeline v = vertex_input_lib_(k);
+    pthread_mutex_unlock(&lib_lock);
+    return v;
+}
+static VkPipeline fragment_output_lib(const PipeKey *k) {
+    pthread_mutex_lock(&lib_lock);
+    VkPipeline v = fragment_output_lib_(k);
+    pthread_mutex_unlock(&lib_lock);
+    return v;
+}
 
 static VkPipeline lib_lookup(void *tab_, uint64_t h, bool *found) {
     struct { uint64_t key; VkPipeline lib; } *tab = tab_;
@@ -5586,7 +5640,7 @@ static VkPipeline lib_lookup(void *tab_, uint64_t h, bool *found) {
     return *found ? tab[slot].lib : (VkPipeline)(uintptr_t)(slot + 1u);  // (not found: the free slot, + 1)
 }
 
-static VkPipeline vertex_input_lib(const PipeKey *k) {
+static VkPipeline vertex_input_lib_(const PipeKey *k) {
     uint64_t h = hash_words(0x5bd1e995ull, k->attr_fmt, offsetof(PipeKey, blend) - offsetof(PipeKey, attr_fmt));
     h = hmix(h, &k->topo_class, 1);
     if (!h) h = 1;
@@ -5622,7 +5676,7 @@ static VkPipeline vertex_input_lib(const PipeKey *k) {
     return lib;
 }
 
-static VkPipeline fragment_output_lib(const PipeKey *k) {
+static VkPipeline fragment_output_lib_(const PipeKey *k) {
     uint64_t h = hash_words(0x27d4eb2dull, k->color, offsetof(PipeKey, attr_fmt) - offsetof(PipeKey, color));
     h = hash_words(h, k->blend, sizeof k->blend);
     h = hmix(h, &k->blend_on, 2);  // (blend_on, a2c)
@@ -5936,7 +5990,7 @@ static Prog *prewarm_program(const PipeRecipe *r, bool use_libraries) {
         free(p);
         return NULL;
     }
-    if (use_libraries) make_shader_libs(p, false);
+    (void)use_libraries;  // (its libraries: the caller makes them, outside warm_lock - below)
     // Keep the program's Vulkan objects alive alongside the prewarmed pipelines, as for programs built in play.
     warm_programs[slot].hash = hash;
     warm_programs[slot].prog = p;
@@ -6010,6 +6064,7 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
     memcpy((uint8_t *)&pp->k + PIPE_STATE_OFFSET, r->state, sizeof r->state);
     bool in_range = r->spv[0] && pp->k.ncolor <= 8 && pp->k.poly_fill <= 3 && pp->k.topo_class <= 2;
     if (in_range) pp->k.prog = prewarm_program(r, use_libraries);
+    if (pp->k.prog && use_libraries && !pp->k.prog->lib_fs) make_shader_libs(pp->k.prog, false);
     if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
     if (atomic_load(&pp->state) != 1) {
         g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
@@ -6029,6 +6084,7 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
 // claimed by writing its key (pipe_slot then skips it for other keys; one left without a pipe is built in play, as a
 // key never warmed). ODYSSEY_PREWARM_THREADS=<n>: that many (1: one at a time, as before).
 static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic uint32_t g_warm_dups;  // (warm-up pipelines the game had built first)
 static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool use_libraries) {
     pthread_mutex_lock(&warm_lock);
     uint32_t slot = pipe_slot(hash);
@@ -6047,34 +6103,82 @@ static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool u
     }
     pthread_mutex_unlock(&warm_lock);
     if (!pp) return false;
+    // (the program's libraries outside warm_lock: a driver compile, 100 ms and more when the pipeline cache doesn't have
+    // it - under the lock it held up the game's own draws, which take that lock to add a pipeline while the warm-up runs
+    // in the background: 50 s before the first frame on a 4-thread run. Two threads asking for one library: shader_lib
+    // makes it once, slib_claim.)
+    if (pp->k.prog && use_libraries && !pp->k.prog->lib_fs) make_shader_libs(pp->k.prog, false);
     if (pp->k.prog && (!use_libraries || !link_pipeline(pp))) build_pipeline(pp);
     bool ok = atomic_load(&pp->state) == 1;
     pthread_mutex_lock(&warm_lock);
-    if (ok) {
+    if (ok && pipe_tab[slot].pipe) ok = false;  // (the game drew it meanwhile and built its own: draw_ below)
+    else if (ok) {
         pp->recorded = true;
         pipe_tab[slot].pipe = pp;
     } else g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
     pthread_mutex_unlock(&warm_lock);
-    if (!ok) free(pp);
+    if (!ok) {  // (built, but the game built its own meanwhile - often, with the warm-up in the background: destroyed)
+        if (pp->pipe) vkDestroyPipeline(g_vk.dev, pp->pipe, NULL), atomic_fetch_add(&g_warm_dups, 1);
+        free(pp);
+    }
     return ok;
 }
+// Start-up waits only for the first scene's pipelines (prioritize_first_scene puts them first); the warm-up then goes
+// on in the background, on the same threads at low priority, while the game starts (2026-11-24: the owner's install,
+// 12,166 recorded pipelines, waited 13.7 s for all of them before the first frame, every start). Meanwhile the draw
+// path takes warm_lock when it adds a pipeline (g_warm_bg: two threads must not claim one table slot), and a pipeline the
+// game drew first is kept over the warm-up's. Compute recipes are left to the game in the background. Each recipe's
+// budget (time, memory) is as before. ODYSSEY_PREWARM_BG=0: wait for all of it, as before.
+static _Atomic bool g_warm_bg;
 typedef struct {
     const PipeRecipe *recipes;
     const uint32_t *order;
-    uint32_t count, recent;
+    uint32_t count, recent, first;
     bool libs;
     uint64_t t0, memory, memory_budget, time_budget;
     _Atomic uint32_t next, warmed, compute, attempted;
-    _Atomic bool stop;
+    _Atomic bool stop, bg, cleaned;
+    _Atomic int running;
+    _Atomic uint32_t max_warmed;  // (background: the memory budget as a number of pipelines - the game's own loading grows the
+                          // process meanwhile, so its private bytes no longer tell what the warm-up added)
+    PipeRecipe *own_recipes;  // (background: freed by whoever ends it last)
+    uint32_t *own_order;
 } WarmJob;
+static void warm_bg_done(WarmJob *j) {
+    LOG("[vk] background warm-up done: %u graphics pipelines prewarmed (%u attempted of %u, %u the game had built first) in %.2f s\n",
+        atomic_load(&j->warmed), atomic_load(&j->attempted), j->count, atomic_load(&g_warm_dups), (plat_now_ns() - j->t0) / 1e9);
+    atomic_store(&g_warm_bg, false);
+    free(j->own_recipes);
+    free(j->own_order);
+    free(j);
+}
+
 static int warm_worker(void *arg) {
     WarmJob *j = arg;
+    bool low = false;
+    uint64_t paused = 0;
     for (;;) {
         if (atomic_load(&j->stop)) break;
         uint32_t a = atomic_fetch_add(&j->next, 1);
         if (a >= j->count) break;
+        // (in the background the game's own shader work goes first: on a 4-core PC the warm-up's threads beside the
+        // programs the game sets up at start, all at low priority, held the first frame until the warm-up ended -
+        // 42 s instead of 20 with the old warm-up. A scene warming up waits for its builds: the same.)
+        uint64_t w0 = 0;
+        while (atomic_load(&j->bg) && !atomic_load(&j->stop) && (atomic_load(&g_shader_jobs) > 0 || sync_shaders())) {
+            if (!w0) w0 = plat_now_ns();
+            SDL_Delay(2);
+        }
+        if (w0) paused += plat_now_ns() - w0;  // (not counted in its time budget - this thread's own waits)
+        if (a >= j->first && !low && atomic_load(&j->bg)) {  // (the first scene's are done: the game goes first)
+            SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+            low = true;
+        }
         // (the same bounds as before: driver allocations for libraries can be much larger than the recipe file)
-        if (a && a % 16 == 0 && (plat_private_bytes() > j->memory + j->memory_budget || plat_now_ns() - j->t0 > j->time_budget)) {
+        bool over = atomic_load(&j->bg) ? atomic_load(&j->warmed) >= atomic_load(&j->max_warmed)
+                                        : plat_private_bytes() > j->memory + j->memory_budget;
+        // (in the background: before each pipeline - with the cache missing, 16 can take many seconds each thread)
+        if (a && (atomic_load(&j->bg) || a % 16 == 0) && (over || plat_now_ns() - j->t0 > j->time_budget + paused)) {
             atomic_store(&j->stop, true);
             break;
         }
@@ -6083,6 +6187,7 @@ static int warm_worker(void *arg) {
         const PipeRecipe *r = &j->recipes[index];
         uint64_t hash = pipe_recipe_hash(r);
         if (!r->spv[1]) {
+            if (atomic_load(&j->bg)) continue;  // (the compute table isn't shared with the game's dispatches)
             pthread_mutex_lock(&warm_lock);
             uint32_t c = prewarm_compute(r, hash);
             pthread_mutex_unlock(&warm_lock);
@@ -6091,6 +6196,8 @@ static int warm_worker(void *arg) {
         }
         if (warm_graphics_pipeline_mt(r, hash, j->libs)) atomic_fetch_add(&j->warmed, 1);
     }
+    if (atomic_fetch_sub(&j->running, 1) == 1 && atomic_load(&j->bg) && !atomic_exchange(&j->cleaned, true))
+        warm_bg_done(j);
     return 0;
 }
 static int warm_threads(void) {
@@ -6107,7 +6214,8 @@ static bool warm_uses_libraries(void) {
 
 static void prewarm_post_pipelines(void);
 
-static uint32_t *prioritize_first_scene(const PipeRecipe *recipes, uint32_t count, uint32_t recent) {
+static uint32_t *prioritize_first_scene(const PipeRecipe *recipes, uint32_t count, uint32_t recent, uint32_t *nfirst) {
+    *nfirst = 0;
     if (!game_is_odyssey()) return NULL;
     uint64_t keys[FIRST_SCENE_PIPELINES];
     uint32_t n = load_first_scene_keys(keys);
@@ -6127,6 +6235,7 @@ static uint32_t *prioritize_first_scene(const PipeRecipe *recipes, uint32_t coun
         }
     }
     LOG("[vk] prioritizing %u first-scene pipelines at startup\n", next);
+    *nfirst = next;
     for (uint32_t i = count - recent; i < count; i++) if (hashes[i]) order[next++] = i;
     for (uint32_t i = 0; i < count - recent; i++) if (hashes[i]) order[next++] = i;
     free(hashes);
@@ -6235,20 +6344,75 @@ void vk_pipeline_prewarm(bool build) {
     // long caches can stop at the same early entries on every boot and miss gameplay effects.
     uint32_t recent = odyssey_native_120_enabled() ? h.count / 4 : 0;
     if (recent > 768) recent = 768;
-    uint32_t *order = build ? prioritize_first_scene(recipes, h.count, recent) : NULL;
+    for (uint32_t i = 0; i < h.count; i++) pipe_recipe_add(&recipes[i]);  // (the list kept: before any warm-up thread)
+    pipe_recipe_saved = pipe_recipe_count;
+    uint32_t nfirst = 0;
+    uint32_t *order = build ? prioritize_first_scene(recipes, h.count, recent, &nfirst) : NULL;
     uint32_t attempted = 0;
     int nthreads = build ? warm_threads() : 1;
+    bool background = false;
     if (build && nthreads > 1) {
-        WarmJob job = {.recipes = recipes, .order = order, .count = h.count, .recent = recent, .libs = use_libraries,
-                       .t0 = t0, .memory = memory, .memory_budget = memory_budget, .time_budget = time_budget};
+        static int bg_env = -2;
+        if (bg_env == -2) bg_env = getenv("ODYSSEY_PREWARM_BG") ? atoi(getenv("ODYSSEY_PREWARM_BG")) : 1;
+        WarmJob *job = calloc(1, sizeof *job);
+        job->recipes = recipes, job->order = order, job->count = h.count, job->recent = recent, job->first = nfirst;
+        job->libs = use_libraries, job->t0 = t0, job->memory = memory, job->memory_budget = memory_budget;
+        job->time_budget = time_budget;
         SDL_Thread *th[32];
         int started = 0;
+        atomic_store(&job->running, nthreads);
         for (int i = 0; i < nthreads; i++)
-            if ((th[started] = SDL_CreateThread(warm_worker, "warmup", &job))) started++;
-        if (!started) warm_worker(&job);
-        for (int i = 0; i < started; i++) SDL_WaitThread(th[i], NULL);
-        warmed = atomic_load(&job.warmed), compute = atomic_load(&job.compute), attempted = atomic_load(&job.attempted);
-        LOG("[vk] warm-up on %d threads\n", started ? started : 1);
+            if ((th[started] = SDL_CreateThread(warm_worker, "warmup", job))) started++;
+        atomic_fetch_sub(&job->running, nthreads - started);
+        if (!started) atomic_store(&job->running, 1), warm_worker(job);
+        // (wait for the first scene's pipelines - or all, with no first-scene list or ODYSSEY_PREWARM_BG=0)
+        bool wait_all = !bg_env || !nfirst || !started;
+        uint64_t half_mem = 0;
+        uint32_t half_warmed = 0;
+        while (!wait_all && atomic_load(&job->running) > 0 && atomic_load(&job->attempted) < nfirst && !atomic_load(&job->stop) &&
+               plat_now_ns() - t0 < time_budget) {
+            if (!half_mem && atomic_load(&job->attempted) >= nfirst / 2)  // (the budget's measure: below)
+                half_mem = plat_private_bytes(), half_warmed = atomic_load(&job->warmed);
+            SDL_DelayNS(2000000);
+        }
+        // (the attempted count is claimed before the build: let those already started finish)
+        while (!wait_all && atomic_load(&job->running) > 0 && atomic_load(&job->warmed) + g_warm_miss[0] + g_warm_miss[1] +
+               g_warm_miss[2] + g_warm_miss[3] < nfirst && plat_now_ns() - t0 < time_budget)
+            SDL_DelayNS(2000000);
+        if (wait_all || atomic_load(&job->running) == 0) {
+            for (int i = 0; i < started; i++) SDL_WaitThread(th[i], NULL);
+            warmed = atomic_load(&job->warmed), compute = atomic_load(&job->compute), attempted = atomic_load(&job->attempted);
+            LOG("[vk] warm-up on %d threads\n", started ? started : 1);
+            free(job);
+        } else {
+            background = true;
+            warmed = atomic_load(&job->warmed), compute = atomic_load(&job->compute), attempted = atomic_load(&job->attempted);
+            LOG("[vk] warm-up on %d threads: the first scene's %u done, %u more in the background\n", started, nfirst,
+                h.count - attempted);
+            job->own_recipes = recipes, job->own_order = order;
+            {   // what a pipeline costs in memory: measured over the first scene's second half (the first half also made
+                // the programs most of the later ones share - 200 KB a pipeline over all of it on the test PC, where
+                // 11,000 fit in 1 GB), then the rest of the budget in pipelines. (On a Steam Deck this stops at ~12,500
+                // of 15,800 - the waiting warm-up built all of them. Re-measured as it went, the background warm-up built
+                // all of them too, but the game then held ~100 MB more in RAM (2026-11-24): pipelines built while the
+                // game runs cost more there. The rest is built at first use, from Mesa's disk cache.)
+                uint64_t now = plat_private_bytes();
+                uint64_t used = now > memory ? now - memory : 0;
+                uint64_t each = 0;
+                if (half_mem && warmed > half_warmed + 64 && now > half_mem) each = (now - half_mem) / (warmed - half_warmed);
+                if (!each) each = used / (warmed ? warmed : 1);
+                if (!each) each = 1;
+                uint64_t more = used < memory_budget ? (memory_budget - used) / each : 0;
+                atomic_store(&job->max_warmed, (uint32_t)(warmed + (more > h.count ? h.count : more)));
+                LOG("[vk] warm-up: %.0f KB a pipeline so far, up to %u in all within the %llu MB budget\n", each / 1024.0,
+                    atomic_load(&job->max_warmed), (unsigned long long)(memory_budget >> 20));
+            }
+            atomic_store(&g_warm_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
+            atomic_store(&job->bg, true);
+            for (int i = 0; i < started; i++) SDL_DetachThread(th[i]);
+            if (atomic_load(&job->running) == 0 && !atomic_exchange(&job->cleaned, true))  // (all ended just now)
+                warm_bg_done(job);  // (frees the list itself: background stays true, nothing freed below)
+        }
     }
     for (; build && nthreads <= 1 && attempted < h.count; attempted++) {
         uint32_t index = order ? order[attempted] : attempted < recent ? h.count - recent + attempted : attempted - recent;
@@ -6260,10 +6424,7 @@ void vk_pipeline_prewarm(bool build) {
         if (!r->spv[1]) { compute += prewarm_compute(r, hash); continue; }
         warmed += warm_graphics_pipeline(r, hash, use_libraries);
     }
-    free(order);
-    for (uint32_t i = 0; i < h.count; i++) pipe_recipe_add(&recipes[i]);
-    pipe_recipe_saved = pipe_recipe_count;
-    free(recipes);
+    if (!background) free(order), free(recipes);  // (else the background warm-up's, freed when it ends)
     atomic_store(&stat_compiles, 0);
     atomic_store(&stat_links, 0);
     if (build)
@@ -8953,10 +9114,24 @@ static void draw_(CmdRec *r, bool indexed) {
             stat_skipped++;
             return;
         }
+        // (the start-up warm-up still going in the background: the slot claimed under its lock, found again there -
+        // it may have taken this one for another pipeline, or added this one meanwhile)
+        bool warm_bg = atomic_load_explicit(&g_warm_bg, memory_order_acquire);
+        if (warm_bg) {
+            pthread_mutex_lock(&warm_lock);
+            pslot = pipe_slot(ph);
+            pp = pslot == PIPE_TAB ? NULL : pipe_tab[pslot].pipe;
+            if (pslot == PIPE_TAB || pp) {
+                pthread_mutex_unlock(&warm_lock);
+                if (!pp) { stat_skipped++; return; }
+                goto have_pipe;
+            }
+        }
         pp = calloc(1, sizeof *pp);
         pp->k = k;
         pipe_tab[pslot].key = ph;
         pipe_tab[pslot].pipe = pp;
+        if (warm_bg) pthread_mutex_unlock(&warm_lock);
         static int logp = -1;
         if (logp < 0) logp = getenv("ODYSSEY_LOG_PROGS") != NULL;
         if (logp) LOG("[prog] pipe vs=%llx fs=%llx frame %llu ready %d\n", (unsigned long long)pr->code[0],
@@ -8965,6 +9140,7 @@ static void draw_(CmdRec *r, bool indexed) {
         else if (pr->huge || !sync_shaders()) queue_job(build_pipeline, pp, 0);
         else run_job(build_pipeline, pp);
     }
+have_pipe:
     if (!(pr->huge ? atomic_load(&pp->state) == 1 : built(&pp->state, pr))) { stat_skipped++; return; }
     if (recordable && !pp->recorded) {
         pipe_recipe_remember(&recipe);

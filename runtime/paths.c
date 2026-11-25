@@ -226,6 +226,7 @@ bool rt_resource(const char *name, const char *dev_rel, char *out, size_t n) {
 // What the setup (runtime/ui/launcher.mm) creates in extracted/, plus what older versions' extraction and manual
 // extractions left there (never read at run time).
 static const char *const GAME_FILES[] = {"exefs", "romfs", "romfs.bin", GAMELIB_NAME, GAMELIB_NAME ".id", ".gamebuild",
+                                         ".gamecache", ".gamecache.new",  // (gamebuild.c: compiled files kept between builds)
                                          ".extract", "extract.log", "xci_secure", "nso_raw", "update_pfs", ".DS_Store"};
 
 // game_dir must be <data root>/extracted, a real folder (a dev worktree's symlinked extracted/ is refused)
@@ -259,7 +260,11 @@ bool rt_remove_game_files(const char *game_dir) {
         return false;
     }
     bool ok = true;
-    for (size_t i = 0; i < sizeof GAME_FILES / sizeof *GAME_FILES; i++) ok &= rt_remove_game_file(game_dir, GAME_FILES[i]);
+    // (not the compiled files kept between builds: a setup run again - RecompLauncher's setup step after an update -
+    // copies the same game files, and each kept object is only used for the same source; gamebuild.c drops them itself
+    // after a build that failed)
+    for (size_t i = 0; i < sizeof GAME_FILES / sizeof *GAME_FILES; i++)
+        if (strncmp(GAME_FILES[i], ".gamecache", 10)) ok &= rt_remove_game_file(game_dir, GAME_FILES[i]);
     rmdir(game_dir);  // only if empty: anything else in there stays
     return ok;
 }
