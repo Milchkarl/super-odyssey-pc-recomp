@@ -1976,6 +1976,86 @@ static void native_brake(uint64_t now) {
     }
 }
 
+// Adaptive frame rate (settings.ini adaptive_frame_rate = 1, or ODYSSEY_RATE_CONTROL=1; off by default): above 60, when
+// frames miss their time the game draws at the next lower step instead of unevenly - 240 -> 120 -> 60 on a 240 Hz
+// display - and goes back up when there is room again. The steps: the rates below the chosen one that the display's
+// refresh is a whole multiple of (each frame on screen equally long), and 60; ODYSSEY_RATE_TIERS=all: every rate
+// (a variable refresh display). Gameplay stays at 60 throughout (odyssey_120.c: a rate change starts a new cadence).
+//   down: the frame time's average (2% a frame, a frame counted as 3 periods at most) over 1.15 of the step's period
+//         - under 104 FPS of 120; at 1.08 it left 120 for 60 at an average of 110 FPS -, at most every 2 s
+//   up:   the game loop's own work (odyssey_120.c, without its waits) under 0.85 of the faster step's period, after 5 s
+//         at the step - 10, 20 .. 60 s when the last climb fell back within 10 s (the work measure doesn't see a busy
+//         GPU: this keeps it from going up and down), 5 s again after a minute without falling
+// Frames over 100 ms (loads, the window in the background) and frames the game draws at 60 for its own reasons
+// (loading, scenes without extra draws) aren't counted.
+_Atomic uint64_t g_native_work_ns;
+static _Atomic int rate_limit_hz;
+int vk_rate_limit(void) { return atomic_load_explicit(&rate_limit_hz, memory_order_relaxed); }
+static int rate_step(int from, int set, bool up) {
+    static const int all[] = {240, 180, 165, 144, 120, 100, 90, 72, 60};
+    static int any = -1;
+    if (any < 0) { const char *e = getenv("ODYSSEY_RATE_TIERS"); any = e && !strcmp(e, "all"); }
+    int disp = g_display_hz, best = from;
+    for (int i = 0; i < 9; i++) {
+        int r = all[i];
+        if (r > set || !(r == 60 || r == set || any || !disp || disp % r == 0)) continue;
+        if (up ? r > from && (best == from || r < best) : r < from && (best == from || r > best)) best = r;
+    }
+    return best;
+}
+static void rate_control(uint64_t now) {
+    static int env = -1;
+    if (env < 0) { const char *e = getenv("ODYSSEY_RATE_CONTROL"); env = e && *e ? atoi(e) != 0 : 2; }
+    static uint64_t last, dwell_until, last_up_ns, last_down_ns, up_dwell = 5000000000ull;
+    static double avg_ms;
+    static int tier, set_seen, nlog;
+    uint64_t prev = last;
+    last = now;
+    int set = settings_game_hz();
+    if (!(env == 2 ? g_settings.adaptive_fps : env) || set <= 60) {
+        atomic_store(&rate_limit_hz, 0);
+        tier = set_seen = 0;
+        return;
+    }
+    if (set != set_seen) tier = set_seen = set, avg_ms = 0, dwell_until = now + 2000000000ull, atomic_store(&rate_limit_hz, 0);
+    extern int odyssey_native_hz(void);
+    if (!prev || now <= prev || now - prev > 100000000ull) return;
+    if (odyssey_native_hz() != tier) {  // (the game at its own 60 meanwhile: the average starts again after it)
+        avg_ms = 0;
+        if (dwell_until < now + 1000000000ull) dwell_until = now + 1000000000ull;
+        return;
+    }
+    // (a step above the display's refresh can't be shown faster than the display: judged by the display's period)
+    int disp = g_display_hz, shown = disp > 0 && tier > disp ? disp : tier;
+    double d = (double)(now - prev) / 1e6, period = 1000.0 / shown;
+    if (d > period * 3) d = period * 3;  // (one long frame - a hitch - isn't a rate the game can't hold)
+    avg_ms = avg_ms > 0 ? avg_ms + (d - avg_ms) * 0.02 : d;
+    if (now < dwell_until) return;
+    int to = tier;
+    double work_ms = (double)atomic_load(&g_native_work_ns) / 1e6;
+    if (avg_ms > period * 1.15) {
+        to = rate_step(tier, set, false);
+        if (to != tier) {
+            if (last_up_ns && now - last_up_ns < 10000000000ull) up_dwell = up_dwell * 2 > 60000000000ull ? 60000000000ull : up_dwell * 2;
+            last_down_ns = now;
+            dwell_until = now + 2000000000ull;
+        }
+    } else if (tier < set && now > last_down_ns + up_dwell) {
+        int up = rate_step(tier, set, true);
+        // (not to a step the display can't show any faster than this one)
+        if (up != tier && !(disp > 0 && tier >= disp) && work_ms > 0 && work_ms < 1000.0 / up * 0.85)
+            to = up, last_up_ns = now, dwell_until = now + 2000000000ull;
+    }
+    if (last_down_ns && now > last_down_ns + 60000000000ull) up_dwell = 5000000000ull;
+    if (to == tier) return;
+    if (nlog++ < 200)
+        LOG("[frame-rate] adaptive: %d -> %d FPS (frames %.1f ms on average, the game loop's work %.1f ms; chosen %d)\n", tier, to,
+            avg_ms, work_ms, set);
+    tier = to;
+    avg_ms = 0;
+    atomic_store(&rate_limit_hz, to < set ? to : 0);
+}
+
 static void backend_present_locked(NvnTexture *t, bool handed);
 void backend_present(NvnTexture *t) {
     plat_heap_check("present");
@@ -2003,6 +2083,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     b->presented = true;
     present_brake(present_ns, fd.game_w != NULL);
     native_brake(present_ns);
+    rate_control(present_ns);
     static const float black[4] = {0, 0, 0, 1};
     uint64_t t0 = SDL_GetTicksNS();
     pcache_autosave();

@@ -71,8 +71,12 @@ int odyssey_native_hz(void) {
 #ifndef __APPLE__
     extern bool vk_native_brake(void);  // (vulkan/device.c: frames missing their time above 60 - a few seconds at 60)
     if (vk_native_brake()) return 60;
-#endif
+    extern int vk_rate_limit(void);  // (the adaptive frame rate's current step, 0: none)
+    int limit = vk_rate_limit(), set = settings_fps_hz(g_settings.frame_rate);
+    return limit && limit < set ? limit : set;
+#else
     return settings_fps_hz(g_settings.frame_rate);
+#endif
 }
 
 bool odyssey_skip_extra_particle_update(void) { return enabled && extra_draw; }
@@ -457,10 +461,12 @@ static void framework_calc(Cpu *c) {
     // A loop's own work (its time minus what it spent blocked: the present's vsync wait) - what an extra draw costs
     extern __thread uint64_t g_blocked_ns;
     static uint64_t prev_ns, prev_blocked, work_ns;
+    extern _Atomic uint64_t g_native_work_ns;
     uint64_t now = plat_now_ns(), blocked = g_blocked_ns;
     if (prev_ns && now - prev_ns < 100000000ull) {
         uint64_t w = now - prev_ns - (blocked - prev_blocked < now - prev_ns ? blocked - prev_blocked : 0);
         work_ns = work_ns ? (w > work_ns ? w : (work_ns * 7 + w) / 8) : w;  // (rises at once, falls slowly)
+        atomic_store(&g_native_work_ns, work_ns);
     }
     uint64_t hz = (uint64_t)odyssey_native_hz(), vsync = vi_vsync_count();
     static uint64_t previous_hz;

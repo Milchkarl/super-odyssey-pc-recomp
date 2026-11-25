@@ -312,6 +312,7 @@ void settings_load(void) {
             g_settings.audio_output = !strcmp(val, "stereo") ? AUDIO_OUT_STEREO : !strcmp(val, "5.1") ? AUDIO_OUT_SURROUND : AUDIO_OUT_AUTO;
         else if (!strcmp(key, "movie_audio")) g_settings.movie_audio = atoi(val) != 0;
         else if (!strcmp(key, "show_fps")) g_settings.show_fps = atoi(val) != 0;
+        else if (!strcmp(key, "adaptive_frame_rate")) g_settings.adaptive_fps = atoi(val) != 0;
         else if (!strcmp(key, "performance_overlay")) g_settings.performance_overlay = atoi(val) != 0;
         else if (!strcmp(key, "overlay_corner")) { int v = atoi(val); g_settings.overlay_corner = v >= 0 && v < OVERLAY_CORNER_COUNT ? v : 0; }
         else if (!strcmp(key, "overlay_size")) { int v = atoi(val); g_settings.overlay_size = v >= 0 && v <= 2 ? v : 1; }
@@ -538,6 +539,7 @@ void settings_save(void) {
                                       g_settings.audio_output == AUDIO_OUT_SURROUND ? "5.1" : "auto");
     fprintf(f, "movie_audio = %d\n", g_settings.movie_audio);
     fprintf(f, "show_fps = %d\n", g_settings.show_fps);
+    fprintf(f, "adaptive_frame_rate = %d\n", g_settings.adaptive_fps);
     fprintf(f, "performance_overlay = %d\n", g_settings.performance_overlay);
     fprintf(f, "overlay_corner = %d\noverlay_size = %d\noverlay_opacity = %d\n", g_settings.overlay_corner,
             g_settings.overlay_size, g_settings.overlay_opacity);

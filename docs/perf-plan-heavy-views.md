@@ -57,6 +57,15 @@ E. **Experiment, last: snapshot-and-continue** - copy what a frame's translation
 
 Not planned: a 60 FPS fallback (rejected by the owner; the code stays off, `ODYSSEY_FRAME_BRAKE=1`).
 
+**Adaptive frame rate (2026-11-25, off by default)**: `adaptive_frame_rate = 1` in settings.ini (or
+`ODYSSEY_RATE_CONTROL=1`): above 60, when frames miss their time the game draws at the next lower rate the display
+shows evenly (240 -> 120 -> 60 on a 240 Hz display; `ODYSSEY_RATE_TIERS=all`: every rate, for variable refresh) and
+goes back up when the game loop has room - `rate_control` in runtime/nvn/vulkan/device.c has the thresholds. Gameplay
+stays at 60. Measured on the test PC (RTX 4090, 4K, a 120 Hz display, set to 240, the Mushroom -> Metro ride): steady
+120 where it fits; arriving in Metro, where the game alone gives an uneven 84-105 FPS for ~20 s, it plays at 60 and
+tries 120 again after 10, then 20 s - so it also sat at 60 for ~15 s where 120 would have held. Same trade as the brake
+above, in steps and with a slower way back; not in the menu. Not tested: a display over 120 Hz, the Steam Deck, 1.0.0.
+
 ## Done means
 
 On the recorded ride, three runs each: at 60 FPS no frame over 17 ms in play; at 120 FPS no burst of frames over
