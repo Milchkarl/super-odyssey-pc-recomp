@@ -204,8 +204,10 @@ static void *heap_trim_thread(void *arg) {
         sleep(30);
         uint64_t held = plat_heap_held_bytes(), t0 = plat_now_ns();
         malloc_trim(0);
-        if (n < 6) fprintf(stderr, "[mem] trim: %.1f ms, malloc held %llu -> %llu MB\n", (plat_now_ns() - t0) / 1e6,
-                       (unsigned long long)(held >> 20), (unsigned long long)(plat_heap_held_bytes() >> 20));
+        struct mallinfo2 mi = mallinfo2();  // (free: held but not in use - freed chunks between ones in use)
+        if (n < 6) fprintf(stderr, "[mem] trim: %.1f ms, malloc held %llu -> %llu MB (%llu MB of it free)\n",
+                       (plat_now_ns() - t0) / 1e6, (unsigned long long)(held >> 20),
+                       (unsigned long long)(plat_heap_held_bytes() >> 20), (unsigned long long)(mi.fordblks >> 20));
     }
     return NULL;
 }

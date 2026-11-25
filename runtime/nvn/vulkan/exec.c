@@ -6084,6 +6084,7 @@ static bool warm_graphics_pipeline(const PipeRecipe *r, uint64_t hash, bool use_
 // claimed by writing its key (pipe_slot then skips it for other keys; one left without a pipe is built in play, as a
 // key never warmed). ODYSSEY_PREWARM_THREADS=<n>: that many (1: one at a time, as before).
 static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic uint32_t g_warm_dups;  // (warm-up pipelines the game had built first)
 static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool use_libraries) {
     pthread_mutex_lock(&warm_lock);
     uint32_t slot = pipe_slot(hash);
@@ -6116,7 +6117,10 @@ static bool warm_graphics_pipeline_mt(const PipeRecipe *r, uint64_t hash, bool u
         pipe_tab[slot].pipe = pp;
     } else g_warm_miss[!in_range ? 1 : !pp->k.prog ? 2 : 3]++;
     pthread_mutex_unlock(&warm_lock);
-    if (!ok) free(pp);  // (its VkPipeline, if built, kept by the driver's cache; a rare duplicate)
+    if (!ok) {  // (built, but the game built its own meanwhile - often, with the warm-up in the background: destroyed)
+        if (pp->pipe) vkDestroyPipeline(g_vk.dev, pp->pipe, NULL), atomic_fetch_add(&g_warm_dups, 1);
+        free(pp);
+    }
     return ok;
 }
 // Start-up waits only for the first scene's pipelines (prioritize_first_scene puts them first); the warm-up then goes
@@ -6135,19 +6139,20 @@ typedef struct {
     _Atomic uint32_t next, warmed, compute, attempted;
     _Atomic bool stop, bg, cleaned;
     _Atomic int running;
-    uint32_t max_warmed;  // (background: the memory budget as a number of pipelines - the game's own loading grows the
+    _Atomic uint32_t max_warmed;  // (background: the memory budget as a number of pipelines - the game's own loading grows the
                           // process meanwhile, so its private bytes no longer tell what the warm-up added)
     PipeRecipe *own_recipes;  // (background: freed by whoever ends it last)
     uint32_t *own_order;
 } WarmJob;
 static void warm_bg_done(WarmJob *j) {
-    LOG("[vk] background warm-up done: %u graphics pipelines prewarmed (%u attempted of %u) in %.2f s\n",
-        atomic_load(&j->warmed), atomic_load(&j->attempted), j->count, (plat_now_ns() - j->t0) / 1e9);
+    LOG("[vk] background warm-up done: %u graphics pipelines prewarmed (%u attempted of %u, %u the game had built first) in %.2f s\n",
+        atomic_load(&j->warmed), atomic_load(&j->attempted), j->count, atomic_load(&g_warm_dups), (plat_now_ns() - j->t0) / 1e9);
     atomic_store(&g_warm_bg, false);
     free(j->own_recipes);
     free(j->own_order);
     free(j);
 }
+
 static int warm_worker(void *arg) {
     WarmJob *j = arg;
     bool low = false;
@@ -6170,7 +6175,7 @@ static int warm_worker(void *arg) {
             low = true;
         }
         // (the same bounds as before: driver allocations for libraries can be much larger than the recipe file)
-        bool over = atomic_load(&j->bg) ? atomic_load(&j->warmed) >= j->max_warmed
+        bool over = atomic_load(&j->bg) ? atomic_load(&j->warmed) >= atomic_load(&j->max_warmed)
                                         : plat_private_bytes() > j->memory + j->memory_budget;
         // (in the background: before each pipeline - with the cache missing, 16 can take many seconds each thread)
         if (a && (atomic_load(&j->bg) || a % 16 == 0) && (over || plat_now_ns() - j->t0 > j->time_budget + paused)) {
@@ -6387,7 +6392,10 @@ void vk_pipeline_prewarm(bool build) {
             job->own_recipes = recipes, job->own_order = order;
             {   // what a pipeline costs in memory: measured over the first scene's second half (the first half also made
                 // the programs most of the later ones share - 200 KB a pipeline over all of it on the test PC, where
-                // 11,000 fit in 1 GB), then the rest of the budget in pipelines
+                // 11,000 fit in 1 GB), then the rest of the budget in pipelines. (On a Steam Deck this stops at ~12,500
+                // of 15,800 - the waiting warm-up built all of them. Re-measured as it went, the background warm-up built
+                // all of them too, but the game then held ~100 MB more in RAM (2026-11-24): pipelines built while the
+                // game runs cost more there. The rest is built at first use, from Mesa's disk cache.)
                 uint64_t now = plat_private_bytes();
                 uint64_t used = now > memory ? now - memory : 0;
                 uint64_t each = 0;
@@ -6395,9 +6403,9 @@ void vk_pipeline_prewarm(bool build) {
                 if (!each) each = used / (warmed ? warmed : 1);
                 if (!each) each = 1;
                 uint64_t more = used < memory_budget ? (memory_budget - used) / each : 0;
-                job->max_warmed = (uint32_t)(warmed + (more > h.count ? h.count : more));
+                atomic_store(&job->max_warmed, (uint32_t)(warmed + (more > h.count ? h.count : more)));
                 LOG("[vk] warm-up: %.0f KB a pipeline so far, up to %u in all within the %llu MB budget\n", each / 1024.0,
-                    job->max_warmed, (unsigned long long)(memory_budget >> 20));
+                    atomic_load(&job->max_warmed), (unsigned long long)(memory_budget >> 20));
             }
             atomic_store(&g_warm_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
             atomic_store(&job->bg, true);
