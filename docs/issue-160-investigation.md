@@ -138,6 +138,15 @@ before the first frame: ~760 cache lookups by the warm-up's 8 threads at once (8
   out of date then). On the Deck the background warm-up stops at ~12,000 of 15,800 pipelines: its per-pipeline memory
   estimate (82-85 KB, from the first scene) is higher than what the rest costs - the old warm-up built all of them within
   the same 1 GB.
+- **Tried: warming all of them in the background** (the cost re-measured every 512 pipelines, 7-55 KB each after the
+  first scene): all 15,740 built, first frame 7.8-8.6 s, play unchanged - but at the same point of the ride the game
+  held 1,513-1,552 MB in RAM against 1,398-1,437 MB with the waiting warm-up (this build, same pipelines). malloc's free
+  memory was the same (~30 MB), so it is memory in use, not fragmentation (`MALLOC_ARENA_MAX=2` changed nothing). Left
+  out for the RAM: the background warm-up keeps the first scene's estimate; the rest is built at first use, from Mesa's
+  disk cache (no build over 30 ms in any Deck ride).
+- Found on the way and fixed: a background warm-up pipeline the game had built first wasn't destroyed (rare: 0-1 a run).
+- The PC's slow frames in the ride (7-25 over 34 ms) all come at one place in Metro, ~12 s after arriving (frames
+  ~4,300-4,420), with every build tried, long after the warm-up ended. Not looked into yet.
 
 ## Found on the way: the release's Steam Deck test doesn't reach the game
 
