@@ -105,13 +105,28 @@ static bool camera_inbetween(void) {
     return on;
 }
 
+// A long move of the camera in one tick that is a sweep, not a cut: it moved about as far, the same way, the tick
+// before (the move's change under half of the move). The arrival in a kingdom flies the camera ~4,600 units a tick:
+// taken for cuts, those frames showed the camera at the tick and every model half a tick back.
+static bool camera_sweep(const float *now, const float *old, const float *older, float travel) {
+    float change = 0.0f;
+    for (unsigned i = 0; i < 6; i++) {
+        float d = (now[i] - old[i]) - (old[i] - older[i]);
+        change += d * d;
+    }
+    return change <= 0.25f * travel;
+}
+
 // 90: the camera between the last two ticks' (draw_lead + 1/2 ticks back from the last; the draw-only frames: none)
 static bool camera_draw_90(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t source, float *pose) {
     static __thread uint64_t scene, camera, tick;  // the last tick's camera (last) and the one before (before)
-    static __thread float last[9], before[9];
-    static __thread bool paired;  // before: the tick before's, the same scene and camera
+    static __thread float last[9], before[9], before2[9];
+    static __thread bool paired, paired2;  // before: the tick before's, the same scene and camera (before2: one more)
     if (!extra_draw) {
+        paired2 = paired;
         paired = draw_scene == scene && source == camera && simulation_tick == tick + 1;
+        paired2 = paired2 && paired;
+        memcpy(before2, before, sizeof before2);
         memcpy(before, last, sizeof before);
         memcpy(last, pose, sizeof last);
         scene = draw_scene;
@@ -134,7 +149,8 @@ static bool camera_draw_90(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_t s
         next_length += next_direction * next_direction;
     }
     // (the limits at 120, for a whole tick instead of half of one)
-    if (!(travel <= 160.0f * 160.0f && turn <= 0.16f * 0.16f && (travel > 0.0f || turn > 0.0f))) return false;
+    if (!((travel <= 400.0f * 400.0f || (paired2 && camera_sweep(last, before, before2, travel))) && turn <= 0.16f * 0.16f &&
+          (travel > 0.0f || turn > 0.0f))) return false;
     if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += back * (before[i] - pose[i]);
     Cpu draw = *c;
@@ -148,21 +164,29 @@ static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_
     // StageScene::drawMain's private copy of the current LookAtCamera.
     // Rebuild the view with sead's evaluator before the world and DLAA consume it.
     static __thread uint64_t scene, camera, tick;
-    static __thread float previous[9];
-    static __thread bool half_drawn;
+    static __thread float previous[9], older[9];
+    static __thread bool half_drawn, was_continuous;
     if (odyssey_native_hz() != 120) return camera_draw_90(c, cam, draw_scene, source, pose);  // (any rate but 120)
     if (extra_draw) {
         half_drawn = draw_scene == scene && source == camera && tick == simulation_tick;
         return false;
     }
-    bool continuous = draw_scene == scene && source == camera && half_drawn && simulation_tick == tick + 1;
+    // (the tick before's camera is all it takes. Until 2026-11-25 the in-between draw of that tick had to have been
+    // drawn too: after a skipped one - a late frame - the camera was drawn at the tick while every model is drawn
+    // half a tick back: 716 of 4,428 gameplay frames with a moving camera in a logged ride, a jitter of the view)
+    bool continuous = draw_scene == scene && source == camera && simulation_tick == tick + 1;
+    (void)half_drawn;
     half_drawn = false;
     scene = draw_scene;
     camera = source;
     tick = simulation_tick;
-    float old[9];
+    float old[9], older_now[9];
+    bool have_older = was_continuous && continuous;
+    memcpy(older_now, older, sizeof older_now);
     memcpy(old, previous, sizeof old);
+    memcpy(older, previous, sizeof older);
     memcpy(previous, pose, sizeof previous);
+    was_continuous = continuous;
     if (!continuous) return false;
     float travel = 0.0f, turn = 0.0f, alignment = 0.0f, length = 0.0f, next_length = 0.0f;
     for (unsigned i = 0; i < 3; i++) {
@@ -177,7 +201,10 @@ static bool camera_draw_inner(Cpu *c, uint64_t cam, uint64_t draw_scene, uint64_
         next_length += next_direction * next_direction;
     }
     // Skip cuts, abrupt changes in roll, and half steps that would reverse the view.
-    if (!(travel <= 80.0f * 80.0f && turn <= 0.08f * 0.08f && (travel > 0.0f || turn > 0.0f))) return false;
+    // (travel: 80 until 2026-11-25 - a quick orbit moves the eye further in a tick, 107 frames in the same ride; a cut
+    // to a view within 400 units looking the same way is drawn half way for one frame)
+    if (!((travel <= 400.0f * 400.0f || (have_older && camera_sweep(pose, old, older_now, travel))) && turn <= 0.08f * 0.08f &&
+          (travel > 0.0f || turn > 0.0f))) return false;
     if (!(alignment > 0.0f && alignment * alignment >= 0.95f * length * next_length)) return false;
     for (unsigned i = 0; i < 9; i++) pose[i] += 0.5f * (old[i] - pose[i]);
     Cpu draw = *c;
