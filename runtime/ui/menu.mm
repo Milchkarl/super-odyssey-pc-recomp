@@ -757,10 +757,27 @@ static void init(void) {
             snprintf(steam1, sizeof steam1, "%s/.local/share/Steam/clientui/fonts/GoNotoKurrent-Regular.ttf", home);
             snprintf(steam2, sizeof steam2, "%s/.steam/steam/clientui/fonts/GoNotoKurrent-Regular.ttf", home);
         }
-        const char *cands[] = {"C:/Windows/Fonts/malgun.ttf", steam1, steam2, "/usr/share/fonts/nanum/NanumGothic.ttf",
-                               "/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/System/Library/Fonts/AppleSDGothicNeo.ttc"};
-        for (const char *p : cands) {
-            if (!*p) continue;
+        // CJK translation fonts follow the menu language (Chinese needs a Han font, Hangul fonts lack the glyphs)
+        const char *cands[8];
+        int nc = 0;
+        if (!strcmp(i18n_lang(), "zh-CN")) {
+            cands[nc++] = "C:/Windows/Fonts/msyh.ttc";
+            cands[nc++] = "C:/Windows/Fonts/simhei.ttf";
+            cands[nc++] = steam1;
+            cands[nc++] = steam2;
+            cands[nc++] = "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc";
+            cands[nc++] = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+        } else {
+            cands[nc++] = "C:/Windows/Fonts/malgun.ttf";
+            cands[nc++] = steam1;
+            cands[nc++] = steam2;
+            cands[nc++] = "/usr/share/fonts/nanum/NanumGothic.ttf";
+            cands[nc++] = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf";
+            cands[nc++] = "/System/Library/Fonts/AppleSDGothicNeo.ttc";
+        }
+        for (int ci = 0; ci < nc; ci++) {
+            const char *p = cands[ci];
+            if (!p || !*p) continue;
             if (FILE *f = fopen(p, "rb")) { fclose(f); snprintf(xfont, sizeof xfont, "%s", p); break; }
         }
         if (xfont[0]) LOG("[i18n] menu font for %s: %s\n", i18n_lang(), xfont);
@@ -1061,6 +1078,14 @@ static void mem_note_ram(void) {
              s.ram_total_mib / 1024.0);
     opt_next_note(b);
 }
+#else
+// macOS: the Metal backend has no Vulkan memory stats (vk_overlay_stats / vk_tex_memory), so the memory bars and
+// notes are skipped. The tabs below call them unconditionally (main builds only Linux/Windows).
+static void memory_bars(float scale) { (void)scale; }
+static void mem_note_resolution(void) {}
+static void mem_note_shadows(void) {}
+static void mem_note_pixels(const char *what, double bytes_per_px, bool output) { (void)what, (void)bytes_per_px, (void)output; }
+static void mem_note_ram(void) {}
 #endif
 
 // A choice whose stored value may be "Auto" (auto_v): the list holds only real values (vals / names), and Auto shows as
