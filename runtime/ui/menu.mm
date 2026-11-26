@@ -757,10 +757,27 @@ static void init(void) {
             snprintf(steam1, sizeof steam1, "%s/.local/share/Steam/clientui/fonts/GoNotoKurrent-Regular.ttf", home);
             snprintf(steam2, sizeof steam2, "%s/.steam/steam/clientui/fonts/GoNotoKurrent-Regular.ttf", home);
         }
-        const char *cands[] = {"C:/Windows/Fonts/malgun.ttf", steam1, steam2, "/usr/share/fonts/nanum/NanumGothic.ttf",
-                               "/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/System/Library/Fonts/AppleSDGothicNeo.ttc"};
-        for (const char *p : cands) {
-            if (!*p) continue;
+        // CJK translation fonts follow the menu language (Chinese needs a Han font, Hangul fonts lack the glyphs)
+        const char *cands[8];
+        int nc = 0;
+        if (!strcmp(i18n_lang(), "zh-CN")) {
+            cands[nc++] = "C:/Windows/Fonts/msyh.ttc";
+            cands[nc++] = "C:/Windows/Fonts/simhei.ttf";
+            cands[nc++] = steam1;
+            cands[nc++] = steam2;
+            cands[nc++] = "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc";
+            cands[nc++] = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+        } else {
+            cands[nc++] = "C:/Windows/Fonts/malgun.ttf";
+            cands[nc++] = steam1;
+            cands[nc++] = steam2;
+            cands[nc++] = "/usr/share/fonts/nanum/NanumGothic.ttf";
+            cands[nc++] = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf";
+            cands[nc++] = "/System/Library/Fonts/AppleSDGothicNeo.ttc";
+        }
+        for (int ci = 0; ci < nc; ci++) {
+            const char *p = cands[ci];
+            if (!p || !*p) continue;
             if (FILE *f = fopen(p, "rb")) { fclose(f); snprintf(xfont, sizeof xfont, "%s", p); break; }
         }
         if (xfont[0]) LOG("[i18n] menu font for %s: %s\n", i18n_lang(), xfont);
