@@ -38,6 +38,7 @@
 #include "../output_scale.h"
 #include "../../ui/performance.h"
 #include "../renderer.h"
+static bool chosen_gpu_is_nvidia(void);  // (below: Streamline only for NVIDIA's cards)
 
 VkG g_vk;
 static _Atomic bool g_no_present;  // (quitting: no present to a window going away - ui_run)
@@ -104,7 +105,13 @@ static void create_instance(void) {
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
     PFN_vkCreateInstance create = vkCreateInstance;
 #ifdef _WIN32
-    if (!g_vk.headless && vk_sl_init()) {  // (NVIDIA Streamline: its proxy sets up what DLSS-G / Reflex need)
+    // (only when the card that will draw is NVIDIA's: Streamline's vkCreateDevice asks any card for NVIDIA's own
+    // extensions - another card chosen in Graphics card, on a PC that also has an NVIDIA one, stopped the game at start:
+    // "Required device extension VK_NV_optical_flow unsupported", create_dev failed -7)
+    // (asked only when Streamline would be set up: sl_glue.cpp vk_sl_init's own condition - DLSS frame generation or Reflex)
+    const char *sl_env = getenv("ODYSSEY_SL");
+    bool sl_wanted = sl_env && *sl_env ? atoi(sl_env) != 0 : g_settings.frame_gen == FG_DLSS || g_settings.low_latency != 0;
+    if (!g_vk.headless && sl_wanted && chosen_gpu_is_nvidia() && vk_sl_init()) {  // (NVIDIA Streamline: its proxy sets up what DLSS-G / Reflex need)
         PFN_vkCreateInstance p = (PFN_vkCreateInstance)vk_sl_instance_proc(VK_NULL_HANDLE, "vkCreateInstance");
         if (p) create = p;
         bool have = false;  // (its plugins name their objects: VK_EXT_debug_utils, else a null call in sl.common)
@@ -151,6 +158,30 @@ static int gpu_score(uint32_t i, const VkPhysicalDeviceProperties *p) {
     if (env && *env) { if (atoi(env) == (int)i) return 100; }
     else if (g_settings.gpu[0] && !strcmp(g_settings.gpu, p->deviceName)) return 100;
     return p->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+}
+
+// Whether the card gpu_score picks is NVIDIA's (before the instance: a short-lived one of our own, without Streamline)
+static bool chosen_gpu_is_nvidia(void) {
+    VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .apiVersion = VK_API_VERSION_1_3};
+    VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &ai};
+    VkInstance inst;
+    if (vkCreateInstance(&ci, NULL, &inst) != VK_SUCCESS) return true;  // (as before: Streamline decides)
+    uint32_t n = 0;
+    vkEnumeratePhysicalDevices(inst, &n, NULL);
+    VkPhysicalDevice pd[16];
+    if (n > 16) n = 16;
+    vkEnumeratePhysicalDevices(inst, &n, pd);
+    int best = -1;
+    uint32_t vendor = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(pd[i], &p);
+        int sc = gpu_score(i, &p);
+        if (sc > best) best = sc, vendor = p.vendorID;
+    }
+    vkDestroyInstance(inst, NULL);
+    if (vendor && vendor != 0x10de) LOG("[streamline] not used: the card that draws isn't NVIDIA's\n");
+    return !vendor || vendor == 0x10de;
 }
 // (the menu's Graphics card list: the Vulkan 1.3 cards found at start, by name)
 static char g_gpu_names[8][VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
