@@ -43,6 +43,7 @@ HITCH = re.compile(r'\[hitch\] frame (\d+): (\d+) ms')
 ARRIVAL = re.compile(r'\[warp\] stage scene \w+ running at frame (\d+) stage "([^"]+)"')
 CONTINUE = '1500:A:8,1650:A:8,1800:A:8,1950:A:8,2100:A:8'
 # (a save made on game 1.0.0, loaded on 1.4.1: the game shows its update notification pages first, each closed with A)
+PICTURE_MEAN_LIMIT = 0.02  # (check_pictures: run-to-run animation stays under ~0.011)
 CONTINUE_LONG = ','.join(f'{f}:A:8' for f in range(1500, 4200, 150))
 
 
@@ -112,7 +113,12 @@ def check_pictures(exe, out, base, version, data, save, kingdoms):
     report = json.loads((tour / 'report.json').read_text(encoding='utf-8')) if (tour / 'report.json').is_file() else {}
     res = report.get('results', [])
     failed = [x['kingdom'] for x in res if x.get('status') != 'captured']
-    review = [x['kingdom'] for x in res if x.get('comparison') in ('review', 'size_mismatch', 'missing_baseline')]
+    # (kingdom_tour's own "review" fails on one tile changed by a few percent: the game's animations - fog, water,
+    # spray, birds, people walking, coins - differ that much between two runs of the same build. 1.0.4 against its own
+    # picture (2026-11-27): Cap 0.0106 mean / 0.47 tile, Mushroom 0.0042 / 0.29, Metro 0.0015 / 0.17. A kingdom fails
+    # here when its whole picture changed: a mean difference above PICTURE_MEAN_LIMIT, or no comparable picture.)
+    review = [x['kingdom'] for x in res if x.get('comparison') in ('size_mismatch', 'missing_baseline') or
+              (x.get('comparison') == 'review' and x.get('mean_absolute_difference', 1.0) > PICTURE_MEAN_LIMIT)]
     if r.returncode == 1 or failed or not res:
         return False, f'{version}: kingdoms that didn\'t load: {", ".join(failed) or "(tour failed: " + r.stderr[-300:] + ")"}'
     if review:
