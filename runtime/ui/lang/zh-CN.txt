@@ -1,0 +1,527 @@
+# Simplified Chinese (简体中文) for the F1 menu and the configuration page - runtime/ui/i18n.mm.
+# One per line: English ||| Chinese (keep the English exactly as the menu shows it).
+Display ||| 显示
+Graphics ||| 图形
+Performance ||| 性能
+Audio ||| 音频
+Controls ||| 控制
+Mods ||| Mod
+Updates ||| 更新
+Quit ||| 退出
+On ||| 开
+Off ||| 关
+Auto ||| 自动
+None ||| 无
+Default ||| 默认
+Game ||| 游戏
+English ||| 英语
+Monitor ||| 显示器
+Moves the game to the selected display. Works in windowed, borderless and exclusive fullscreen. Current display leaves window placement to you. Display numbers follow the connected display list; select again if that list changes. An unavailable display falls back to the primary display. ||| 将游戏移动到所选显示器。在窗口、无边框和独占全屏模式下均可用。“当前显示器”由您自行决定窗口位置。显示器编号跟随已连接显示器列表；如果该列表发生变化，请重新选择。不可用的显示器会回退到主显示器。
+Current display ||| 当前显示器
+Display mode ||| 显示模式
+Borderless uses the desktop's resolution. Exclusive fullscreen requests a monitor display mode. F11 and Alt+Enter toggle between the window and your last fullscreen mode. ||| 无边框模式使用桌面分辨率。独占全屏模式会向显示器请求一个显示模式。F11 和 Alt+Enter 可在窗口与上次的全屏模式之间切换。
+Windowed ||| 窗口
+Borderless ||| 无边框
+Exclusive fullscreen ||| 独占全屏
+Display resolution ||| 显示分辨率
+The window's size, or in exclusive fullscreen the monitor's mode - the sizes your monitor offers. Desktop: the current window size, or the desktop's resolution in exclusive fullscreen. Borderless always uses the desktop resolution. ||| 窗口的大小，或在独占全屏下显示器的模式——即显示器所提供的尺寸。桌面：当前窗口大小，独占全屏下则为桌面分辨率。无边框模式始终使用桌面分辨率。
+Desktop ||| 桌面
+Refresh rate ||| 刷新率
+VSync ||| 垂直同步
+Adaptive ||| 自适应
+Screen shape ||| 屏幕形状
+Aspect ratio ||| 画面比例
+The picture's shape, on any screen. 16:9: the Switch's picture. Fill window: the screen's own shape. 16:10, 21:9, 32:9, 4:3: that shape - where the screen's is different, black bars fill the rest (21:9 on a 16:9 TV: bars above and below; 16:9 on an ultrawide: bars at the sides). A wider shape shows more of the world at the sides, a narrower one a little less; the HUD keeps its shape and stays in the corners of the picture. ||| 画面在任何屏幕上的形状。16:9：Switch 的画面。填充窗口：屏幕自身的形状。16:10、21:9、32:9、4:3：对应形状——当与屏幕形状不同时，其余部分以黑边填充（16:9 电视上的 21:9：上下出现黑边；带鱼屏上的 16:9：左右出现黑边）。更宽的形状会在两侧显示更多世界场景，更窄的则稍少；HUD 保持自身形状并停留在画面角落。
+Fill window ||| 填充窗口
+Console mode ||| 主机模式
+What the game is told it runs as. Docked: its TV rendering (1600 x 900 before scaling, docked effects). Handheld: its own handheld rendering (1280 x 720, lighter effects), as on a Switch Lite - much less work for the GPU, for handhelds and low-power PCs. Applies at the next start. ||| 游戏认为自己运行在哪种主机形态下。底座（TV）模式：其 TV 渲染（缩放前为 1600 x 900，底座特效）。掌机模式：其掌机渲染（1280 x 720，更轻量的特效），如同 Switch Lite——大幅减轻 GPU 负担，适合掌机形态和低功耗 PC。下次启动时生效。
+Docked (TV) ||| 底座（TV）
+Handheld ||| 掌机
+Dynamic resolution ||| 动态分辨率
+On: as on the Switch - the game lowers its resolution when frames take long. Off: always its full resolution (sharper; needs a fast enough GPU or a higher power limit). Applies at the next start. ||| 开：与 Switch 相同——当渲染一帧耗时过长时，游戏会降低分辨率。关：始终使用完整分辨率（更清晰；需要足够快的 GPU 或更高的功耗限制）。下次启动时生效。
+Resolution ||| 分辨率
+Internal resolution ||| 内部分辨率
+Match display ||| 匹配显示器
+Dynamic ||| 动态
+Spatial upscaler ||| 空间放大器
+How the image is scaled up to the window when it renders at a lower resolution. AMD FSR 1: edge-aware upscaling and sharpening, sharper. Bilinear: plain and soft. ||| 当图像以较低分辨率渲染时，如何放大到窗口大小。AMD FSR 1：基于边缘的放大与锐化，更清晰。双线性：简单柔和。
+Bilinear ||| 双线性
+Anti-aliasing ||| 抗锯齿
+Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and blends only along them, so textures stay sharp. Most useful at a lower internal resolution. ||| 在游戏画面缩放到窗口之前平滑锯齿边缘。SMAA：检测边缘并仅沿边缘进行混合，纹理保持清晰。在较低的内部分辨率下最为有用。
+Temporal upscaling ||| 时间性超分
+Temporal upscaler ||| 时间性超分器
+Selects the temporal anti-aliasing/upscaling technique. Each keeps its own mode and sharpening settings. Changes during play. ||| 选择时间性抗锯齿/超分技术。每种技术各自保存自己的模式和锐化设置。游戏运行中即时生效。
+DLSS mode ||| DLSS 模式
+DLAA anti-aliases at display resolution. Quality, Balanced and Performance render at progressively lower resolutions. Changes apply during play; history resets while the new mode is prepared. ||| DLAA 在显示分辨率下进行抗锯齿。质量、平衡和性能模式以逐级更低的分辨率渲染。更改在游戏运行中生效；在新模式准备期间历史记录会重置。
+Quality ||| 质量
+Balanced ||| 平衡
+DLSS preset ||| DLSS 预设
+Model hint for NVIDIA DLSS. Default uses K for DLAA/Quality/Balanced and M for Performance. Changes during play. ||| NVIDIA DLSS 的模型提示。默认情况下，DLAA/质量/平衡使用 K 模型，性能使用 M 模型。游戏运行中生效。
+DLSS sharpness (RCAS) ||| DLSS 锐化 (RCAS)
+FSR sharpness ||| FSR 锐化
+XeSS sharpness (RCAS) ||| XeSS 锐化 (RCAS)
+Reconstruction sharpening. 0% bypasses it. Saved independently for each technique; changes at once. ||| 重建锐化。0% 为禁用。各技术独立保存设置；立即生效。
+CAS sharpening ||| CAS 锐化
+Optional CAS after reconstruction, independent of the sharpening above. ||| 重建之后的可选 CAS，独立于上方的锐化设置。
+CAS sharpness ||| CAS 强度
+Optional CAS strength, saved separately for each technique. 0% bypasses the pass. ||| 可选的 CAS 强度，各技术独立保存。0% 为跳过该处理。
+Sharpness ||| 锐化
+Image ||| 图像
+Anisotropic filtering ||| 各向异性过滤
+Keeps ground, roads and walls seen at a shallow angle sharp into the distance. Only surface textures are raised; shadows and screen effects keep the game's setting. Game: the level the game asks for, as on the Switch. ||| 使以低角度看向远处的地面、道路和墙壁保持清晰。仅提升表面纹理；阴影和屏幕特效保持游戏本身的设置。游戏：按游戏要求的等级，与 Switch 相同。
+Frame rate ||| 帧率
+90 and 120 FPS draw up to 90 or 120 frames per second while gameplay runs at its original 60 Hz. Use a display that refreshes at least that fast (90 Hz: Steam Deck OLED). 60 FPS matches the Switch and uses the least power. Changes at once. ||| 90 和 120 FPS 会在游戏玩法保持原始 60 Hz 的同时，每秒最多绘制 90 或 120 帧。请使用刷新率至少达到该值的显示器（90 Hz：Steam Deck OLED）。60 FPS 与 Switch 相同且功耗最低。立即生效。
+Power ||| 功耗
+Battery saver ||| 省电模式
+Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, no SMAA, no 120 FPS or interpolation, 4x texture filtering. The game itself still runs at its normal speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) for the biggest savings. Some changes apply at the next start. ||| 为使用电池的掌机和笔记本电脑设置更轻量的配置：75% 内部分辨率并使用 FSR 1 放大、禁用 SMAA、禁用 120 FPS 或插帧、4x 纹理过滤。游戏本身仍以正常速度运行。在 Steam Deck 上，还可通过快速访问菜单（性能 > TDP 限制）降低功耗限制以获得最大节能效果。部分更改需下次启动时生效。
+Overlay ||| 叠加层
+Show FPS ||| 显示 FPS
+Shows the frame rate in the top right corner. ||| 在右上角显示帧率。
+Performance overlay ||| 性能叠加层
+Shows the frame rate and frame times with a graph, GPU / CPU / memory use, temperatures and power where your PC reports them, the upscaler and resolution, and Mario's position. Hidden while this menu is open. Choose its parts below. ||| 以图表显示帧率和帧时间，以及 GPU / CPU / 内存占用、设备可报告的温度和功耗、超分器和分辨率，以及 Mario 的位置。此菜单打开时隐藏。可在下方选择要显示的部分。
+Overlay position ||| 叠加层位置
+The corner of the picture the performance overlay sits in. ||| 性能叠加层所在的画面角落。
+Top right ||| 右上
+Top left ||| 左上
+Bottom right ||| 右下
+Bottom left ||| 左下
+Overlay size ||| 叠加层大小
+The size of the performance overlay's text. ||| 性能叠加层文字的大小。
+Small ||| 小
+Medium ||| 中
+Large ||| 大
+Overlay background ||| 叠加层背景
+How solid the overlay's background is. 0% shows only the text. ||| 叠加层背景的不透明程度。0% 仅显示文字。
+Show GPU ||| 显示 GPU
+GPU use, temperature, power draw, video memory and clock speed. Temperature, power and clock need an NVIDIA card, or Linux with an AMD or Intel one. ||| GPU 占用、温度、功耗、显存和频率。温度、功耗和频率需要 NVIDIA 显卡，或在 Linux 上使用 AMD 或 Intel 显卡。
+Show CPU ||| 显示 CPU
+CPU use, the game's own share of it, and on Linux the CPU's temperature. ||| CPU 占用、游戏自身的占用份额，以及在 Linux 上的 CPU 温度。
+Show memory ||| 显示内存
+The PC's memory in use, and the game's own. ||| PC 的内存占用，以及游戏自身的占用。
+Show frame time graph ||| 显示帧时间图表
+A line of the last frames' times: flat when the game runs evenly, a spike at each hitch. ||| 最近各帧耗时的曲线：游戏流畅运行时平坦，每次卡顿处出现尖峰。
+Show hardware names ||| 显示硬件名称
+The names of the graphics card and the processor. ||| 显卡和处理器的名称。
+Show upscaler and resolution ||| 显示超分器和分辨率
+The upscaler and anti-aliasing in use, and the game's internal resolution next to its size on screen. ||| 当前使用的超分器和抗锯齿，以及游戏内部分辨率及其在屏幕上的尺寸。
+Show Mario's position ||| 显示 Mario 的位置
+Mario's position in the kingdom, in metres. Useful for bug reports. ||| Mario 在国度中的位置（以米为单位）。便于提交 Bug 报告。
+Shaders ||| 着色器
+Memory use ||| 内存占用
+Normal builds the shaders of everything an area loads ahead of time, for fewer stutters (about 9 GB of RAM with an NVIDIA GPU; the default). Low builds each shader the first time it is drawn: a short stutter the first time, about 6.5 GB. Auto picks Low on a PC with less than 12 GB of RAM. The game itself needs about 3.5 GB, so 4 GB of RAM is not enough. Takes effect at the next start. ||| “普通”会预先生成场景加载的所有着色器，减少卡顿（NVIDIA GPU 下约占 9 GB 内存；默认值）。“低”在每种着色器首次绘制时才生成：首次会有短暂卡顿，约占 6.5 GB。“自动”在内存少于 12 GB 的 PC 上选择“低”。游戏本身约需 3.5 GB，因此 4 GB 内存并不够用。下次启动时生效。
+Normal ||| 普通
+Low ||| 低
+Long ||| 长
+Preload area shaders ||| 预载场景着色器
+Builds the shaders of everything an area loads right away, to reduce stalls and objects popping in. Uses a lot of memory (the graphics driver keeps them), so it stops at a quarter of your RAM or 8 GB. Shaders the game has drawn before are built ahead either way. Applies to areas loaded from now on. ||| 立即生成场景加载的所有着色器，以减少卡顿和物体突现。占用大量内存（由显卡驱动保存），因此上限为内存的四分之一或 8 GB。无论何种设置，游戏已绘制过的着色器都会预先生成。仅对之后加载的场景生效。
+Asynchronous shader building ||| 异步着色器生成
+On: when something is drawn before its shader is ready, the game keeps running and the object appears a moment later (or the picture is held for a frame) - no stutter. Off: nothing is ever missing, but the game pauses while the shader builds (a short hitch). ||| 开：当某物在其着色器就绪前被绘制时，游戏继续运行，物体稍后出现（或画面停留一帧）——不会卡顿。关：不会缺少任何东西，但着色器生成期间游戏会暂停（短暂顿挫）。
+Warm-up at start ||| 启动时预热
+How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter the first time they appear. Normal: up to 15 s and 3 GB of memory. Long: up to 30 s and 12 GB (at most half of this PC's memory). Auto: Long with 16 GB of memory or more. Applies at the next start. ||| 游戏启动时花多久将已见过的管线准备好，避免特效首次出现时卡顿。普通：最多 15 秒和 3 GB 内存。长：最多 30 秒和 12 GB（最多为这台电脑内存的一半）。自动：内存 16 GB 及以上时为“长”。下次启动时生效。
+Compile shaders ||| 编译着色器
+Compiles the game's shader archives and pipeline states recorded during play at the next start. A progress window shows both passes. Use after a driver update or after visiting new areas. ||| 在下次启动时编译游戏着色器存档以及游玩期间记录的管线状态。进度窗口会显示两个阶段。在更新驱动或探索新区域后使用。
+Sound ||| 声音
+Volume ||| 音量
+The game's volume. 100% is the game's own level; above it, louder. ||| 游戏音量。100% 为游戏本身的水准；更高则更响。
+Reverb ||| 混响
+The game's echo effect in caves and big rooms. ||| 游戏在洞穴和大厅中的回声效果。
+Movie audio ||| 视频音频
+Sound in the game's videos (e.g. the control tips). Applies the next time a video starts. ||| 游戏视频中的声音（例如操作提示）。下次视频播放时生效。
+Mute in background ||| 后台静音
+No sound while the game's window isn't in front (another window is active). The sound comes back as soon as you switch back. ||| 当游戏窗口不在前台时（其他窗口处于活动状态）不播放声音。切回后声音立即恢复。
+System language ||| 系统语言
+Language ||| 语言
+The game's text language. Auto keeps the one your save has (the game's own Options > Language changes it); any other choice replaces it. Applies the next time the game starts. ||| 游戏文本的语言。自动会沿用存档中的语言（可通过游戏自身的“选项 > 语言”更改）；其他任何选项会将其覆盖。下次游戏启动时生效。
+Menu language ||| 菜单语言
+This menu's own language. Auto: the game's language when the menu has a translation for it (Korean, Brazilian Portuguese), else English. Applies the next time the game starts. ||| 此菜单自身的语言。自动：当菜单有对应翻译时（韩语、巴西葡萄牙语）使用游戏语言，否则为英语。下次游戏启动时生效。
+Controller ||| 控制器
+Motion controls ||| 体感操作
+The controller's gyro and accelerometer for the game's motion moves: shake it to throw Cappy at a target, spin him, or tilt where the game asks. Needs a controller with motion sensors (PlayStation, Switch Pro, Steam Deck). ||| 使用手柄的陀螺仪和加速度计实现游戏的体感动作：摇晃手柄即可朝目标投掷 Cappy、旋转挥帽，或在游戏要求时倾斜手柄。需要带体感传感器的控制器（PlayStation、Switch Pro、Steam Deck）。
+Shake button ||| 摇晃按键
+Shake key ||| 摇晃键位
+Middle mouse button ||| 鼠标中键
+Mouse button 4 ||| 鼠标按键 4
+Mouse button 5 ||| 鼠标按键 5
+Left stick press ||| 按下左摇杆
+Right stick press ||| 按下右摇杆
+Right paddle 1 ||| 右背键 1
+Left paddle 1 ||| 左背键 1
+Right paddle 2 ||| 右背键 2
+Left paddle 2 ||| 左背键 2
+Touchpad ||| 触摸板
+Share / Capture ||| 分享 / 截取
+Shake without moving the controller: while this button or key is held, the game sees the controller shaken - the motion cap throw (homing at a target), spins and shake moves. Works with Motion controls off and on controllers or keyboards without motion sensors. If a key is also bound to a game button, it does both. ||| 无需实际摇动手柄即可触发摇晃：按住此按键或键位时，游戏会认为手柄正在被摇晃——即体感投帽（自动锁定目标）、旋转挥帽以及摇晃动作。在关闭体感操作时、以及在没有体感传感器的控制器或键盘上也可使用。如果该键位同时绑定到游戏按键，则两者都会生效。
+Vibration ||| 震动
+The controller's rumble, as the game sends it (the Switch's HD rumble on the controller's motors). Turn it off for no rumble at all; DualSense and Switch Pro controllers use their own motors through it. ||| 游戏发送的手柄震动（Switch 的高清震动经由手柄马达输出）。关闭后完全没有震动；DualSense 和 Switch Pro 控制器会通过它使用自身的马达。
+Stick deadzone ||| 摇杆死区
+How far a controller stick moves before it counts. Raise it if Mario or the camera drifts on their own. ||| 摇杆移动多少距离才会被判定。如果 Mario 或镜头自行漂移，请调高此值。
+Stick camera ||| 摇杆镜头
+Stick horizontal speed ||| 摇杆水平速度
+Stick vertical speed ||| 摇杆垂直速度
+Invert stick horizontal ||| 反转摇杆水平方向
+Invert stick vertical ||| 反转摇杆垂直方向
+The main gameplay camera only. Mario's movement and menu navigation keep their normal controls. The game's own camera inversion options also apply. ||| 仅影响游戏主镜头。Mario 的移动和菜单导航保持正常操作。游戏自身的镜头反转选项同样生效。
+Mouse ||| 鼠标
+Mouse camera ||| 鼠标镜头
+Moving the mouse turns the camera. While you play, the pointer stays in the window; it is free again in this menu (Esc) or when you switch to another window. ||| 移动鼠标即可转动镜头。游玩时指针会锁定在窗口内；在本菜单中（Esc）或切换到其他窗口后指针恢复自由。
+Mouse horizontal speed ||| 鼠标水平速度
+Mouse vertical speed ||| 鼠标垂直速度
+Separate speed for each mouse axis. A quick flick turns the camera faster still. ||| 鼠标各轴向独立的速度。快速甩动鼠标时镜头转动更快。
+Invert mouse left / right ||| 反转鼠标左 / 右
+Invert mouse up / down ||| 反转鼠标上 / 下
+Moving the mouse up turns the camera down instead. ||| 向上移动鼠标时镜头改为向下转。
+Button prompts ||| 按键提示
+The game's button icons. Auto switches as you play: the keys you bound (and the mouse for the camera) after you use the keyboard or mouse, the controller's own buttons (Xbox, PlayStation or Switch) after you use a controller. Controller always shows the connected controller's; Switch, Xbox and PlayStation always those. ||| 游戏的按键图标。自动模式会在游玩中切换：使用键盘或鼠标后显示绑定的按键（镜头操作对应鼠标），使用控制器后显示控制器自身的按键（Xbox、PlayStation 或 Switch）。“控制器”始终显示已连接控制器的按键；Switch、Xbox 和 PlayStation 则始终显示对应平台的按键。
+Keyboard ||| 键盘
+Skip the start-up controller screen ||| 跳过启动时的控制器画面
+Leaves out the wait on the Joy-Con instructions screen before the title screen. Applies at the next start. The game's own tips while playing ("You can also shake the controller", the Joy-Con videos) stay, as on the Switch. ||| 跳过标题画面之前 Joy-Con 说明画面的等待。下次启动时生效。游玩过程中游戏自身的提示（“也可以摇晃控制器”、Joy-Con 视频）会保留，与 Switch 相同。
+Menu ||| 菜单
+No mods found ||| 未找到 Mod
+Put each mod in its own folder in here, with its romfs folder inside - as mods for the Switch emulators come: mods/<Mod name>/romfs/...\n\nMods made for version 1.0.0 of the game work best. If two mods change the same file, the one higher in the list wins.\n\nCode mods (exefs: IPS / pchtxt patches, Super Mario Odyssey: Online) can't be used: the game code is recompiled from the original game on your PC. ||| 将每个 Mod 放在此处的独立文件夹中，其内包含 romfs 文件夹——与 Switch 模拟器的 Mod 格式相同：mods/<Mod 名称>/romfs/...\n\n为游戏 1.0.0 版本制作的 Mod 兼容性最好。如果两个 Mod 修改了同一个文件，列表中靠上的优先。\n\n代码类 Mod（exefs：IPS / pchtxt 补丁、Super Mario Odyssey: Online）无法使用：游戏代码是在您的 PC 上从原版游戏重新编译的。
+Folder ||| 文件夹
+Open mods folder ||| 打开 Mod 文件夹
+This version ||| 当前版本
+The version of Super Odyssey PC Recomp you're running. ||| 您正在运行的 Super Odyssey PC Recomp 版本。
+Check for updates ||| 检查更新
+Looks for a newer release on the project's GitHub page. ||| 在项目的 GitHub 页面上查找更新的版本。
+Check now ||| 立即检查
+Project page ||| 项目主页
+Opens the project's GitHub page in your browser. ||| 在浏览器中打开项目的 GitHub 页面。
+Check at start ||| 启动时检查
+Looks for a new release each time the game starts (in the background; only GitHub is contacted, and nothing about you or your game is sent). ||| 每次游戏启动时查找新版本（在后台进行；仅连接 GitHub，不会发送任何关于您或您游戏的信息）。
+Quit to Desktop ||| 退出到桌面
+Closes Super Odyssey PC Recomp after confirmation. ||| 确认后关闭 Super Odyssey PC Recomp。
+Diagnostics ||| 诊断
+Copy crash report ||| 复制崩溃报告
+Creates one text file with the saved settings, log, hardware/driver and fault details. Copies its path to paste into the attachment file picker. Includes local paths; nothing is uploaded. ||| 生成一个包含已保存设置、日志、硬件/驱动和故障详情的文本文件。复制其路径以便粘贴到附件选择器。包含本地路径；不会上传任何内容。
+Create file ||| 创建文件
+Configuration ||| 配置
+Play ||| 开始游戏
+Exit ||| 退出
+Show this screen at every start ||| 每次启动时显示此页面
+Start: Play ||| 启动：开始游戏
+Compile the shaders now? ||| 现在编译着色器吗？
+Compiling the shaders ||| 正在编译着色器
+Compile now ||| 立即编译
+Later ||| 稍后
+Stop and play ||| 停止并开始游戏
+What is compiled so far is kept; the rest is made while you play. ||| 已编译的内容会保留；其余部分在游玩过程中生成。
+The game's shaders are turned into ones your GPU runs, once, before playing. Without it they are made the first time each one is needed, which shows as short stutters for a while. It takes a few minutes (about 6 on a Steam Deck) and is only needed again after an update that changes them, or when you ask for it in the menu. ||| 开始游戏前，游戏的着色器会被一次性转换为您的 GPU 可运行的版本。若不进行此操作，着色器会在首次需要时才生成，表现为一段时间的短暂卡顿。此过程需要几分钟（Steam Deck 上约 6 分钟），且仅在更改它们的更新之后或您在菜单中主动要求时才需再次进行。
+Step 1 of 3: translating the game's shaders ||| 第 1 步，共 3 步：转换游戏着色器
+Step 2 of 3: compiling them for your GPU ||| 第 2 步，共 3 步：为您的 GPU 编译着色器
+Step 3 of 3: compiling the recorded pipelines ||| 第 3 步，共 3 步：编译已记录的管线
+finding the game's shaders... ||| 正在查找游戏着色器……
+Steam Deck tip: press the ... button, open Performance, turn on Manual GPU Clock Control and set it to 1000 MHz. With a low TDP limit (7-10 W) this keeps the GPU fast enough for a steady 60 FPS. ||| Steam Deck 小贴士：按下 … 键，打开“性能”，开启“手动 GPU 频率控制”并设为 1000 MHz。在较低的 TDP 限制（7-10 W）下，这能让 GPU 保持足够快的速度以稳定 60 FPS。
+Vibration strength ||| 震动强度
+The monitor's refresh rate in exclusive fullscreen (windowed and borderless use the desktop's: change it in your system's display settings). Auto: the highest rate your monitor offers that is a multiple of the frame rate (120 Hz on a 144 Hz monitor at 60 FPS), so every frame is shown for the same time - the smoothest picture. Other rates (144 Hz at 60 FPS) show frames for uneven times: judder. ||| 独占全屏下显示器的刷新率（窗口和无边框模式使用桌面刷新率：请在系统显示设置中更改）。自动：选择显示器提供的、为帧率整数倍的最高刷新率（144 Hz 显示器上 60 FPS 时为 120 Hz），使每帧显示时间相同——画面最流畅。其他刷新率（60 FPS 时 144 Hz）会导致每帧显示时间不均：产生抖动感。
+Upscaling ||| 超分
+Upscale method ||| 超分方式
+How the picture is reconstructed and upscaled. Off: the game renders plainly at the internal resolution (the Spatial upscaler above scales it to the window). NVIDIA DLSS, AMD FSR and Intel XeSS: temporal upscaling and anti-aliasing - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 画面如何被重建和放大。关：游戏直接以内部分辨率渲染（由上方的空间放大器缩放到窗口）。NVIDIA DLSS、AMD FSR 和 Intel XeSS：时间性超分与抗锯齿——在较低内部分辨率下更清晰，需要相应的 GPU 和驱动支持。各项各自保存模式和锐化设置。游戏运行中生效。
+This covers this menu and the configuration screen. The game's own text language is in Controls > System language. ||| 此设置仅作用于本菜单和配置页面。游戏自身的文本语言位于“控制 > 系统语言”。
+# 0.3.2 / 1.0 additions (#63)
+Narrow picture view ||| 窄画面视野
+Cropped sides ||| 裁切两侧
+Full width ||| 全宽
+In a picture narrower than 16:9 (16:10, 4:3, Fill on a Steam Deck). Cropped sides: the 16:9 view's height, a little cut off at the left and right. Full width: everything the 16:9 view shows, and more above and below. ||| 用于比 16:9 更窄的画面（16:10、4:3、Steam Deck 上的填充窗口）。裁切两侧：保持 16:9 视野的高度，左右略微裁切。全宽：包含 16:9 视野的全部内容，上下还会显示更多。
+What a picture narrower than 16:9 (16:10, 4:3) shows: cut sides, or the full width and more above and below. ||| 比例小于 16:9（16:10、4:3）的画面显示内容：裁切两侧，或全宽并在上下显示更多。
+Full width shows the whole picture; Cropped sides (the default) keeps the 16:9 view's height. ||| 全宽显示完整画面；裁切两侧（默认）保持 16:9 视野的高度。
+HUD position (wide) ||| HUD 位置（宽屏）
+In a picture wider than 16:9 (21:9, 32:9, Fill on an ultrawide). Edges: the coin and moon counters, the life gauge, the button guides and the mini map go to the picture's corners, as on a 16:9 screen. Centered: the whole HUD in a 16:9 box in the middle. Menus and messages stay in the middle either way. ||| 用于比 16:9 更宽的画面（21:9、32:9、带鱼屏上的填充窗口）。边缘：金币和月亮计数、生命值表、按键指引和小地图移到画面角落，如同 16:9 屏幕。居中：整个 HUD 以 16:9 的框居中放置。无论何种设置，菜单和消息都保持在中间。
+Centered (16:9) ||| 居中 (16:9)
+How sharp the 3D image is - each choice shows the size it renders at in this window and picture shape. Shown as your screen's resolution: that resolution (at least the Switch's 1600 x 900). 100% (the default): exactly your screen's pixels (Steam Deck: 1280 x 800). Dynamic: as sharp as your GPU keeps at full speed. 75% / 50% / 25%: a share of the display, for slower machines; the fixed sizes render at exactly that, above the screen's for a sharper picture (supersampling). ||| 3D 画面的清晰程度——每个选项都会显示在当前窗口和画面形状下的渲染尺寸。以屏幕分辨率显示：即该分辨率（至少为 Switch 的 1600 x 900）。100%（默认）：恰好为屏幕像素数（Steam Deck：1280 x 800）。动态：以 GPU 能全速维持的清晰度渲染。75% / 50% / 25%：屏幕的一定比例，适合较慢的机器；固定尺寸则按该数值精确渲染，高于屏幕分辨率时画面更清晰（超采样）。
+Rendering at %.0f x %.0f. ||| 正在以 %.0f x %.0f 渲染。
+ Dynamic: %.0f%% of the display right now. |||  动态：当前为显示器的 %.0f%%。
+Your screen's resolution lets the temporal upscaler choose its usual input size. A fixed resolution overrides that size. At or above the display resolution, upscaling is bypassed. Native AA/DLAA applies at equal sizes. ||| 屏幕分辨率允许时间性超分器自行选择惯用的输入尺寸。固定分辨率会覆盖该尺寸。达到或超过显示分辨率时，超分将被跳过。尺寸相同时启用原生 AA/DLAA。
+Smooths jagged edges of the game image before it is scaled to the window. SMAA: finds the edges and blends only along them, so textures stay sharp (the better look). FXAA: one quick pass that softens every high-contrast edge - the lightest on the GPU, a little softer. Most useful at a lower internal resolution. (MSAA isn't offered: the game lights its scene in several full-screen passes after the geometry, where MSAA has nothing to work on - a higher internal resolution, 2x and up, is the supersampling that works.) ||| 在游戏画面缩放到窗口之前平滑锯齿边缘。SMAA：检测边缘并仅沿边缘混合，纹理保持清晰（效果更好）。FXAA：一遍快速处理，柔化所有高对比度边缘——GPU 负担最轻，画面稍柔。在较低内部分辨率下最为有用。（不提供 MSAA：游戏在几何体绘制之后通过多遍全屏处理进行场景光照，MSAA 在其中无处发挥——更高的内部分辨率（2x 及以上）才是有效的超采样手段。）
+How the picture is upscaled to the window. Off: the game renders plainly at the internal resolution and is scaled with plain bilinear filtering. AMD FSR 1: edge-aware upscaling and sharpening of each frame - set Internal resolution below your screen's (75% for example); at your screen's resolution there is nothing to scale. NVIDIA DLSS, AMD FSR 2 / 3.1 / 4 and Intel XeSS: temporal upscaling and anti-aliasing from several frames - sharper at a lower internal resolution, needing the GPU and driver for it. Each keeps its own mode and sharpening settings. Changes during play. ||| 画面如何放大到窗口。关：游戏直接以内部分辨率渲染，并以普通双线性过滤缩放。AMD FSR 1：基于边缘的逐帧放大与锐化——请将内部分辨率设为低于屏幕（例如 75%）；达到屏幕分辨率时无需放大。NVIDIA DLSS、AMD FSR 2 / 3.1 / 4 和 Intel XeSS：基于多帧的时间性超分与抗锯齿——在较低内部分辨率下更清晰，需要相应的 GPU 和驱动支持。各项各自保存模式和锐化设置。游戏运行中生效。
+AMD FSR 4 (Beta) ||| AMD FSR 4 (测试版)
+Not available on this PC (greyed out): ||| 在这台电脑上不可用（显示为灰色）：
+Low latency (NVIDIA Reflex) ||| 低延迟 (NVIDIA Reflex)
+Less delay between your input and the picture: the game starts each frame as late as it can instead of queuing frames ahead. Boost also keeps the GPU clocks up. NVIDIA GPUs; always on with DLSS frame generation. Applies the next time the game starts. ||| 减少输入到画面的延迟：游戏尽可能延迟每一帧的开始，而不是提前排队帧。Boost 模式还会维持 GPU 频率。需要 NVIDIA 显卡；DLSS 帧生成时始终开启。下次游戏启动时生效。
+Texture detail ||| 纹理细节
+Surface textures use a sharper level of detail: crisper ground, walls and clothing at a distance and at high resolutions. High: half a level sharper, Ultra: a full level. Fine patterns can shimmer a little more without anti-aliasing. Switch: as on the Switch. ||| 表面纹理使用更锐利的细节等级：远距离和高分辨率下地面、墙壁和衣物更清晰。高：锐利半个等级，超高：一个完整等级。在没有抗锯齿时，细密纹理可能略有闪烁。Switch：与 Switch 相同。
+Switch ||| Switch
+High ||| 高
+Ultra ||| 超高
+High (2x) ||| 高 (2x)
+Ultra (4x) ||| 超高 (4x)
+Shadow quality ||| 阴影质量
+Draw distance ||| 视距
+Very high ||| 超高
+Enemies, coins, characters and other objects appear from farther away, and models switch to their simpler versions and fade out farther away. High: twice the Switch's distances, Very high: four times. Faraway objects then also keep moving, as they do near you. Costs CPU and GPU time in large kingdoms. Very high is heavy: in New Donk City it halved the frame rate on a fast PC (120 to about 60 FPS); High costs nothing there. The landscape itself is unchanged. Switch: as on the Switch. Changes at once. ||| 敌人、金币、角色和其他物体从更远处出现，模型在更远处才切换为简化版本并淡出。高：为 Switch 视距的两倍，超高：四倍。远处物体也会像近处一样保持移动。在大型国度中消耗 CPU 和 GPU 时间。超高非常吃性能：在 New Donk City 中，快速 PC 上的帧率减半（120 到约 60 FPS）；高的开销则可以忽略。地形本身不变。Switch：与 Switch 相同。立即生效。
+Draws the game's shadow maps at 2x or 4x their size: sharper, steadier shadow edges without the stair steps. Costs some GPU time and video memory (Ultra: about 300 MB more). Switch: as on the Switch. Applies from the next area loaded. ||| 以 2 倍或 4 倍尺寸绘制游戏的阴影贴图：阴影边缘更锐利、更稳定，没有阶梯感。消耗一些 GPU 时间和显存（超高：约多占 300 MB）。Switch：与 Switch 相同。从下一个加载的场景起生效。
+Above 60, the game draws that many frames per second, each a real frame showing Mario, the camera and the world where they are at that moment (no generated in-between images); gameplay itself - physics, enemies, timers - keeps the game's own 60 steps a second, as it was made. Choose your display's refresh rate or a divisor of it (a 144 Hz screen: 72 or 144), and a PC that can draw that fast - 60 FPS on a 144 Hz screen can't be smooth: frames alternate 2 and 3 refreshes (a judder no VSync setting removes; G-Sync / FreeSync does). Match display picks that rate for you. 60 FPS matches the Switch and uses the least power. Changes at once. ||| 高于 60 时，游戏每秒绘制相应数量的帧，每一帧都是显示 Mario、镜头和世界当时状态的真实画面（不生成中间图像）；游戏玩法本身——物理、敌人、计时器——仍按原设计保持每秒 60 步。请选择显示器的刷新率或其约数（144 Hz 屏幕：72 或 144），并确保 PC 能画得这么快——144 Hz 屏幕上的 60 FPS 无法流畅：各帧交替持续 2 次和 3 次刷新（任何垂直同步设置都无法消除的抖动感；G-Sync / FreeSync 可以）。匹配显示器会自动为您选择合适的帧率。60 FPS 与 Switch 相同且功耗最低。立即生效。
+Early frame hand-off ||| 提前交帧
+On: the game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places at high frame rates: about 10-15% more FPS (132 -> 148 on average at 240 FPS). If you see flickering or broken geometry, set it to Off. Auto: off on Windows for now. ||| 开：这一帧提交给显卡后游戏立即开始下一帧，而不等待显卡画完——游戏逻辑与绘制并行运行。高帧率下的复杂场景：约多出 10-15% 的 FPS（240 FPS 下平均从 132 提升到 148）。如果出现闪烁或几何体破损，请设为关。自动：目前在 Windows 上为关。
+On: the game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places at high frame rates: about 10-15% more FPS (132 -> 148 on average at 240 FPS). If you see flickering or broken geometry, set it to Off. Auto: on (as the Steam Deck has always run). ||| 开：这一帧提交给显卡后游戏立即开始下一帧，而不等待显卡画完——游戏逻辑与绘制并行运行。高帧率下的复杂场景：约多出 10-15% 的 FPS（240 FPS 下平均从 132 提升到 148）。如果出现闪烁或几何体破损，请设为关。自动：开（Steam Deck 一直以来的运行方式）。
+Multithreaded rendering ||| 多线程渲染
+A second CPU thread hands the drawing commands to the graphics driver while the first prepares the next ones. Busy places at high frame rates: about 25-30% more FPS on a fast PC (139 -> 179 at 240 FPS). Uses one more CPU core. If you see flickering, missing objects or crashes, turn it off. ||| 由第二个 CPU 线程向显卡驱动提交绘制命令，同时第一个线程准备后续命令。高帧率下的复杂场景：快速 PC 上约多出 25-30% 的 FPS（240 FPS 下 139 提升到 179）。多占用一个 CPU 核心。如果出现闪烁、物体缺失或崩溃，请关闭。
+Only set up shaders seen before ||| 仅预置已见过的着色器
+On: when an area loads, only the shaders the game has drawn before (in any session) are prepared ahead; the rest wait until they are first drawn. Frees CPU time after a kingdom loads (Steam Deck: about 5 FPS more in busy places), but a new area can stutter a little the first time things appear. Off (default): everything an area loads is prepared ahead. Applies to areas loaded from now on. ||| 开：加载场景时，仅预先准备游戏以前（任意会话中）绘制过的着色器；其余等到首次绘制时再生成。可在国度加载后释放 CPU 时间（Steam Deck：复杂场景约多出 5 FPS），但新场景中的物体首次出现时可能略有卡顿。关（默认）：场景加载的所有内容都预先准备。仅对之后加载的场景生效。
+Audio output ||| 音频输出
+What the game mixes for. 5.1 surround: the game's own 5.1 mix (front, centre, subwoofer, rear) - needs a 5.1 or 7.1 speaker setup in your system's sound settings. Stereo: two channels. Auto: 5.1 when your sound device is set up with 6 or more channels. Applies the next time the game starts. ||| 游戏混音的目标配置。5.1 环绕声：游戏自带的 5.1 混音（前置、中置、低音炮、后置）——需要在系统声音设置中配置 5.1 或 7.1 音箱。立体声：双声道。自动：声音设备配置为 6 声道及以上时使用 5.1。下次游戏启动时生效。
+Stereo ||| 立体声
+Invert gyro X ||| 反转陀螺仪 X
+Invert gyro Y ||| 反转陀螺仪 Y
+If a motion move goes the wrong way on your controller: X turns tilting forward / back the other way round, Y turning left / right. ||| 如果控制器上的体感动作方向不对：X 反转前后倾斜，Y 反转左右转动。
+Gyro calibration ||| 陀螺仪校准
+Calibrate gyro ||| 校准陀螺仪
+No controller with a gyro is connected. ||| 未连接带陀螺仪的控制器。
+Calibrating: keep the controller still... ||| 校准中：请保持控制器静止……
+Done: the offset is saved and used from now on. ||| 完成：偏移已保存并将从此生效。
+Lay the controller flat and still, then press it: its gyro's offset at rest is measured (2 seconds) and saved. Use it if the game sees motion while the controller lies still. ||| 将控制器平放并保持静止，然后按下：测量并保存静止状态下的陀螺仪偏移（2 秒）。如果控制器静止时游戏仍检测到动作，请使用此功能。
+Separate speed for each mouse axis. The camera turns as far as the mouse moves, at once - no easing as with a stick (the usual follow camera; the other camera kinds take the mouse as a stick). ||| 鼠标各轴向独立的速度。镜头随鼠标移动即时转动同等距离——没有摇杆那样的缓动（通常的跟随镜头；其他镜头类型会将鼠标视为摇杆）。
+Controller: %s  (%s button names) ||| 控制器：%s（%s 按键名）
+connected ||| 已连接
+No controller connected  (%s button names shown) ||| 未连接控制器（显示 %s 按键名）
+Cappy controller ||| Cappy 控制器
+Not assigned ||| 未分配
+Assign a second controller here, then choose Two Players in the game's pause menu. Mario keeps the current controller and keyboard. Cappy uses this controller's buttons and sticks; secondary motion controls are not available yet. Assignment lasts for this session. ||| 在此分配第二个控制器，然后在游戏的暂停菜单中选择“双人游玩”。Mario 继续使用当前控制器和键盘。Cappy 使用此控制器的按键和摇杆；第二控制器的体感操作尚不可用。分配仅在本次会话内有效。
+Select a binding, then press the new button, key, mouse button or wheel. Esc (or 5 seconds) cancels. A button that's already in use swaps with the old one. ||| 选择一个绑定，然后按下新的按键、键位、鼠标按键或滚轮。Esc（或等待 5 秒）取消。已被占用的按键会与原绑定互换。
+Controller bindings reset to the defaults. ||| 控制器绑定已重置为默认值。
+Keyboard bindings reset to the defaults. ||| 键盘绑定已重置为默认值。
+%s is now %s. ||| %s 现在是 %s。
+%s is now %s; %s moved to %s (swapped). ||| %s 现在是 %s；%s 移至 %s（互换）。
+Cancelled: %s unchanged. ||| 已取消：%s 未更改。
+Nothing pressed: %s unchanged. ||| 未按下任何按键：%s 未更改。
+%s available ||| %s 可用
+Downloading %.0f%% ||| 正在下载 %.0f%%
+%s installed ||| %s 已安装
+Downloads %s from GitHub and puts it over this install's program files. Your game files, saves, settings and mods stay. After the restart the game code is rebuilt for the new version if it needs to be (a few minutes, once). ||| 从 GitHub 下载 %s 并覆盖本安装的程序文件。您的游戏文件、存档、设置和 Mod 会保留。重启后如有需要，会为新版本重新构建游戏代码（需几分钟，仅一次）。
+Download and install ||| 下载并安装
+What's new ||| 更新内容
+Opens the release's page on GitHub in your browser. ||| 在浏览器中打开 GitHub 上的版本页面。
+Restart now ||| 立即重启
+Starts the new version. Progress since your last save is lost. ||| 启动新版本。上次保存之后的进度将丢失。
+Up to date ||| 已是最新
+Checking... ||| 正在检查……
+Didn't work ||| 检查失败
+Not set up ||| 未配置
+On: classic vsync - each frame waits for the screen's next refresh, no tearing (a late frame waits a whole refresh; with G-Sync / FreeSync the screen follows the game instead). Fast (Mailbox): no tearing and no waiting - the screen shows the newest finished frame at each refresh. Adaptive (Relaxed): as On, but a late frame goes out at once (tearing only then). Off (the default): frames go out the moment they're done - the lowest input delay, with tearing. Where the GPU or driver lacks one, the closest it has is used. ||| 开：经典垂直同步——每帧等待屏幕的下一次刷新，无撕裂（延迟的帧要等一整个刷新周期；G-Sync / FreeSync 下屏幕改为跟随游戏）。快速（信箱）：无撕裂也无需等待——屏幕每次刷新显示最新完成的帧。自适应（宽松）：与开类似，但延迟的帧立即输出（仅此时可能撕裂）。关（默认）：帧完成即输出——输入延迟最低，但可能撕裂。当 GPU 或驱动不支持某一模式时，会使用最接近的可用模式。
+Fast (Mailbox) ||| 快速（信箱）
+Adaptive (Relaxed) ||| 自适应（宽松）
+Smooth color gradients ||| 平滑颜色渐变
+Fixes color banding: in night skies, fog, water and dark rooms the game's colors change in visible steps (bands or rings) instead of a smooth fade - on the Switch too. On: the game's picture is kept in more precise colors until it reaches the screen, with a fine, invisible grain there that hides the steps. Costs almost nothing. Off: the picture exactly as on the Switch. ||| 修复色带：在夜空、雾、水面和昏暗房间中，游戏颜色会以可见的台阶（色带或色环）而非平滑过渡变化——Switch 上也是如此。开：游戏画面在到达屏幕前保持更精确的颜色，并在屏幕上叠加一层细微不可见的噪点来掩盖色阶。开销几乎为零。关：画面与 Switch 完全相同。
+Experimental ||| 实验性
+120 FPS interpolation (may crash) ||| 120 FPS 插帧（可能崩溃）
+Warning: this can make the game crash - several players had crashes with it on (NVIDIA and AMD), and it can make shadows flicker. Leave it off unless you want to try it; if the game crashes or shows glitches, turn it off first. For a higher frame rate use Performance > Frame rate instead (72-240 FPS, real frames). What it does: adds a made-up image between the game's frames, targeting 120 FPS on a 120 Hz or faster display. Needs Frame rate 60 FPS and Upscale method Off or AMD FSR 1. Busy scenes can fall back to 60 FPS. ||| 注意：此功能可能导致游戏崩溃——多名玩家开启后出现崩溃（NVIDIA 和 AMD 均有），还可能使阴影闪烁。除非想尝试，否则请保持关闭；如果游戏崩溃或出现异常画面，请先关闭它。要获得更高帧率，请改用“性能 > 帧率”（72-240 FPS，真实帧）。功能说明：在游戏帧与帧之间插入一张生成的图像，在 120 Hz 或更快的显示器上以 120 FPS 为目标。需要帧率为 60 FPS 且超分方式为“关”或 AMD FSR 1。复杂场景可能回落到 60 FPS。
+Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > Frame rate, and Graphics > Experimental at the bottom of this tab). ||| 帧生成会等到游戏在不依靠自身附加帧的情况下渲染出 60 FPS（性能 > 帧率，以及本页底部的图形 > 实验性）。
+Optimizations ||| 优化
+Auto (on) ||| 自动（开）
+Auto (off) ||| 自动（关）
+Shaders - advanced ||| 着色器 - 高级
+Preload area shaders (more RAM) ||| 预载场景着色器（占用更多内存）
+NVIDIA graphics cards only: not available with this one. ||| 仅支持 NVIDIA 显卡：当前显卡不可用。
+\n\nApplies when the game starts again. ||| \n\n下次游戏启动时生效。
+The game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places: about 10-15% more FPS on a PC (132 -> 148 at 240 FPS), and 45 -> 58-60 FPS on a Steam Deck. On by default. If you see flickering or broken objects, set it to Off. ||| 这一帧提交给显卡后，游戏立即开始下一帧，而不等待显卡画完——游戏逻辑与绘制并行运行。复杂场景：PC 上约多出 10-15% 的 FPS（240 FPS 下 132 提升到 148），Steam Deck 上从 45 提升到 58-60 FPS。默认开启。如果出现闪烁或物体破损，请设为关。
+A second CPU thread hands the drawing commands to the graphics driver while the first prepares the next ones. Busy places at high frame rates: about 25-30% more FPS on a fast PC (148 -> 179 at 240 FPS). Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it was tested; off with AMD and Intel for now - try On there. If you see flickering, missing objects or crashes, set it to Off. ||| 由第二个 CPU 线程向显卡驱动提交绘制命令，同时第一个线程准备后续命令。高帧率下的复杂场景：快速 PC 上约多出 25-30% 的 FPS（240 FPS 下 148 提升到 179）。多占用一个 CPU 核心。自动：NVIDIA 显卡上开启（已经过测试）；AMD 和 Intel 上暂为关闭——可以在其上尝试开启。如果出现闪烁、物体缺失或崩溃，请设为关。
+Less delay between your input and the picture: the game starts each frame as late as it can instead of queuing frames ahead. Boost also keeps the GPU clocks up. Always on with DLSS frame generation. Applies the next time the game starts. ||| 减少输入到画面的延迟：游戏尽可能延迟每一帧的开始，而不是提前排队帧。Boost 模式还会维持 GPU 频率。DLSS 帧生成时始终开启。下次游戏启动时生效。
+Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, no SMAA, no 120 FPS or interpolation, the game's own texture filtering. The game itself still runs at its normal speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) for the biggest savings. Some changes apply at the next start. ||| 为使用电池的掌机和笔记本电脑设置更轻量的配置：75% 内部分辨率并使用 FSR 1 放大、禁用 SMAA、禁用 120 FPS 或插帧、游戏自带的纹理过滤。游戏本身仍以正常速度运行。在 Steam Deck 上，还可通过快速访问菜单（性能 > TDP 限制）降低功耗限制以获得最大节能效果。部分更改需下次启动时生效。
+Sets lighter settings for handhelds and laptops on battery: 75% internal resolution upscaled with FSR 1, no SMAA, Frame rate 60 FPS, the game's own texture filtering. The game itself still runs at its normal speed. On a Steam Deck, also lower the power limit in the Quick Access menu (Performance > TDP Limit) for the biggest savings. Some changes apply at the next start. ||| 为使用电池的掌机和笔记本电脑设置更轻量的配置：75% 内部分辨率并使用 FSR 1 放大、禁用 SMAA、帧率 60 FPS、游戏自带的纹理过滤。游戏本身仍以正常速度运行。在 Steam Deck 上，还可通过快速访问菜单（性能 > TDP 限制）降低功耗限制以获得最大节能效果。部分更改需下次启动时生效。
+A generated frame between each two the game renders: 120 FPS shown from the game's 60 - smoother motion on a 120 Hz or faster display, a little more input delay (Performance > Low latency takes most of it back). AMD FSR: any GPU; changes during play. NVIDIA DLSS: GeForce RTX 40 series or newer, with Reflex; applies the next time the game starts. Intel XeSS frame generation exists only for DirectX 12, not for this Vulkan renderer. Needs Frame rate 60 FPS. The HUD can shimmer slightly on generated frames. ||| 在游戏渲染的每两帧之间插入一帧生成画面：由游戏的 60 帧呈现 120 FPS——在 120 Hz 或更快的显示器上动作更流畅，输入延迟略增（性能 > 低延迟可挽回大部分）。AMD FSR：任意 GPU；游戏运行中生效。NVIDIA DLSS：GeForce RTX 40 系列或更新，配合 Reflex；下次游戏启动时生效。Intel XeSS 帧生成仅存在于 DirectX 12，不适用于此 Vulkan 渲染器。需要帧率为 60 FPS。生成的帧上 HUD 可能轻微闪烁。
+Off: set Frame rate 60 FPS ||| 关：请将帧率设为 60 FPS
+Frame generation waits until the game renders 60 FPS without its own extra frames (Performance > Frame rate). ||| 帧生成会等到游戏在不依靠自身附加帧的情况下渲染出 60 FPS（性能 > 帧率）。
+A second CPU thread hands the drawing commands to the graphics driver while the first prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). Uses one more CPU core. On by default. If you see flickering, missing objects, a frozen picture or crashes, turn it off. ||| 由第二个 CPU 线程向显卡驱动提交绘制命令，同时第一个线程准备后续命令：复杂场景中 FPS 更高（快速 PC 上 240 FPS 下 148 提升到 179）。多占用一个 CPU 核心。默认开启。如果出现闪烁、物体缺失、画面冻结或崩溃，请关闭。
+Bindings apply to the game only. Menus keep a fixed layout (A / Cross or Enter selects, B / Circle or Esc goes back), and the in-game menu always opens with F1 or Esc, or the controller's Back + Start held together, or its Home / Guide button - so this page can't be locked out. The game's button icons follow the controller bindings. ||| 绑定仅对游戏生效。菜单保持固定布局（A / Cross 或 Enter 确认，B / Circle 或 Esc 返回），游戏内菜单始终可通过 F1 或 Esc、同时按住控制器的 Back + Start、或 Home / Guide 键打开——因此本页面不会无法进入。游戏的按键图标跟随控制器绑定。
+Fullscreen:  F11 / Alt+Enter ||| 全屏：F11 / Alt+Enter
+How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter the first time they appear. Normal: up to 15 s and 3 GB of memory. Long: up to 30 s and 12 GB (at most half of this PC's memory) - the default: the fewest first-time stutters. Auto: Long with 16 GB of memory or more, else Normal. Applies at the next start. ||| 游戏启动时花多久将已见过的管线准备好，避免特效首次出现时卡顿。普通：最多 15 秒和 3 GB 内存。长：最多 30 秒和 12 GB（最多为这台电脑内存的一半）——默认值：首次卡顿最少。自动：内存 16 GB 及以上时为“长”，否则为“普通”。下次启动时生效。
+Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start ||| 打开 / 关闭此菜单：F1、Esc、控制器的 Home / Xbox / PlayStation 键，或 Back + Start
+Select:  A / Cross  (Enter)        Back:  B / Circle  (Esc)        Switch tabs:  L / R  (Q / E) ||| 选择：A / Cross（Enter）        返回：B / Circle（Esc）        切换标签页：L / R（Q / E）
+The game starts its next frame as soon as this one is handed to the graphics card, instead of waiting for the card to finish it - the game and the drawing run side by side. Busy places: about 10-15% more FPS on a PC (132 -> 148 at 240 FPS), and 45 -> 58-60 FPS on a Steam Deck. On by default. If you see flickering or broken objects, turn it off. ||| 这一帧提交给显卡后，游戏立即开始下一帧，而不等待显卡画完——游戏逻辑与绘制并行运行。复杂场景：PC 上约多出 10-15% 的 FPS（240 FPS 下 132 提升到 148），Steam Deck 上从 45 提升到 58-60 FPS。默认开启。如果出现闪烁或物体破损，请关闭。
+ Off by default on the Steam Deck: there it can stop the graphics chip (a rare GPU reset) - a fix is being looked for. |||  在 Steam Deck 上默认关闭：在该设备上它可能导致图形芯片停止工作（罕见的 GPU 重置）——正在寻找修复方案。
+How long the game spends at start getting the pipelines it has seen ready, so effects don't stutter the first time they appear. Each one keeps some graphics driver memory. Auto (the default): up to 1 GB, the first scene's and the most recent - as smooth as more in our tests, with the least memory. Normal: up to 15 s and 3 GB. Long: up to 30 s and 12 GB (at most half of this PC's memory). Applies at the next start. ||| 游戏启动时花多久将已见过的管线准备好，避免特效首次出现时卡顿。每个管线都会占用一些显卡驱动内存。自动（默认）：最多 1 GB，保留首个场景和最近的管线——在测试中与更大的上限同样流畅，内存占用最少。普通：最多 15 秒和 3 GB。长：最多 30 秒和 12 GB（最多为这台电脑内存的一半）。下次启动时生效。
+Discord ||| Discord
+Discord activity ||| Discord 动态
+Shows Super Odyssey PC Recomp, the kingdom you're in and the time played on your Discord profile, while the Discord app is open on this computer. Off: nothing is shown. Changes at once. ||| 当 Discord 应用在此电脑上运行时，在您的 Discord 个人资料中显示 Super Odyssey PC Recomp、所在的国度和游玩时长。关：不显示任何内容。立即生效。
+Title screen ||| 标题画面
+Cap Kingdom ||| 帽子国
+Cascade Kingdom ||| 瀑布国
+Sand Kingdom ||| 沙之国
+Lake Kingdom ||| 湖之国
+Wooded Kingdom ||| 森林国
+Cloud Kingdom ||| 云之国
+Lost Kingdom ||| 失落国
+Metro Kingdom ||| 都市国
+Snow Kingdom ||| 雪之国
+Seaside Kingdom ||| 海之国
+Luncheon Kingdom ||| 料理国
+Ruined Kingdom ||| 废墟国
+Bowser's Kingdom ||| 库巴国
+Moon Kingdom ||| 月之国
+Mushroom Kingdom ||| 蘑菇王国
+Dark Side ||| 月之暗面
+Darker Side ||| 月之背面
+Which screen the game shows on. ||| 游戏画面显示在哪个屏幕上。
+Your main screen. ||| 您的主屏幕。
+A window, borderless full screen, or exclusive full screen. ||| 窗口、无边框全屏或独占全屏。
+Borderless (the default). ||| 无边框（默认）。
+The size of the window, or of the screen mode in exclusive full screen. ||| 窗口的大小，或独占全屏下屏幕模式的大小。
+Desktop (the default). ||| 桌面（默认）。
+How many times a second the screen updates (exclusive full screen only). ||| 屏幕每秒刷新多少次（仅限独占全屏）。
+Auto (the default). ||| 自动（默认）。
+Lines the frames up with the screen's refreshes, so the picture never tears (splits in two). ||| 使帧与屏幕刷新对齐，画面永不撕裂（分成两半）。
+Off for the lowest input delay (the default). Fast if you see tearing. On with a G-Sync / FreeSync screen. ||| 关可获得最低输入延迟（默认）。看到撕裂时用快速。G-Sync / FreeSync 屏幕上用开。
+The picture's shape. 16:9 is the Switch's. ||| 画面的形状。16:9 为 Switch 的形状。
+16:9 for the Switch's picture; Fill on wide screens and on the Steam Deck. ||| Switch 画面用 16:9；宽屏和 Steam Deck 上用填充窗口。
+Where the coin counters and other HUD go on a picture wider than 16:9. ||| 比 16:9 更宽的画面上，金币计数和其他 HUD 的位置。
+Edges when Aspect ratio is Fill on a wide screen (the Steam Deck's default); otherwise it changes nothing. ||| 画面比例为“填充窗口”且为宽屏时用“边缘”（Steam Deck 的默认值）；其他情况下无影响。
+Whether the game thinks the Switch is docked to a TV or held in the hands. ||| 游戏认为 Switch 接在 TV 底座上还是握在手中。
+Docked for the best picture (the default). Handheld for longer battery life on a handheld PC. ||| 底座模式画质最佳（默认）。掌机模式可延长掌机形态 PC 的续航。
+Lets the game lower its resolution when a scene is busy, as the Switch does. ||| 允许游戏在场景复杂时降低分辨率，与 Switch 相同。
+Off (the default): always sharp. ||| 关（默认）：始终清晰。
+How many pixels the game draws: more is sharper but more work for the graphics card. ||| 游戏绘制的像素数量：越多越清晰，但显卡负担越重。
+100% (the default): your screen's resolution. 75% on a slow graphics card. ||| 100%（默认）：屏幕分辨率。显卡较慢时用 75%。
+How a lower resolution is stretched to the window. ||| 较低的分辨率如何拉伸到窗口大小。
+MetalFX. ||| MetalFX。
+Smooths jagged edges. ||| 平滑锯齿边缘。
+Off (the default). FXAA or SMAA for smoother edges. ||| 关（默认）。需要更平滑的边缘时用 FXAA 或 SMAA。
+Draws fewer pixels and rebuilds a sharp picture from them, for more FPS. ||| 绘制更少的像素并由此重建清晰的画面，以获得更高 FPS。
+Off on a fast PC (the default). NVIDIA DLSS on an RTX card, or AMD FSR, when you need more FPS. ||| 快速 PC 上关闭（默认）。需要更高 FPS 时，RTX 显卡用 NVIDIA DLSS，或用 AMD FSR。
+Adds a made-up frame between each two real ones, for smoother motion. ||| 在每两帧真实画面之间插入一帧生成画面，使动作更流畅。
+Off (the default). Only with a 120 Hz or faster screen, at 60 FPS. ||| 关（默认）。仅限 120 Hz 或更快的屏幕，且帧率为 60 FPS。
+Shortens the delay between pressing a button and seeing it (NVIDIA cards). ||| 缩短按下按键到看到效果的延迟（NVIDIA 显卡）。
+Off (the default). On if you want the lowest input delay. ||| 关（默认）。想要最低输入延迟时开启。
+How much lower the game renders before the picture is rebuilt. ||| 画面重建前，游戏以多低的分辨率渲染。
+Quality. ||| 质量。
+Quality, or DLAA on a fast card. ||| 质量，快速显卡上用 DLAA。
+Which DLSS model rebuilds the picture. ||| 用哪个 DLSS 模型重建画面。
+Default. ||| 默认。
+How much the rebuilt picture is sharpened. ||| 重建画面的锐化程度。
+20% (the default). ||| 20%（默认）。
+How much FSR 1 sharpens the picture. ||| FSR 1 对画面的锐化程度。
+90% (the default). ||| 90%（默认）。
+An extra sharpening pass after the upscaler. ||| 超分器之后的额外锐化处理。
+Off (the default). ||| 关（默认）。
+How strong that extra sharpening is. ||| 额外锐化的强度。
+Keeps ground and walls sharp when seen at a shallow angle in the distance. ||| 使低角度看向远处的地面和墙壁保持清晰。
+Game (the default, as on the Switch). 16x for sharper ground at almost no cost. ||| 游戏（默认，与 Switch 相同）。16x 可让地面更清晰且几乎无开销。
+Sharper surface textures in the distance. ||| 远处的表面纹理更清晰。
+Switch (the default, as on the Switch). ||| Switch（默认，与 Switch 相同）。
+Sharper, steadier shadow edges. ||| 阴影边缘更锐利、更稳定。
+Switch (the default). High or Ultra on a fast graphics card. ||| Switch（默认）。快速显卡上用高或超高。
+Removes the visible color bands in skies, fog and dark areas. ||| 消除天空、雾和昏暗区域中可见的色带。
+On (the default). ||| 开（默认）。
+Lets the game start its next frame while the graphics card finishes the last one, for more FPS. ||| 允许游戏在显卡绘制上一帧的同时开始下一帧，以获得更高 FPS。
+On (the default). Off if objects flicker. ||| 开（默认）。物体闪烁时关闭。
+Uses one more CPU core to feed the graphics card, for more FPS. ||| 多用一个 CPU 核心为显卡供给命令，以获得更高 FPS。
+Off (the default). On with an NVIDIA card for more FPS in busy places. ||| 关（默认）。NVIDIA 显卡上开启可在复杂场景获得更高 FPS。
+How many frames a second the game draws. The Switch draws 60. ||| 游戏每秒绘制的帧数。Switch 为 60。
+60 FPS (the default, as on the Switch). Your screen's rate if your PC holds it steadily. Above 60, the busiest places (New Donk City seen from high up) can drop frames on any PC. ||| 60 FPS（默认，与 Switch 相同）。PC 能稳定保持时可用屏幕的刷新率。高于 60 时，最复杂的场景（高处俯瞰 New Donk City）在任何 PC 上都可能掉帧。
+A small frame rate counter in the corner. ||| 角落里的小型帧率计数器。
+Frame rate, frame times, and how busy the graphics card, CPU and memory are. ||| 帧率、帧时间，以及显卡、CPU 和内存的占用情况。
+Off (the default). On to find out why a scene is slow. ||| 关（默认）。想找出场景缓慢的原因时开启。
+Where the performance overlay sits. ||| 性能叠加层的位置。
+As you like. ||| 随您喜好。
+How big the performance overlay's text is. ||| 性能叠加层文字的大小。
+How solid the performance overlay's background is. ||| 性能叠加层背景的不透明程度。
+A part of the performance overlay. ||| 性能叠加层的组成部分。
+Shows the kingdom you're in on your Discord profile while Discord is open. ||| Discord 运行时，在您的 Discord 个人资料中显示所在的国度。
+Off (the default). On if you want your Discord friends to see what you're playing. ||| 关（默认）。想让 Discord 好友看到您在玩什么时开启。
+Prepares all of the game's shaders again at the next start (a few minutes). ||| 下次启动时重新准备游戏的所有着色器（需几分钟）。
+Only after a graphics driver update, or if stutter comes back. ||| 仅在显卡驱动更新后，或卡顿再次出现时使用。
+Keeps the game running while a new effect's shader is being prepared, instead of pausing. ||| 新特效的着色器生成期间游戏继续运行，而不是暂停。
+On (the default): no stutter. ||| 开（默认）：不会卡顿。
+How much memory is used to prepare shaders ahead of time. ||| 用于预先生成着色器的内存量。
+How long the game prepares the effects it has seen before, before you play. ||| 开始游戏前，游戏为已见过的特效准备的时长。
+When an area loads, prepares only shaders the game has drawn before. ||| 加载场景时，仅准备游戏以前绘制过的着色器。
+Off (the default). On with a slow CPU if the frame rate dips after loading. ||| 关（默认）。CPU 较慢且加载后帧率下降时开启。
+Prepares all of an area's shaders as soon as it loads. ||| 场景一加载就准备其所有着色器。
+Off (the default): it uses a lot of memory. ||| 关（默认）：内存占用很大。
+The game's volume. ||| 游戏音量。
+100% (the default). ||| 100%（默认）。
+Stereo or 5.1 surround sound. ||| 立体声或 5.1 环绕声。
+The echo in caves and big rooms, as on the Switch. ||| 洞穴和大厅中的回声，与 Switch 相同。
+Sound in the game's videos. ||| 游戏视频中的声音。
+No sound while another window is in front. ||| 其他窗口在前台时静音。
+As you like (off by default). ||| 随您喜好（默认关闭）。
+Looks for a new version each time the game starts. ||| 每次游戏启动时查找新版本。
+On if your controller has motion sensors (the default). ||| 控制器带体感传感器时开启（默认）。
+Off, unless motion moves feel reversed. ||| 关，除非体感动作感觉方向反了。
+10% (the default). Higher if the camera drifts on its own. ||| 10%（默认）。镜头自行漂移时调高。
+100% (the default), then to taste. ||| 100%（默认），之后按个人喜好调整。
+Off (as on the Switch). ||| 关（与 Switch 相同）。
+On for keyboard and mouse (the default). ||| 键盘和鼠标开启（默认）。
+Recommended: ||| 推荐配置：
+A second CPU thread hands the drawing commands to the graphics driver while the first prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). Uses one more CPU core. Auto: on with an NVIDIA graphics card, where it has been tested; off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or crashes, set it to Off. ||| 由第二个 CPU 线程向显卡驱动提交绘制命令，同时第一个线程准备后续命令：复杂场景中 FPS 更高（快速 PC 上 240 FPS 下 148 提升到 179）。多占用一个 CPU 核心。自动：NVIDIA 显卡上开启（已经过测试）；AMD 和 Intel 显卡及 Steam Deck 上关闭（在 Steam Deck 上它曾导致图形芯片停止工作——罕见的 GPU 重置）。如果出现闪烁、物体缺失、画面冻结或崩溃，请设为关。
+Category ||| 类别
+Select ||| 选择
+Change ||| 更改
+Back ||| 返回
+Close ||| 关闭
+Move ||| 移动
+Settings ||| 设置
+YOUR SETTINGS ||| 您的设置
+Version ||| 版本
+Mouse in menus ||| 菜单中的鼠标
+In the game's own menus (title, file select, pause menu, shops, dialogue): left click confirms (A), right click or the mouse's Back button goes back (B), the wheel moves up and down. Mouse buttons you bound to something else keep that binding. Not while you play. ||| 在游戏自身的菜单中（标题、存档选择、暂停菜单、商店、对话）：左键确认（A），右键或鼠标后退键返回（B），滚轮上下移动。已绑定其他功能的鼠标按键保持原绑定。游玩过程中无效。
+HUD and menu quality ||| HUD 和菜单质量
+The game's HUD, text and menus are drawn from pictures made for the Switch's 720 lines; stretched over a bigger screen they turn soft and their curves wobble. High: they are enlarged with a filter that follows their edges - round shapes stay round and edges become crisp, without jagged steps, outlines or halos. It works on any screen larger than the Switch's and more the bigger the screen; a Steam Deck's own screen is too close to the Switch's to change. The pictures keep their detail (nothing is redrawn). Costs a little GPU time while a menu covers the screen. Switch: as the game draws them. Changes at once (the HUD may blink the first time). ||| 游戏的 HUD、文字和菜单由为 Switch 720 行画面制作的图像绘制；拉伸到更大的屏幕上会变得模糊，曲线也会扭曲。高：使用跟随边缘的过滤器放大——圆形保持圆形，边缘清晰利落，没有锯齿台阶、描边或光晕。适用于任何大于 Switch 的屏幕，屏幕越大效果越明显；Steam Deck 自带屏幕与 Switch 太接近，没有变化。图像保留自身细节（不会重新绘制）。菜单覆盖屏幕时消耗少量 GPU 时间。Switch：与游戏原本的绘制方式相同。立即生效（首次时 HUD 可能闪烁一次）。
+Clean, crisp edges on the game's HUD, text and menus on screens larger than the Switch's. ||| 在大于 Switch 的屏幕上，游戏 HUD、文字和菜单获得干净利落的边缘。
+Switch (the default, as the game draws them). High on a 1080p or larger screen. ||| Switch（默认，与游戏原本的绘制方式相同）。1080p 或更大的屏幕上用高。
+Frame rate counter ||| 帧率计数器
+Gyro sensitivity ||| 陀螺仪灵敏度
+How far turning the controller turns what the game aims with motion (first-person views, aiming Cappy). 100% is the controller's own movement. ||| 转动控制器时，游戏体感瞄准（第一人称视角、Cappy 瞄准）随之转动的幅度。100% 为控制器实际转动量。
+Shake threshold ||| 摇晃阈值
+Jolts smaller than this are not passed on to the game, so the controller's own rumble (hidden moons nearby) or bumping it doesn't throw Cappy. Raise it until rumble no longer throws; real shakes then need to be a little stronger. Off passes everything on, as the Switch does. ||| 小于此值的震动不会传递给游戏，因此控制器自身的震动（附近有隐藏月亮时）或碰撞不会触发投帽。调高直到震动不再触发投掷；之后真实摇晃需要稍大一些的力度。关则像 Switch 一样传递所有震动。
+Sticks ||| 摇杆
+Left stick deadzone ||| 左摇杆死区
+Right stick deadzone ||| 右摇杆死区
+How far a stick moves before it counts. Raise it if Mario, the camera or the map pointer moves on its own (the map's pointer drifting away from what you select is a sign of it). The default is 5%. ||| 摇杆移动多少距离才会被判定。如果 Mario、镜头或地图指针自行移动，请调高此值（地图指针偏离所选内容就是征兆之一）。默认为 5%。
+Left stick range ||| 左摇杆行程
+Right stick range ||| 右摇杆行程
+How much of a full tilt the stick's end gives. Above 100% a full tilt comes before the stick's end (a worn or small stick that doesn't reach it); below 100% the stick's end gives less than a full tilt. ||| 摇杆推到底时相当于多大的满倾角。高于 100% 时，满倾角在摇杆到底之前就达到（针对推不到底的老化或小型摇杆）；低于 100% 时，摇杆到底也达不到满倾角。
+Now: left %3.0f%%, right %3.0f%% of a full tilt ||| 当前：左摇杆 %3.0f%%，右摇杆 %3.0f%% 满倾角
+5% (the default). Higher if Mario moves on his own. ||| 5%（默认）。Mario 自行移动时调高。
+5% (the default). Higher if the camera or the map pointer drifts on its own. ||| 5%（默认）。镜头或地图指针自行漂移时调高。
+Compile shaders now ||| 立即编译着色器
+The shaders need compiling (a new install or an update that changed them). Do it now and play later, or press Play and choose then. ||| 着色器需要编译（全新安装或有相关更新）。可以现在编译稍后游玩，或按下开始游戏届时再选择。
+Compile, play later ||| 编译，稍后游玩
+What is compiled so far is kept; the rest is made while you play. When it is done you are back on the start page. ||| 已编译的内容会保留；其余部分在游玩过程中生成。完成后您会回到起始页面。
+Bloom quality ||| 泛光质量
+The game draws its glow (bloom, light shafts) as a small image, a quarter of its picture's width, and stretches it over the screen; its edges along bright sky and lights then show small steps, more visible next to a sharp high-resolution picture. High: the glow is stretched with a smoother filter, so those edges fade evenly. The glow keeps the game's shape and strength, and its detail stays the game's (it isn't drawn at a higher resolution). High also smooths the hazy far horizon behind the kingdoms (a small picture stretched over the sky, whose texels show as blocks and blobs). Costs a little GPU time (about 0.3 ms a frame at 4K on a fast graphics card). Switch: as on the Switch. Changes at once. ||| 游戏将光晕（泛光、光柱）绘制为一张宽度仅为画面四分之一的小图，再拉伸到整个屏幕；沿明亮天空和灯光的边缘会出现细小台阶，在清晰的高分辨率画面旁更为明显。高：光晕以更平滑的过滤器拉伸，边缘均匀过渡。光晕保持游戏原有的形状和强度，细节也保持游戏原有的（不以更高分辨率绘制）。高还会平滑国度背后朦胧的远方地平线（一张拉伸到天空的小图，其像素会显示为块状和斑状）。消耗少量 GPU 时间（快速显卡上 4K 分辨率下每帧约 0.3 毫秒）。Switch：与 Switch 相同。立即生效。
+Smoother edges on the glow around bright sky and lights, and a smoother far horizon. ||| 明亮天空和灯光周围光晕的边缘更平滑，远方地平线也更平滑。
+Switch (the default, as on the Switch). High at high resolutions. ||| Switch（默认，与 Switch 相同）。高分辨率下用高。
+Ambient occlusion ||| 环境光遮蔽
+Darkens the places light reaches less: the corners between steps and walls, the ground under Mario, enemies and objects, folds and gaps. It gives the scene more depth. Not in the Switch version: an addition (GTAO, worked out from the scene's depth each frame). Costs GPU time: about 1 ms a frame at 1440p and 2.5 ms at 4K on a fast graphics card, less with an Upscale method. Off: as on the Switch. Changes at once. ||| 加深光线较少到达的区域：台阶与墙壁之间的角落、Mario、敌人和物体下方的地面、褶皱和缝隙。为场景增添层次感。Switch 版没有的效果：一项新增功能（GTAO，每帧根据场景深度计算）。消耗 GPU 时间：快速显卡上 1440p 每帧约 1 毫秒、4K 约 2.5 毫秒，配合超分方式可降低。关：与 Switch 相同。立即生效。
+Soft shading in corners and under characters and objects (not on the Switch). ||| 角落里以及角色和物体下方的柔和阴影（Switch 上没有）。
+Off (the default, as on the Switch). On with a fast graphics card. ||| 关（默认，与 Switch 相同）。快速显卡上开启。
+Normal (the default). Low on a PC with less than 12 GB of RAM. ||| 普通（默认）。内存少于 12 GB 的 PC 上用低。
+(Recommended) ||| （推荐）
+Bottom left (the default), or as you like. ||| 左下（默认），或按个人喜好。
+Switch (the default, as on the Switch). High on a fast PC. Very high can halve the frame rate in busy kingdoms. ||| Switch（默认，与 Switch 相同）。快速 PC 上用高。超高在繁忙的国度中可能使帧率减半。
+Low GPU memory mode ||| 低显存模式
+For PCs with integrated graphics and 8 GB of RAM where the game crashes with "Out of graphics memory" a few seconds in. On: only the parts of the game's memory the graphics need are made visible to the GPU, instead of all of it (about 3 GB). Off (the default): all of it, as before. Applies at the next start. ||| 适用于带集成显卡和 8 GB 内存、游戏启动几秒后报“显卡内存不足”崩溃的 PC。开：仅将游戏内存中图形所需的部分开放给 GPU，而不是全部（约 3 GB）。关（默认）：像以前一样开放全部。下次启动时生效。
+Makes only the parts of the game's memory the graphics need visible to the GPU (applies at the next start). ||| 仅将游戏内存中图形所需的部分开放给 GPU（下次启动时生效）。
+Off (the default). On if the game crashes with Out of graphics memory on a laptop with integrated graphics. ||| 关（默认）。带集成显卡的笔记本上游戏报显卡内存不足崩溃时开启。
+Presets ||| 预设
+Apply low-end PC preset ||| 应用低配置 PC 预设
+For slow PCs and integrated graphics: sets Internal resolution 75%, Dynamic resolution on, Console mode Handheld (the game's lighter rendering), Memory use Low, Frame rate 60, and anti-aliasing, upscaling, frame generation and the higher-quality picture options off. Every one of them can be changed back in its own place. Console mode and Memory use apply at the next start. ||| 适用于较慢的 PC 和集成显卡：设置内部分辨率 75%、动态分辨率开、主机模式掌机（游戏更轻量的渲染）、内存占用低、帧率 60，并关闭抗锯齿、超分、帧生成和更高质量的画质选项。每一项都可在各自位置改回。主机模式和内存占用下次启动时生效。
+Experimental above 60: on game version 1.4.1 the extra frames repeat the game's 60 updates for now, so motion still looks like 60; on 1.0.0 Mario and the camera move in between. ||| 60 以上的实验性说明：游戏 1.4.1 版本中，附加帧目前只是重复游戏的 60 次更新，因此动作看起来仍是 60；1.0.0 版本中 Mario 和镜头会在帧间平滑移动。
+Sets the lightest settings in one step. ||| 一步应用最轻量的设置。
+Only on a slow PC or integrated graphics. ||| 仅适用于较慢的 PC 或集成显卡。
+Motion blur ||| 动态模糊
+The game blurs the picture a little while the camera turns. Off: the picture stays sharp while it turns. On: as on the Switch. Changes at once. ||| 镜头转动时游戏会略微模糊画面。关：转动时画面保持清晰。开：与 Switch 相同。立即生效。
+Mouse smoothing ||| 鼠标平滑
+Evens out the camera's steps when the mouse moves: each update blends in the ones before. The camera still turns as far in total, slightly later. 0%: raw, as the mouse moves. ||| 鼠标移动时平滑镜头的转动：每次更新都会融入之前的输入。镜头总转动量不变，只是略微延后。0%：无平滑，随鼠标直接移动。
+Mouse camera stays where you put it ||| 鼠标镜头保持在您放置的位置
+The camera normally swings behind Mario as he walks and levels itself. On: while the mouse has the camera, it only turns when you move the mouse. Off: as on the Switch. ||| 通常镜头会随 Mario 行走自动转到其背后并自动回正。开：鼠标控制镜头期间，仅在移动鼠标时镜头才转动。关：与 Switch 相同。
+First-person view faces Mario's way ||| 第一人称视角朝向 Mario 的面向
+The first-person view (press the right stick) starts looking the way Mario faces. Off: the way the camera was looking, as on the Switch. ||| 第一人称视角（按下右摇杆）启动时朝向 Mario 的面向。关：朝向镜头原来的方向，与 Switch 相同。
+Shake ||| 摇晃
+Spin throw ||| 旋转投掷
+Screenshot ||| 截图
+Action ||| 动作
+Press a button or key (Delete clears)... ||| 请按下一个按键或键位（Delete 清除）……
+Shake: while held, the game sees the controller shaken - the motion cap throw (homing at a target), spins and shake moves, with Motion controls off too. Spin throw: one press throws Cappy spinning around Mario. Screenshot: saves the window as a picture in the screenshots folder in the game's folder. Select a cell, then press any button, key or mouse button (Delete clears it). It then no longer presses the game button it was bound to. ||| 摇晃：按住期间，游戏会认为手柄正在被摇晃——即体感投帽（自动锁定目标）、旋转挥帽以及摇晃动作，在体感操作关闭时也有效。旋转投掷：按一下即让 Cappy 绕 Mario 旋转飞出。截图：将窗口保存为图片，存放在游戏文件夹的 screenshots 文件夹中。选择一个格子，然后按下任意按键、键位或鼠标按键（Delete 清除）。此后该键不再触发其原绑定的游戏按键。
+The amiibo figure the game sees when it asks for one: hold D-pad Right while playing (or answer Uncle amiibo), and this figure is touched for you - no NFC reader or amiibo file needed. Mario figures give a short invincibility, Peach a life-up heart, Bowser shows regional coins, any other a Power Moon hint; the wedding figures also give their outfits early. None: no amiibo, as before. A change applies at the next start of the game. ||| 游戏请求 amiibo 时识别到的手办：游玩时按住十字键右（或回应 amiibo 叔叔），便会替您触碰该手办——无需 NFC 读取器或 amiibo 文件。Mario 系手办提供短暂无敌，Peach 给予加命爱心，Bowser 显示地方硬币，其他手办给出力量月亮提示；婚礼系列手办还会提前解锁对应服装。无：不使用 amiibo，与以前相同。更改在下次游戏启动时生效。
+Snapshot Mode at full frame rate ||| 拍照模式全帧率
+The game holds Snapshot Mode (D-pad Down) to 30 FPS. On: it runs at 60 FPS like the rest of the game. Off: as on the Switch. Changes at once. ||| 游戏将拍照模式（十字键下）限制在 30 FPS。开：与游戏其他部分一样以 60 FPS 运行。关：与 Switch 相同。立即生效。
+Shadow distance ||| 阴影距离
+Very high (4x) ||| 超高 (4x)
+How far from the camera the sun's shadows are drawn: farther objects keep their shadows. The same shadow map then covers more ground, so shadows near Mario get softer - raise Shadow quality with it. Switch: as on the Switch. Changes at once. ||| 太阳阴影绘制的距离范围：更远的物体保留阴影。同一张阴影贴图因此覆盖更大范围，Mario 附近的阴影会变柔——请同时调高阴影质量。Switch：与 Switch 相同。立即生效。
+Shake button and key ||| 摇晃按键与键位
+Homing throw ||| 追踪投掷
+What the shake button and key do. Shake: the controller shaken while held, as on the Switch - with Cappy on Mario's head that is a spin throw; with Cappy out, a homing attack; and the shake moves (shaking a pole, rolling faster). Homing throw: one press throws Cappy and sends it homing at the nearest target (with Cappy already out: the homing attack alone) - never a spin; the Spin throw button does that (#137). ||| 摇晃按键与键位的功能。摇晃：按住期间游戏认为手柄正在被摇晃，与 Switch 相同——Cappy 在 Mario 头上时为旋转投掷；Cappy 已飞出时为追踪攻击；还包括摇晃动作（摇杆子、加速翻滚）。追踪投掷：按一下即投出 Cappy 并使其自动追踪最近的目标（Cappy 已飞出时：仅执行追踪攻击）——绝不会是旋转；旋转由旋转投掷按键完成（#137）。
+Switch 2 controllers (Bluetooth) ||| Switch 2 控制器（蓝牙）
+The Switch 2 Pro Controller and Joy-Con 2 over Bluetooth, with their gyro and the game's HD rumble - no other program needed. Applies at the next start. Then hold the small Sync button on the controller until its lights sweep; after that any button reconnects it. Don't pair it in Windows' Bluetooth settings: the game connects it. ||| 通过蓝牙连接 Switch 2 Pro 手柄和 Joy-Con 2，支持其陀螺仪和游戏的高清震动——无需其他程序。下次启动时生效。之后按住手柄上的小型 Sync 键直到指示灯扫动；此后按任意键即可重新连接。请勿在 Windows 蓝牙设置中配对：由游戏自行连接。
+Off (the default). On to play with a Switch 2 Pro Controller or Joy-Con 2. ||| 关（默认）。要使用 Switch 2 Pro 手柄或 Joy-Con 2 游玩时开启。

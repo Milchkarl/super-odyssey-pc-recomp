@@ -369,8 +369,10 @@ static id<MTLTexture> view_texture(NvnTexture *t, const NvnTextureView *v, bool 
     NSUInteger lv0 = (v->setmask & 1) ? v->base_level : 0;
     NSUInteger nlv = (v->setmask & 1) && v->num_levels ? v->num_levels : base.mipmapLevelCount - lv0;
     NSUInteger ly0 = (v->setmask & 2) ? v->min_layer : 0;
+    if (base.textureType != MTLTextureTypeCube && base.textureType != MTLTextureTypeCubeArray && ly0 >= base.arrayLength)
+        ly0 = base.arrayLength - 1;  // (the game may ask for a layer the texture has not)
     NSUInteger nly = (v->setmask & 2) && v->num_layers ? v->num_layers : base.arrayLength - ly0;
-    if (base.textureType == MTLTextureTypeCube) nly = 6;
+    if (base.textureType == MTLTextureTypeCube || base.textureType == MTLTextureTypeCubeArray) nly = 6;
     MTLTextureType type = base.textureType;
     if (render && (type == MTLTextureType2DArray || type == MTLTextureTypeCube) && nly == 1) type = MTLTextureType2D;
     if (lv0 + nlv > base.mipmapLevelCount) nlv = base.mipmapLevelCount - lv0;
@@ -382,6 +384,12 @@ static id<MTLTexture> view_texture(NvnTexture *t, const NvnTextureView *v, bool 
         LOG("[view] tex fmt %#x (mtl %lu) viewed as nvn %#x (mtl %lu)\n", t->format, (unsigned long)base.pixelFormat, v->format, (unsigned long)pf);
     }
     NSUInteger ns = type == MTLTextureType2D ? 1 : nly;
+    // The game may ask for a layer a texture has not (a clear in the intro); Metal asserts on an out-of-range slice
+    // range. A cube's slices are its faces (6 per cube): its range is arrayLength * 6 and must stay whole cubes.
+    NSUInteger max_slices = (type == MTLTextureTypeCube || type == MTLTextureTypeCubeArray) ? base.arrayLength * 6 : base.arrayLength;
+    if (ly0 >= max_slices) ly0 = max_slices - 1;
+    if (ly0 + ns > max_slices) ns = max_slices - ly0;
+    if ((type == MTLTextureTypeCube || type == MTLTextureTypeCubeArray) && (ly0 % 6 || ns % 6)) { ly0 = 0; ns = max_slices >= 6 ? 6 : max_slices; }
     uint64_t params = (uint64_t)pf | (uint64_t)type << 16 | (uint64_t)lv0 << 24 | (uint64_t)nlv << 32 | (uint64_t)ly0 << 40 | (uint64_t)ns << 52;
     id<MTLTexture> got = view_cached(base, params, ^{
         return [base newTextureViewWithPixelFormat:pf textureType:type levels:NSMakeRange(lv0, nlv) slices:NSMakeRange(ly0, ns)];
@@ -525,6 +533,8 @@ static void attachment_formats(MTLRenderPipelineDescriptor *pd) {
         if (st.rt.color[i] && st.rt.color[i]->samples > 1) pd.rasterSampleCount = st.rt.color[i]->samples;
 }
 
+static int rt_kind(uint32_t f);  // (defined below; the clear shader is picked by the attachment format)
+
 static void clear(int index, int kind, const void *color, uint32_t mask, bool depth, float dval, bool stencil,
                   uint32_t sval, uint32_t smask) {
     begin_pass();
@@ -538,6 +548,9 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     id<MTLLibrary> lib = clear_lib(index < 0 ? 0 : index);
     pd.vertexFunction = [lib newFunctionWithName:@"vs"];
     static NSString *const fs[] = {@"fs_f", @"fs_i", @"fs_u"};
+    if (index >= 0 && index < st.rt.ncolor && st.rt.color[index])
+        kind = rt_kind(st.rt.color[index]->format);  // pick the shader by the attachment format: the guest's kind can
+                                                     // be int/uint for a float target (int4 -> RG11B10Float fails)
     if (kind < 0 || kind > 2) kind = 0;  // (as Vulkan: anything else is float - the guest passes garbage in the upper bits)
     pd.fragmentFunction = [lib newFunctionWithName:index >= 0 ? fs[kind] : @"fs_none"];
     attachment_formats(pd);
@@ -851,10 +864,9 @@ void shader_cache_warm(void) {
     });
 }
 
-static bool sync_shaders(void) {  // ODYSSEY_SYNC_SHADERS: compile on first use, blocking (deterministic tests)
-    static int v = -1;
-    if (v < 0) v = getenv("ODYSSEY_SYNC_SHADERS") != NULL;
-    return v;
+static bool sync_shaders(void) {
+    // Skipped draws during asynchronous Metal pipeline creation leave the scene target black.
+    return true;
 }
 
 static void compile_program(Prog *pr) {
