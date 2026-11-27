@@ -1828,6 +1828,10 @@ bool renderer_take_frame_incomplete(void) { return atomic_exchange(&g_frame_inco
 typedef struct Prog Prog;
 static void remember_frame_hold(Prog *p);
 uint64_t renderer_present_count(void);
+// (stall_watch, below) the draw now waiting for its program's build, and since when
+static _Atomic uintptr_t g_wait_prog;
+static _Atomic uint64_t g_wait_since;
+static void wait_report(Prog *p, double ms, int state);
 static bool built(_Atomic int *state, Prog *p) {
     int s = atomic_load(state);
     static int fs_wait = -1;
@@ -1853,7 +1857,10 @@ static bool built(_Atomic int *state, Prog *p) {
     if (s == 0 && (sync_shaders() || g_draw_must_wait)) {
         uint64_t t0 = plat_now_ns();
         kernel_block_begin();  // (the core's other threads run meanwhile: loading)
+        atomic_store(&g_wait_prog, (uintptr_t)p), atomic_store(&g_wait_since, t0);  // (stall_watch)
         while ((s = atomic_load(state)) == 0 && plat_now_ns() - t0 < 10000000000ull) SDL_DelayNS(200000);
+        atomic_store(&g_wait_since, 0);
+        if (plat_now_ns() - t0 >= 1000000000ull) wait_report(p, (plat_now_ns() - t0) / 1e6, s);
         if (shader_time_ms() >= 0 && (plat_now_ns() - t0) / 1e6 >= shader_time_ms())
             LOG("[shtime] draw waited %.1f ms for its build (%s)\n", (plat_now_ns() - t0) / 1e6,
                 g_draw_must_wait && !sync_shaders() ? "full-screen pass" : "scene warm-up");
@@ -3660,6 +3667,57 @@ static bool preload_room(void) {
             (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20));
     if (!over) atomic_store(&full, false);
     return !over;
+}
+
+// A draw that waited a second or more for its program (always logged: players' logs then say what a long black
+// screen waited for), and the stall watch: a thread that writes what the game is doing whenever no frame has been
+// shown for 5 s, then 10, 20, 40 .. s - a draw waiting for a build, shader jobs queued, the start-up warm-up, the CPU
+// the process used meanwhile (cores busy with no waits: the game's own code, loading or computing).
+extern const char *odyssey_stage_name(void);
+static void wait_report(Prog *p, double ms, int state) {
+    static _Atomic int n;
+    if (atomic_fetch_add(&n, 1) >= 200) return;
+    LOG("[wait] frame %llu (%s): a draw waited %.0f ms for its shaders%s - program vs %llx fs %llx, step %d, %d shader jobs queued or running\n",
+        (unsigned long long)renderer_present_count(), odyssey_stage_name(), ms, state == 0 ? " and gave up" : state == 2 ? " (they failed)" : "",
+        p ? (unsigned long long)p->code[0] : 0ull, p ? (unsigned long long)p->code[1] : 0ull, p ? atomic_load(&p->step) : -1,
+        atomic_load(&g_shader_jobs));
+}
+static _Atomic bool g_stall_bg;  // (the background warm-up running: set where g_warm_bg is)
+static void *stall_watch(void *a) {
+    (void)a;
+    uint64_t last = renderer_present_count(), since = plat_now_ns(), next = 5000000000ull, cpu0 = plat_process_cpu_ns(), t_cpu = since;
+    bool told = false;
+    for (;;) {
+        SDL_Delay(500);
+        uint64_t n = renderer_present_count(), now = plat_now_ns();
+        if (n != last) {
+            if (told) LOG("[stall] frames again after %.1f s (frame %llu)\n", (now - since) / 1e9, (unsigned long long)n);
+            last = n, since = now, next = 5000000000ull, told = false;
+            cpu0 = plat_process_cpu_ns(), t_cpu = now;
+            continue;
+        }
+        if (now - since < next) continue;
+        next *= 2;
+        told = true;
+        uint64_t cpu = plat_process_cpu_ns(), ws = atomic_load(&g_wait_since);
+        Prog *p = (Prog *)atomic_load(&g_wait_prog);
+        char wait[160] = "no draw waiting for shaders";
+        if (ws) snprintf(wait, sizeof wait, "a draw waiting %.1f s for program fs %llx (step %d)", (now - ws) / 1e9,
+                         p ? (unsigned long long)p->code[1] : 0ull, p ? atomic_load(&p->step) : -1);
+        extern bool odyssey_scene_warming(void);
+        LOG("[stall] no frame for %.0f s (frame %llu, %s%s): %s; %d shader jobs queued or running; start-up warm-up %s; CPU used meanwhile: %.1f cores\n",
+            (now - since) / 1e9, (unsigned long long)n, odyssey_stage_name(), game_is_odyssey() && odyssey_scene_warming() ? ", a scene loading" : "",
+            wait, atomic_load(&g_shader_jobs), atomic_load(&g_stall_bg) ? "running in the background" : "not running",
+            now > t_cpu ? (double)(cpu - cpu0) / (double)(now - t_cpu) : 0.0);
+        cpu0 = cpu, t_cpu = now;
+    }
+    return NULL;
+}
+void vk_stall_watch_start(void) {  // (the first frame the game shows: device.c)
+    static _Atomic bool started;
+    if (atomic_exchange(&started, true) || getenv("ODYSSEY_NO_STALL_WATCH")) return;
+    pthread_t t;
+    if (pthread_create(&t, NULL, stall_watch, NULL) == 0) pthread_detach(t);
 }
 
 // The libraries of a program set up ahead, for its first draw (a job, or the draw itself while builds block)
@@ -6147,7 +6205,7 @@ typedef struct {
 static void warm_bg_done(WarmJob *j) {
     LOG("[vk] background warm-up done: %u graphics pipelines prewarmed (%u attempted of %u, %u the game had built first) in %.2f s\n",
         atomic_load(&j->warmed), atomic_load(&j->attempted), j->count, atomic_load(&g_warm_dups), (plat_now_ns() - j->t0) / 1e9);
-    atomic_store(&g_warm_bg, false);
+    atomic_store(&g_warm_bg, false), atomic_store(&g_stall_bg, false);
     free(j->own_recipes);
     free(j->own_order);
     free(j);
@@ -6407,7 +6465,7 @@ void vk_pipeline_prewarm(bool build) {
                 LOG("[vk] warm-up: %.0f KB a pipeline so far, up to %u in all within the %llu MB budget\n", each / 1024.0,
                     atomic_load(&job->max_warmed), (unsigned long long)(memory_budget >> 20));
             }
-            atomic_store(&g_warm_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
+            atomic_store(&g_warm_bg, true), atomic_store(&g_stall_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
             atomic_store(&job->bg, true);
             for (int i = 0; i < started; i++) SDL_DetachThread(th[i]);
             if (atomic_load(&job->running) == 0 && !atomic_exchange(&job->cleaned, true))  // (all ended just now)

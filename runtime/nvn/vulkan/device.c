@@ -2083,6 +2083,7 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     b->presented = true;
     present_brake(present_ns, fd.game_w != NULL);
     native_brake(present_ns);
+    { extern void vk_stall_watch_start(void); vk_stall_watch_start(); }
     rate_control(present_ns);
     static const float black[4] = {0, 0, 0, 1};
     uint64_t t0 = SDL_GetTicksNS();
