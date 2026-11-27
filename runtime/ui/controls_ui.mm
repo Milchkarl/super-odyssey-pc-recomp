@@ -18,7 +18,7 @@ extern "C" {
 static void cell(int dev, int slot, int fam, int cap_dev, int cap_slot, int ms_left) {
     char lbl[96];
     bool waiting = cap_dev == dev && cap_slot == slot;
-    if (waiting) snprintf(lbl, sizeof lbl, "Press %s...  %d##%d_%d", dev == BIND_DEV_PAD ? "a button (or a key)" : "a key or mouse button",
+    if (waiting) snprintf(lbl, sizeof lbl, "%s  %d##%d_%d", tr(dev == BIND_DEV_PAD ? "Press a button (or a key)..." : "Press a key or mouse button..."),
                           (ms_left + 999) / 1000, dev, slot);
     else snprintf(lbl, sizeof lbl, "%s##%d_%d", dev == BIND_DEV_PAD ? bind_pad_label(g_bind_pad[slot], fam) :
                                                  bind_key_label(g_bind_key[slot]), dev, slot);
@@ -173,7 +173,7 @@ extern "C" void controls_bindings_draw(float scale) {
             ImGui::TextUnformatted(bind_input_name(slot));
             ImGui::TableNextColumn();
             if (slot < BIND_PAD_COUNT) cell(BIND_DEV_PAD, slot, fam, cd, cs, ms);
-            else ImGui::TextDisabled(slot < BIND_RS_UP ? "Left stick" : "Right stick");
+            else ImGui::TextDisabled("%s", tr(slot < BIND_RS_UP ? "Left stick" : "Right stick"));
             ImGui::TableNextColumn();
             cell(BIND_DEV_KEY, slot, fam, cd, cs, ms);
         }
@@ -181,11 +181,11 @@ extern "C" void controls_bindings_draw(float scale) {
     }
     ImGui::Spacing();
     ImGui::BeginDisabled(bind_is_default(BIND_DEV_PAD));
-    if (ImGui::Button("Reset controller to defaults")) { bind_capture_cancel(); bind_reset(BIND_DEV_PAD); }
+    if (ImGui::Button(tr("Reset controller to defaults"))) { bind_capture_cancel(); bind_reset(BIND_DEV_PAD); }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(bind_is_default(BIND_DEV_KEY));
-    if (ImGui::Button("Reset keyboard to defaults")) { bind_capture_cancel(); bind_reset(BIND_DEV_KEY); }
+    if (ImGui::Button(tr("Reset keyboard to defaults"))) { bind_capture_cancel(); bind_reset(BIND_DEV_KEY); }
     ImGui::EndDisabled();
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", tr("Bindings apply to the game only. Menus keep a fixed layout (A / Cross or Enter selects, "

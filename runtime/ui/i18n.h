@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 const char *tr(const char *en);
+// tr() for a printf format (#162: translate the format, not the finished text, so a translation can place the values
+// where its language needs them): the translation only when its conversions are the English's, in the same order -
+// a translation file with a wrong one can't crash the menu
+const char *tr_fmt(const char *en);
 // the menu's language code ("en", "ko"), from the setting (Auto: the game's language when there's a translation)
 const char *i18n_lang(void);
 // every translated text, one after another (the font's glyphs for it are made from these); NULL: English

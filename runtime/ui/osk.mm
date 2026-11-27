@@ -137,7 +137,7 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
     if (ImGui::Button(tr("Cancel"), ImVec2(k * 2, k))) r = -1;
     ImGui::SameLine();
     if (ImGui::Button(tr("OK"), ImVec2(k * 2, k))) r = 1;
-    ImGui::TextDisabled("A  type      B  delete      Start / +  OK      (%d / %d)", len, max_chars);
+    ImGui::TextDisabled(tr_fmt("A  type      B  delete      Start / +  OK      (%d / %d)"), len, max_chars);
     return r;
 }
 
