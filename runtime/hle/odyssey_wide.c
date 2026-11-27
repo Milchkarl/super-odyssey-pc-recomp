@@ -14,6 +14,7 @@
 // column-major; a centred orthographic / perspective one): its x row (offsets 0, 16, 32, 48) scales with 1 / the layout
 // width, its y row (offsets 4, 20, 36, 52) by the shape when narrower (the HUD made shorter to keep its shape).
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../hle.h"
@@ -23,7 +24,11 @@ static volatile float g_want = 1.0f;  // (render thread) the window's aspect / 1
 static float g_wide = 1.0f;           // (game thread) the shape in effect
 
 static float layout_k(float shape) { return shape > 1.0f ? shape : 1.0f; }  // the layout width's factor
-static float hud_y(float shape) { return shape < 1.0f ? shape : 1.0f; }     // the HUD's height factor
+static float hud_y(float shape) {  // the HUD's height factor (ODYSSEY_WIDE_KY=1, tests: never shorter)
+    static int off = -1;
+    if (off < 0) off = getenv("ODYSSEY_WIDE_KY") && atoi(getenv("ODYSSEY_WIDE_KY")) == 1;
+    return shape < 1.0f && !off ? shape : 1.0f;
+}
 
 #define NDI 16
 static struct {
@@ -57,6 +62,13 @@ float odyssey_wide_drawinfo(uint64_t di) {
     g_di[i].known = false;
     g_di[i].k = g_wide;
     g_di[i].ky = 1.0f;
+    {   // ODYSSEY_LOG_WIDE=1: each layouts' projection made (which ones the shape reaches)
+        static int lg = -1;
+        if (lg < 0) lg = getenv("ODYSSEY_LOG_WIDE") != NULL;
+        Cpu *c = lg ? kernel_current_cpu() : NULL;
+        if (lg) LOG("[wide] drawinfo %llx made (slot %d of %d, shape %.3f, lr %llx)\n", (unsigned long long)di, i, g_ndi, g_wide,
+                    c ? (unsigned long long)c->x[30] : 0ull);
+    }
     return layout_k(g_wide);
 }
 
@@ -113,3 +125,5 @@ static float camera_shape(void) {
     g_wide = want;
     return g_wide;
 }
+
+

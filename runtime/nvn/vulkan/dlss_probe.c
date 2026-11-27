@@ -127,10 +127,38 @@ void vk_dlss_probe_instance(const char **ext, uint32_t *count, uint32_t capacity
         return;
     }
     wcscat(path, L"\\_nvngx.dll");
-    ngx.library = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    // (ODYSSEY_DLSS_STALE_PATH=1, tests: as if the registry named a removed driver folder - the fallback below)
+    ngx.library = getenv("ODYSSEY_DLSS_STALE_PATH") ? (SetLastError(126), NULL)
+                                                   : LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!ngx.library) {
         LOG("[dlss] cannot load driver NGX core (Windows error %lu)\n", (unsigned long)GetLastError());
-        return;
+        // (#189, RTX 3080, driver 621.01: error 126 - the registry's FullPath can still name the folder of a driver
+        // since replaced, which Windows removed. The installed driver's own copy is in the driver store: the newest
+        // nv* package there that has one.)
+        wchar_t root[MAX_PATH], pattern[MAX_PATH + 64], best[MAX_PATH + 64] = L"";
+        FILETIME best_time = {0};
+        UINT rl = GetSystemDirectoryW(root, MAX_PATH);
+        if (rl && rl < MAX_PATH - 64) {
+            _snwprintf(pattern, MAX_PATH + 64, L"%ls%lcDriverStore%lcFileRepository%lcnv*", root, 92, 92, 92);
+            WIN32_FIND_DATAW d;
+            HANDLE h = FindFirstFileW(pattern, &d);
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    if (!(d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                    wchar_t cand[MAX_PATH + 64];
+                    _snwprintf(cand, MAX_PATH + 64, L"%ls%lcDriverStore%lcFileRepository%lc%ls%lc_nvngx.dll", root, 92, 92, 92,
+                               d.cFileName, 92);
+                    WIN32_FILE_ATTRIBUTE_DATA fa;
+                    if (GetFileAttributesExW(cand, GetFileExInfoStandard, &fa) && CompareFileTime(&fa.ftLastWriteTime, &best_time) > 0)
+                        best_time = fa.ftLastWriteTime, wcscpy(best, cand);
+                } while (FindNextFileW(h, &d));
+                FindClose(h);
+            }
+        }
+        if (best[0]) ngx.library = LoadLibraryExW(best, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+        LOG("[dlss] the driver store's NGX core: %s (Windows error %lu)\n", !best[0] ? "none found" : ngx.library ? "loaded" : "not loaded",
+            ngx.library ? 0ul : (unsigned long)GetLastError());
+        if (!ngx.library) return;
     }
 #define GET(member, name) ngx.member = (void *)GetProcAddress(ngx.library, "NVSDK_NGX_VULKAN_" name)
     GET(init, "Init_Ext2");

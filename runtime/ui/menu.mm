@@ -1378,6 +1378,24 @@ static void tab_graphics(void) {
 #else
         double shape = odyssey_wide_shape();
 #endif
+        // (the start page and the configuration program: no game yet - the sizes the game will render at, on the
+        // display and in the picture shape it will use (as device.c), not this page's window and 16:9. #161: a 3840 x 1600
+        // screen saw 3840 x 2160 here and 3840 x 1600 in the game for the same choice; the configuration program's
+        // 1280 x 800 window would show sizes for that window.)
+        if (g_setup.load()) {
+            SDL_Window *w = SDL_GetKeyboardFocus();
+            SDL_DisplayID did = w ? SDL_GetDisplayForWindow(w) : SDL_GetPrimaryDisplay();
+            const SDL_DisplayMode *m = did ? SDL_GetDesktopDisplayMode(did) : NULL;
+            if (m && m->w > 0 && m->h > 0) {
+                dw = m->w * (m->pixel_density > 0 ? m->pixel_density : 1.0f), dh = m->h * (m->pixel_density > 0 ? m->pixel_density : 1.0f);
+#ifndef __APPLE__
+                double win = (dw / dh) / (16.0 / 9.0);
+                int a = g_settings.aspect >= 0 && g_settings.aspect < ASPECT_COUNT ? g_settings.aspect : ASPECT_16_9;
+                shape = a == ASPECT_FILL ? (fabs(win - 1.0) > 0.005 ? win : 1.0) : ASPECT_K[a];
+                if (a != ASPECT_FILL && fabs(shape / win - 1.0) < 0.03) shape = fabs(win - 1.0) > 0.005 ? win : 1.0;
+#endif
+            }
+        }
         for (int i = 0; i < 11; i++) {
             double rw = 0, rh = 0;
             if (dw > 0 && dh > 0) output_scale_preview(dw, dh, shape, res_mode[i], &rw, &rh);
@@ -1866,12 +1884,10 @@ static void tab_performance(void) {
         char d[1100];
         snprintf(d, sizeof d, "%s%s", tr("A second CPU thread hands the drawing commands to the graphics driver while the first "
                                          "prepares the next ones: more FPS in busy places (148 -> 179 at 240 FPS on a fast PC). "
-                                         "Uses one more CPU core. Until you pick one: on with an NVIDIA graphics card, where it has been tested; "
-                                         "off with AMD and Intel ones and on the Steam Deck (there it once stopped the graphics "
-                                         "chip - a rare GPU reset). If you see flickering, missing objects, a frozen picture or "
-                                         "crashes, set it to Off."),
+                                         "Uses one more CPU core. Off by default: it has caused rare crashes and, on the Steam Deck, a GPU reset. "
+                                         "If you see flickering, missing objects, a frozen picture or crashes, set it to Off."),
                  rt_start != g_settings.record_thread ? tr("\n\nApplies when the game starts again.") : "");
-        opt_choice_resolved("Multithreaded rendering", &g_settings.record_thread, -1, rv, rt, 2, vk_gpu_is_nvidia() ? 1 : 0, d);
+        opt_choice_resolved("Multithreaded rendering", &g_settings.record_thread, -1, rv, rt, 2, 0, d);  // (Auto: Off - exec.c dq_enabled)
     }
 #endif
     opt_toggle("Faster kingdom arrival", &g_settings.fast_arrival, false,

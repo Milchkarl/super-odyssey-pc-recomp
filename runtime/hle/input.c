@@ -1007,10 +1007,28 @@ HLE_FUNC("_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19
     uint64_t live_ns = motion_src_id && switch2_owns(motion_src_id) ? 60000000ull : 20000000ull;
     bool sensor_live = live && mot.has_gyro && mot.last_push_ns && now - mot.last_push_ns < live_ns;
     if (!sensor_live) {
-        uint64_t due = mot.last_push_ns && now > mot.last_push_ns ? (now - mot.last_push_ns) / MOTION_TICK_NS : 1;
+        uint64_t prev = mot.last_push_ns;
+        uint64_t due = prev && now > prev ? (now - prev) / MOTION_TICK_NS : 1;
+        bool gap = due > 16;
         if (due > 16) due = 16;
         if (!due && !mot.hist_n) due = 1;
         for (uint64_t i = 0; i < due; i++) motion_push(now);
+        // (the rest of a 5 ms step carried to the next read: #185 - set to now, it was dropped at every read, and the
+        // states came at 180 a second at 60 FPS, 144 at 144 FPS and fewer still above: the shake key's 15 ms flips
+        // (motion_push) slowed with the frame rate until the game no longer took them for a spin throw - reliable only
+        // capped at 30 FPS. Now 200 a second at any frame rate, as the Switch's.)
+        if (prev && due && !gap && now > prev) mot.last_push_ns = prev + due * MOTION_TICK_NS;
+        static int lr = -1;  // ODYSSEY_LOG_MOTION_RATE=1: the states made a second (200: the Switch's rate)
+        static uint64_t lr_t0, lr_n;
+        if (lr < 0) lr = getenv("ODYSSEY_LOG_MOTION_RATE") != NULL;
+        if (lr) {
+            lr_n += due;
+            if (!lr_t0) lr_t0 = now;
+            else if (now - lr_t0 >= 2000000000ull) {
+                LOG("[input] motion states without a sensor: %.0f a second\n", lr_n * 1e9 / (double)(now - lr_t0));
+                lr_t0 = now, lr_n = 0;
+            }
+        }
     }
     // newest first, as many as asked for and kept
     int want = (int)c->x[1], n = want < mot.hist_n ? want : mot.hist_n;
