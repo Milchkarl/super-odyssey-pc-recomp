@@ -6,3 +6,8 @@ Exec=SuperOdysseyRecomp
 Icon=superodysseyrecomp
 Categories=Game;
 Terminal=false
+Actions=Configure;
+
+[Desktop Action Configure]
+Name=Super Odyssey Configuration
+Exec=SuperOdysseyRecomp --configure

@@ -111,6 +111,7 @@ static void create_instance(void) {
     // (asked only when Streamline would be set up: sl_glue.cpp vk_sl_init's own condition - DLSS frame generation or Reflex)
     const char *sl_env = getenv("ODYSSEY_SL");
     bool sl_wanted = sl_env && *sl_env ? atoi(sl_env) != 0 : g_settings.frame_gen == FG_DLSS || g_settings.low_latency != 0;
+    if (plat_configure_mode()) sl_wanted = false;  // (the configuration program draws no game frames)
     if (!g_vk.headless && sl_wanted && chosen_gpu_is_nvidia() && vk_sl_init()) {  // (NVIDIA Streamline: its proxy sets up what DLSS-G / Reflex need)
         PFN_vkCreateInstance p = (PFN_vkCreateInstance)vk_sl_instance_proc(VK_NULL_HANDLE, "vkCreateInstance");
         if (p) create = p;
@@ -2443,9 +2444,9 @@ void ui_window_init(void) {
     atexit(quick_exit_handler);
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     settings_load();
-    updater_auto_check();  // (in the background; the menu's Updates page shows it)
+    if (!plat_configure_mode()) updater_auto_check();  // (in the background; the menu's Updates page shows it)
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) FATAL("SDL_Init: %s\n", SDL_GetError());
-    int win_w = 1280, win_h = 720;
+    int win_w = 1280, win_h = plat_configure_mode() ? 800 : 720;
     if (getenv("ODYSSEY_WINDOW")) sscanf(getenv("ODYSSEY_WINDOW"), "%dx%d", &win_w, &win_h);
     SDL_WindowFlags wflags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (getenv("ODYSSEY_HIDDEN")) wflags |= SDL_WINDOW_HIDDEN;
@@ -2460,7 +2461,8 @@ void ui_window_init(void) {
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
     rt_window_icon(window);
     // the Fullscreen setting applies from the first frame on; test windows stay windows
-    if (!getenv("ODYSSEY_WINDOW") && !getenv("ODYSSEY_HIDDEN")) menu_apply_window_requests(window);
+    // (the configuration program: a window of its own, whatever the game's window setting)
+    if (!getenv("ODYSSEY_WINDOW") && !getenv("ODYSSEY_HIDDEN") && !plat_configure_mode()) menu_apply_window_requests(window);
     create_instance();
     bool surface = false;
 #ifdef _WIN32
@@ -2491,8 +2493,10 @@ void ui_window_init(void) {
     create_swapchain();
     vk_exec_init();
     vk_shaders_init();
-    vk_shader_cache_migrate();  // (cache/spirv into cache/shaders.pack, in the background)
-    vk_pipeline_prewarm(!recovering_pipeline_cache);
+    if (!plat_configure_mode()) {  // (the configuration program draws no game: nothing to warm up)
+        vk_shader_cache_migrate();  // (cache/spirv into cache/shaders.pack, in the background)
+        vk_pipeline_prewarm(!recovering_pipeline_cache);
+    }
     vk_start_ok();
 }
 

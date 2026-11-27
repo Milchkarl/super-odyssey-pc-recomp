@@ -1140,7 +1140,7 @@ void ui_window_init(void) {
     // as HID devices, for which the system asks for Input Monitoring - "receive keystrokes from any application")
     settings_load();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) FATAL("SDL_Init: %s\n", SDL_GetError());
-    int win_w = 1280, win_h = 720;
+    int win_w = 1280, win_h = plat_configure_mode() ? 800 : 720;
     if (getenv("ODYSSEY_WINDOW")) sscanf(getenv("ODYSSEY_WINDOW"), "%dx%d", &win_w, &win_h);
     // ODYSSEY_HIDDEN=1: never shown (automated test runs render off screen without taking the user's focus)
     SDL_WindowFlags wflags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -1149,7 +1149,7 @@ void ui_window_init(void) {
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
     rt_window_icon(window);
     // the Fullscreen setting applies from the start screen on (not only once the game runs); test windows stay windows
-    if (!getenv("ODYSSEY_WINDOW") && !getenv("ODYSSEY_HIDDEN")) menu_apply_window_requests(window);
+    if (!getenv("ODYSSEY_WINDOW") && !getenv("ODYSSEY_HIDDEN") && !plat_configure_mode()) menu_apply_window_requests(window);
     SDL_MetalView view = SDL_Metal_CreateView(window);
     layer = (__bridge CAMetalLayer *)SDL_Metal_GetLayer(view);
     dev = MTLCreateSystemDefaultDevice();

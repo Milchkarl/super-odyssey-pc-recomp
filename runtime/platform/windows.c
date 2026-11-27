@@ -201,7 +201,7 @@ static void log_to_file_without_console(void) {
     if (!n || n >= sizeof exe) return;
     char *slash = strrchr(exe, '\\');
     if (slash) slash[1] = 0;
-    snprintf(g_log_path, sizeof g_log_path, "%sSuperOdysseyRecomp.log", exe);
+    snprintf(g_log_path, sizeof g_log_path, "%s%s.log", exe, plat_log_name());
     bool append = getenv("ODYSSEY_LOG_APPEND") != NULL;
     if (piped) {  // (a failed freopen closes stderr: with a pipe there is something to lose, so try the file first)
         FILE *probe = fopen(g_log_path, "ab");
@@ -214,7 +214,7 @@ static void log_to_file_without_console(void) {
     }
     if (!append) {  // (the last session's log kept: a player who restarts after a freeze still has the log of the freeze)
         char prev[MAX_PATH + 16];
-        snprintf(prev, sizeof prev, "%sSuperOdysseyRecomp.previous.log", exe);
+        snprintf(prev, sizeof prev, "%s%s.previous.log", exe, plat_log_name());
         MoveFileExA(g_log_path, prev, MOVEFILE_REPLACE_EXISTING);
     }
     if (!freopen(g_log_path, append ? "ab" : "wb", stderr)) { g_log_path[0] = 0; return; }

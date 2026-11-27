@@ -1,6 +1,7 @@
 // User settings (settings.ini in the data root), edited from the in-game menu.
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 
 enum { RES_MATCH = 0, /* 1..8 = 1x..8x */ RES_DYNAMIC = 9, RES_Q75 = 10, RES_Q25 = 11, RES_Q50 = 12, RES_1440 = 13,
        RES_DISPLAY = 14 /* 100%: the window's own pixels (Steam Deck: 1280 x 800), no floor at the Switch's 900 lines */ };
@@ -257,6 +258,9 @@ static inline int *settings_temporal_cas_sharpness(void) {
 void settings_load(void);
 const char *settings_current_file(void);
 void settings_save(void);
+// every setting back to the first-start one, as the Switch (controls, languages, card, volume kept); the old file kept
+// as settings.backup-<date>.ini, its name in backup. False: the backup failed and nothing changed
+bool settings_restore_switch(char *backup, size_t backup_size);
 // The console mode in effect this run (read once: a change applies at the next start; ODYSSEY_HANDHELD=1 / =0 overrides)
 bool settings_handheld(void);
 // The game's dynamic resolution this run (read once; ODYSSEY_GAME_DYNRES=0 / =1 overrides)
