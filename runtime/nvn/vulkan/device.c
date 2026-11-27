@@ -708,7 +708,21 @@ static bool cache_start_interrupted(void) {
     return pending;
 }
 
+// A damaged record found in the SPIR-V pack last time (shaders.c pack_load): the pack set aside and the shaders
+// prepared again (the preparation is then due: prepare_due, which calls this before it decides) - garbage that still
+// looks like SPIR-V crashed the drivers (#180)
+static void damaged_pack_aside(void) {
+    struct stat st;
+    if (stat("cache/shaders.pack.damaged", &st) != 0) return;
+    LOG("[shader] cache/shaders.pack had damaged records: set aside (cache/shaders.pack.bad), shaders prepared again\n");
+    remove("cache/shaders.pack.bad");
+    rename("cache/shaders.pack", "cache/shaders.pack.bad");
+    remove("cache/shaders.pack.damaged");
+    remove(PREPARED_MARK);
+}
+
 void vk_cache_crash_guard(void) {
+    damaged_pack_aside();
     if (cache_start_interrupted()) {
         recovering_pipeline_cache = true;
         LOG("[vk] the last start ended early: the driver's pipeline caches are set aside (once)\n");
@@ -860,7 +874,16 @@ int vk_hdr_state(void) { return g_vk.sc_hdr ? 2 : g_hdr10_offered ? 1 : 0; }
 
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
+    // (failing: the window's surface gone for a moment - exclusive full screen while the display sleeps or another
+    // program takes it, during the minutes of a game-code build: AMD's driver answers VK_ERROR_UNKNOWN, #184. As when
+    // minimised: no swapchain now, tried again at the next frame - it was a fatal error)
+    VkResult cr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps);
+    if (cr != VK_SUCCESS) {
+        static int n;
+        if (n++ < 5) LOG("[vk] the window's surface can't be read (%d): no picture until it can\n", cr);
+        SDL_Delay(50);
+        return;
+    }
     int w, h;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     VkExtent2D ext = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : (VkExtent2D){(uint32_t)w, (uint32_t)h};
@@ -2562,6 +2585,7 @@ static void prep_mark_write(const char *key) {
 }
 static bool prepare_due(bool log, char key[64]) {
     key[0] = 0;
+    damaged_pack_aside();
     // (each way of not preparing says so when asked to log: a Recomp Launcher player's 0.5.1 log, 2026-11-20, had it
     // due at the start page and never run, with no line saying why - ~1,000 shader builds while playing)
     if (g_prepare_skipped) { if (log) LOG("[prep] not this start: put off (Later)\n"); return false; }

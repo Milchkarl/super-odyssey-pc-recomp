@@ -3294,14 +3294,40 @@ static bool prog_modules(Prog *p) {
     if ((!p->vs || !p->fs) && p->spv_key[0] && p->spv_key[1]) {
         size_t nv = 0, nf = 0;
         uint32_t *sv = vk_spirv_by_key(p->spv_key[0], &nv), *sf = sv ? vk_spirv_by_key(p->spv_key[1], &nf) : NULL;
+        // A saved SPIR-V that can't be read back (a damaged record in cache/shaders.pack - a crash or power loss while
+        // it was written; the index trusts the record's header): made again from the game's shader code, still where
+        // the program found it, and stored again (the newer record wins at the next start). Taken only when it comes
+        // out the same (the same keys: the same GLSL) - shader memory used for something else since gives other keys.
+        // Before, the program went on with no modules, and the Steam Deck's driver crashed on the pipeline (#180).
+        bool remade = false;
+        if ((!sv || !sf) && p->code[0] && p->code[1] && p->cmax[0] && p->cmax[1]) {
+            free(sv), free(sf);
+            sv = sf = NULL;
+            ShaderKey fk = p->fkey;
+            ShaderInfo *vi = maxwell_translate((const uint8_t *)(uintptr_t)p->code[0], p->cmax[0], STAGE_VERTEX, &p->vkey), *fi = NULL;
+            if (vi && vi->msl) {
+                fk.vs_out_mask = vi->out_mask;
+                fi = maxwell_translate((const uint8_t *)(uintptr_t)p->code[1], p->cmax[1], STAGE_FRAGMENT, &fk);
+            }
+            if (vi && vi->msl && fi && fi->msl) {
+                uint32_t *a = vk_glsl_to_spirv(vi->msl, STAGE_VERTEX, "vs", &nv);
+                uint64_t ka = vk_spirv_last_key;
+                uint32_t *b = a ? vk_glsl_to_spirv(fi->msl, STAGE_FRAGMENT, "fs", &nf) : NULL;
+                uint64_t kb = vk_spirv_last_key;
+                if (a && b && ka == p->spv_key[0] && kb == p->spv_key[1]) sv = a, sf = b, remade = true;
+                else free(a), free(b);
+            }
+            if (vi) maxwell_free(vi);
+            if (fi) maxwell_free(fi);
+        }
         if (sv && sf) {
             if (!p->vs) p->vs = vk_module(sv, nv);
             if (!p->fs) p->fs = vk_module(sf, nf);
-        } else {
-            static int n;
-            if (n++ < 10) LOG("[shader] SPIR-V of vs=%llx fs=%llx not in the cache any more: program unavailable\n",
-                              (unsigned long long)p->code[0], (unsigned long long)p->code[1]);
         }
+        static int n;
+        if (n < 20 && (remade || !sv || !sf))
+            n++, LOG("[shader] SPIR-V of vs=%llx fs=%llx not readable in the cache: %s\n", (unsigned long long)p->code[0],
+                     (unsigned long long)p->code[1], remade ? "made again from the game's shader code" : "program unavailable");
         free(sv);
         free(sf);
     }
@@ -4462,7 +4488,12 @@ static VkPrimitiveTopology topo_class_base(uint8_t c) {
 static void build_pipeline(void *arg) {
     Pipe *pp = arg;
     PipeKey *k = &pp->k;
-    prog_modules(k->prog);  // (made here when its set-up didn't: a null module fails this pipeline as any error does)
+    // (made here when its set-up didn't. None: this pipeline fails - not created with a null module, which the Steam
+    // Deck's driver crashes on, #180)
+    if (!prog_modules(k->prog)) {
+        atomic_store(&pp->state, 2);
+        return;
+    }
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = k->prog->vs, .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = k->prog->fs, .pName = "main"}};

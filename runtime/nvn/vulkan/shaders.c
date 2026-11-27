@@ -7,6 +7,7 @@
 #endif
 #include <pthread.h>
 #include <shaderc/shaderc.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -121,17 +122,45 @@ static PackEnt pk_lookup(uint64_t h) {
     return ent;
 }
 
+// Whether words are a whole SPIR-V module: its header, then instructions whose word counts add up to exactly the end.
+// (A damaged record - a crash or power loss while the pack was written - can decompress "fine" into other words: zstd
+// frames written before 2026-11-27 carry no checksum. Handed to the driver, those crashed it: NVIDIA at the game's
+// start, the Steam Deck's driver on a pipeline, #180. Refused here, the shader is made again: exec.c prog_modules.)
+static bool spirv_whole(const uint32_t *w, size_t n) {
+    if (n < 5 || w[0] != 0x07230203 || !w[3]) return false;
+    size_t i = 5;
+    while (i < n) {
+        uint32_t wc = w[i] >> 16;
+        if (!wc || wc > n - i) return false;
+        i += wc;
+    }
+    return i == n;
+}
+
 static uint32_t *pack_load(uint64_t h, size_t *nwords) {
     PackEnt ent = pk_lookup(h);
     if (!ent.key) return NULL;
     void *z = malloc(ent.packed);
     uint32_t *d = malloc((size_t)ent.words * 4);
     FILE *f = fopen(PACK_PATH, "rb");
-    bool ok = f && z && d && fseeko(f, (off_t)ent.off, SEEK_SET) == 0 && fread(z, 1, ent.packed, f) == ent.packed;
+    PackRec r;
+    bool ok = f && z && d && fseeko(f, (off_t)(ent.off - sizeof r), SEEK_SET) == 0 && fread(&r, sizeof r, 1, f) == 1 &&
+              fread(z, 1, ent.packed, f) == ent.packed && r.check == pk_check(z, ent.packed);
     if (f) fclose(f);
     if (ok) {
-        size_t got = ZSTD_decompress(d, (size_t)ent.words * 4, z, ent.packed);
-        ok = !ZSTD_isError(got) && got == (size_t)ent.words * 4 && d[0] == 0x07230203;
+        size_t got = ZSTD_decompress(d, (size_t)ent.words * 4, z, ent.packed);  // (checks the frame's checksum when it has one)
+        ok = !ZSTD_isError(got) && got == (size_t)ent.words * 4 && spirv_whole(d, ent.words);
+    }
+    if (!ok) {
+        static int n;
+        if (n++ < 10) LOG("[shader] SPIR-V %016llx in %s is damaged: not used\n", (unsigned long long)h, PACK_PATH);
+        // (a damaged record: others may be damaged in ways no check here sees - the next start sets the pack aside and
+        // the shaders are prepared again: device.c vk_cache_crash_guard)
+        static _Atomic bool marked;
+        if (!atomic_exchange(&marked, true)) {
+            FILE *m = fopen(PACK_PATH ".damaged", "w");
+            if (m) { fputs("set aside at the next start\n", m); fclose(m); }
+        }
     }
     free(z);
     if (!ok) { free(d); return NULL; }
@@ -150,7 +179,7 @@ static uint32_t *legacy_load(uint64_t h, size_t *nwords) {  // (cache/spirv: one
     uint32_t *d = n > 20 && n % 4 == 0 ? malloc((size_t)n) : NULL;
     if (d && fread(d, 1, (size_t)n, f) != (size_t)n) { free(d); d = NULL; }
     fclose(f);
-    if (d && d[0] != 0x07230203) { free(d); d = NULL; }
+    if (d && !spirv_whole(d, (size_t)n / 4)) { free(d); d = NULL; }
     if (d) *nwords = (size_t)n / 4;
     return d;
 }
@@ -179,10 +208,15 @@ bool vk_spirv_cache_available(void) {
 
 _Atomic bool vk_spirv_cache_failed;  // a SPIR-V couldn't be written: what is stored can't be counted on (exec.c modules)
 static void cache_store_at(uint64_t h, const uint32_t *spv, size_t nwords, int level) {
-    size_t cap = ZSTD_compressBound(nwords * 4);
+    size_t cap = ZSTD_compressBound(nwords * 4) + 16;  // (+ the frame checksum)
     uint8_t *buf = malloc(sizeof(PackRec) + cap);
     if (!buf) { vk_spirv_cache_failed = true; return; }
-    size_t packed = ZSTD_compress(buf + sizeof(PackRec), cap, spv, nwords * 4, level);
+    // (with the frame's checksum: a damaged record is then refused by ZSTD_decompress itself)
+    ZSTD_CCtx *cc = ZSTD_createCCtx();
+    size_t packed = cc && !ZSTD_isError(ZSTD_CCtx_setParameter(cc, ZSTD_c_compressionLevel, level)) &&
+                    !ZSTD_isError(ZSTD_CCtx_setParameter(cc, ZSTD_c_checksumFlag, 1))
+                    ? ZSTD_compress2(cc, buf + sizeof(PackRec), cap, spv, nwords * 4) : (size_t)-1;
+    ZSTD_freeCCtx(cc);
     if (ZSTD_isError(packed)) { free(buf); vk_spirv_cache_failed = true; return; }
     PackRec r = {0x314B5053, (uint32_t)nwords, h, (uint32_t)packed, 0};
     r.check = pk_check(buf + sizeof(PackRec), packed);
