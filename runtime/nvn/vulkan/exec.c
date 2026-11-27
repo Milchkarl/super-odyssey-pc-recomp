@@ -3246,6 +3246,7 @@ struct Prog {
     uint64_t code_sum[2];   // (ahead) the start of both shaders then: different when translated = the memory was reused
     uint64_t tkey;          // its translation's key (tcache): 0 = not saved
     bool from_tcache;       // translated in an earlier run: its SPIR-V keys and bindings come from there (no GLSL)
+    bool fs_discard, fs_discard_known;  // its fragment shader can discard (gpl_lto; looked up from its SPIR-V once)
     _Atomic int state;  // 0 building, 1 ready, 2 failed
 };
 // translation, then SPIR-V + modules (compile), then (g_vk.gpl) the libraries; programs set up ahead stop before
@@ -4583,6 +4584,37 @@ static const VkDynamicState DYN_FO[] = {VK_DYNAMIC_STATE_BLEND_CONSTANTS};
 
 static __thread VkResult t_lib_result;  // (the last create_lib_in's on this thread)
 static __thread bool t_lib_hit;  // (the last library this thread made came from the game's pipeline cache)
+// Link-time-optimized links (#103, #174, #26, #66). AMD's Windows driver gets a depth-only pipeline whose fragment shader
+// discards (alpha-tested shadow casters: the sun shadow map's foliage, fences, Mario's dust) wrong when it is fast-linked
+// from libraries: the discard is lost and every quad is written whole - the dust under Mario on sand cast dark squares,
+// other alpha-tested casters blocky shadows (reproduced on a Radeon 780M, Adrenalin; NVIDIA and the Deck's driver fine).
+// Found by linking halves of the 395 programs a Sand Kingdom run draws with link-time optimization: the dust's
+// instanced shadow-map draw. So on AMD's Windows driver such pipelines are linked with link-time optimization (a real
+// compile, of a small depth-only shader: the warm-up or the first draw); every library keeps what such a link needs.
+// ODYSSEY_GPL_LTO=0: never, 1: every pipeline, 2: depth-only pipelines that discard - on any GPU.
+static int gpl_lto(void) {
+    static int mode = -1;
+    if (mode < 0) {
+        const char *e = getenv("ODYSSEY_GPL_LTO");
+#ifdef _WIN32
+        mode = e && *e ? atoi(e) : g_vk.props.vendorID == 0x1002 ? 2 : 0;
+#else
+        mode = e && *e ? atoi(e) : 0;
+#endif
+        if (mode) LOG("[vk] link-time-optimized links: %s\n", mode == 1 ? "every pipeline" : "depth-only pipelines whose fragment shader discards");
+    }
+    return mode;
+}
+// Whether SPIR-V can discard a fragment (OpKill, OpTerminateInvocation, OpDemoteToHelperInvocation)
+static bool spirv_discards(const uint32_t *w, size_t n) {
+    for (size_t i = 5; w && i < n;) {
+        uint32_t wc = w[i] >> 16, op = w[i] & 0xffff;
+        if (!wc || i + wc > n) break;
+        if (op == 252 || op == 4416 || op == 5380) return true;
+        i += wc;
+    }
+    return false;
+}
 static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryFlagsEXT part) {
     const void *next = pi->pNext;
     VkPipelineCreateFlags flags = pi->flags;
@@ -4593,6 +4625,7 @@ static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateI
     li.pNext = &fb_ci;
     pi->pNext = &li;
     pi->flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    if (gpl_lto()) pi->flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
     VkPipeline lib = VK_NULL_HANDLE;
     VkResult r = vkCreateGraphicsPipelines(g_vk.dev, cache, 1, pi, NULL, &lib);
     t_lib_result = r;
@@ -4741,6 +4774,7 @@ static bool lib_key(VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryF
                                                  .pNext = (void *)pi->pNext, .flags = part};
     pi->pNext = &li;
     pi->flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    if (gpl_lto()) pi->flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;  // (as create_lib_in makes it)
     VkPipelineCreateInfoKHR pc = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_INFO_KHR, .pNext = pi};
     *out = (VkPipelineBinaryKeyKHR){.sType = VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR};
     bool ok = pf_pipeline_key(g_vk.dev, &pc, out) == VK_SUCCESS && out->keySize <= VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR;
@@ -4969,7 +5003,8 @@ static VkPipeline shader_lib_make(Prog *p, bool frag, int fill, bool cached_only
     // its saved data (pipeline binaries), with the flags as flags2: the capture bit has no 32-bit form
     bool pbin = g_vk.pbin && p->spv_key[0] && p->spv_key[1] && pbin_init();
     VkPipelineCreateFlags2CreateInfoKHR f2 = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
-                                              .pNext = pi.pNext, .flags = base | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR};
+                                              .pNext = pi.pNext, .flags = base | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+                                                       (gpl_lto() ? VK_PIPELINE_CREATE_2_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT : 0)};
     // (not on the render thread at a first draw - a file read and the driver's work, 1-50 ms: hundreds at a stage's start
     // stalled it; a worker does it while the draw waits a frame - except for a full-screen pass, whose wait holds the
     // whole picture)
@@ -5820,6 +5855,15 @@ static bool link_pipeline(Pipe *pp) {
     PCACHE_FEEDBACK(fb);
     fb_ci.pNext = &lci;
     VkGraphicsPipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &fb_ci, .layout = p->layout};
+    if (gpl_lto() == 2 && k->ncolor == 0 && !p->fs_discard_known && p->spv_key[1]) {
+        size_t nf = 0;
+        uint32_t *sf = vk_spirv_by_key(p->spv_key[1], &nf);
+        p->fs_discard = spirv_discards(sf, nf);
+        free(sf);
+        p->fs_discard_known = true;
+    }
+    if (gpl_lto() == 1 || (gpl_lto() == 2 && k->ncolor == 0 && p->fs_discard))
+        pi.flags |= VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
     uint64_t t0 = plat_now_ns();
     VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &pp->pipe);
     shader_time_log("link", p->code[1], t0);
