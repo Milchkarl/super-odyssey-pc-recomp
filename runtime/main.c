@@ -245,8 +245,10 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--play")) {  // straight into the game, without the configuration page
 #ifdef _WIN32
             _putenv_s("ODYSSEY_NO_CONFIG", "1");
+            _putenv_s("ODYSSEY_PLAY", "1");  // (a due shader preparation still shows on the page: setup.mm config_run)
 #else
             setenv("ODYSSEY_NO_CONFIG", "1", 1);
+            setenv("ODYSSEY_PLAY", "1", 1);
 #endif
             continue;
         }

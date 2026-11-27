@@ -1076,8 +1076,21 @@ bool config_run(void) {
     // (test runs and --play: straight into the game)
     const char *skip_vars[] = {"ODYSSEY_NO_CONFIG", "ODYSSEY_INPUT", "ODYSSEY_HOST_INPUT", "ODYSSEY_WARP", "ODYSSEY_HIDDEN",
                                "ODYSSEY_EXIT_AFTER_SHOT", "ODYSSEY_SETUP_EXIT_WHEN_DONE", "ODYSSEY_BIND_TEST"};
+    // --play (RecompLauncher starts the game so, and Steam launch options): no settings - but a full shader preparation
+    // that is due runs here, on the page's progress card, then the game starts. It had a small window of its own
+    // (vk_prepare_before_start), stuck at "0 / 0" while the shaders were read, which players took for an old version.
+    bool play_prep = false;
+#ifndef __APPLE__
+    if (getenv("ODYSSEY_PLAY")) {
+        bool test = false;
+        for (size_t i = 1; i < sizeof skip_vars / sizeof *skip_vars; i++) test |= getenv(skip_vars[i]) && *getenv(skip_vars[i]);
+        if (!test) { settings_load(); play_prep = vk_prepare_due(); }
+        if (play_prep) LOG("[config] --play with a shader preparation due: it runs on the page, then the game\n");
+    }
+#endif
     for (const char *v : skip_vars)
-        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST")) {
+        if (const char *e = getenv(v); e && *e && !(v == skip_vars[0] && !strcmp(e, "0")) && !getenv("ODYSSEY_PREP_PAGE_TEST") &&
+                                       !(v == skip_vars[0] && play_prep)) {
             LOG("[config] page skipped: %s is set%s\n", v, v == skip_vars[0] ? " (or --play)" : "");
             return true;
         }
@@ -1112,6 +1125,7 @@ bool config_run(void) {
     ui_window_init();
 #ifndef __APPLE__
     if (prep_due && !g_settings.config_at_start) g_prep = PREP_ASK;  // (straight to the question)
+    if (play_prep) { g_prep_stay = false; prep_start(); }  // (--play: no question, compiled, then the game)
 #ifndef __APPLE__
     g_prep_due_home = prep_due;
 #endif
