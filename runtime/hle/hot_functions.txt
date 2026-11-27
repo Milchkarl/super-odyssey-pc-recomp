@@ -1,5 +1,6 @@
 # The game functions that run, per module and game build id (tools/hot_functions.py; addresses only).
-# runtime/gamebuild.c compiles a generated file that defines none of these without optimization.
+# runtime/gamebuild.c compiles a generated file that defines none of these without optimization - only with
+# ODYSSEY_GAME_COLD_FILES=1 since 2026-11-27 (stutter while moving on 8-thread CPUs, #177).
 # main 3ca12dfaaf9c82da
 7000000024
 700000019c

@@ -270,8 +270,12 @@ static void log_tail(const char *path, char *out, size_t n) {  // the last line 
 // code). A generated file holding none of them is compiled without optimization: ~0.4 s instead of up to 100 s, the
 // code there runs several times slower but isn't run in play. Most of the system libraries and nearly all the video
 // library (our videos play through FFmpeg) are such code: a new player's build -46% (PC, 8 jobs; 2026-11-24). A
-// module of a game version the list doesn't name is built optimized throughout, as before; so is everything with
-// ODYSSEY_GAME_ALL_OPT=1 (tests). The list is part of GAMELIB_ID (Makefile).
+// module of a game version the list doesn't name is built optimized throughout, as before.
+// OFF by default since 2026-11-27 (ODYSSEY_GAME_COLD_FILES=1 turns it on, tests): the list misses code that runs while
+// moving through a kingdom, and with 8 logical processors the same 90 s run through Sand (1.4.1, 60 FPS) had 265 and 82
+// frames over 25 ms (up to 709 ms; the worst tenth of the seconds at 18 / 33 FPS) against 8 with every file optimized -
+// on 32 none either way. Players saw it as stutter while moving, new in 1.0.2 (#177). The list is part of GAMELIB_ID
+// (Makefile): its header changed with this, so every 1.0.2 build is made again.
 typedef struct { uint64_t *a; size_t n; bool known; } HotSet;
 static HotSet g_hot[3];  // (MODULES order)
 
@@ -295,7 +299,8 @@ static bool nso_build_id(const char *nso, char out[17]) {
 static void hot_load(HotSet *h, const char *list, const char *module, const char *build) {
     free(h->a);
     memset(h, 0, sizeof *h);
-    if (!list[0] || getenv("ODYSSEY_GAME_ALL_OPT")) return;
+    const char *cold = getenv("ODYSSEY_GAME_COLD_FILES");
+    if (!list[0] || !cold || !atoi(cold) || getenv("ODYSSEY_GAME_ALL_OPT")) return;
     FILE *f = fopen(list, "r");
     if (!f) return;
     char line[256], want[128];
