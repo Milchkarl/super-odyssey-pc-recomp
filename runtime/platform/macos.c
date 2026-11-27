@@ -133,6 +133,7 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
     return di.dli_sname;
 }
 
+uint64_t plat_process_cpu_ns(void) { return 0; }
 uint64_t plat_private_bytes(void) { return 0; }
 uint64_t plat_resident_bytes(void) { return 0; }
 uint64_t plat_total_ram(void) { return 0; }

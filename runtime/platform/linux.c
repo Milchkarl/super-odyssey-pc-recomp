@@ -279,6 +279,10 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
 }
 
 // Fatal error without a terminal: say so in a message box rather than vanishing (the details are in the log).
+uint64_t plat_process_cpu_ns(void) {
+    struct timespec ts;
+    return clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) ? 0 : (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
 uint64_t plat_private_bytes(void) {  // (anonymous memory, resident or swapped: what Windows counts as private)
     FILE *f = fopen("/proc/self/status", "r");
     char line[256];

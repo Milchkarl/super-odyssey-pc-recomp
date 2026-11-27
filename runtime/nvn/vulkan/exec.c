@@ -1828,6 +1828,10 @@ bool renderer_take_frame_incomplete(void) { return atomic_exchange(&g_frame_inco
 typedef struct Prog Prog;
 static void remember_frame_hold(Prog *p);
 uint64_t renderer_present_count(void);
+// (stall_watch, below) the draw now waiting for its program's build, and since when
+static _Atomic uintptr_t g_wait_prog;
+static _Atomic uint64_t g_wait_since;
+static void wait_report(Prog *p, double ms, int state);
 static bool built(_Atomic int *state, Prog *p) {
     int s = atomic_load(state);
     static int fs_wait = -1;
@@ -1853,7 +1857,10 @@ static bool built(_Atomic int *state, Prog *p) {
     if (s == 0 && (sync_shaders() || g_draw_must_wait)) {
         uint64_t t0 = plat_now_ns();
         kernel_block_begin();  // (the core's other threads run meanwhile: loading)
+        atomic_store(&g_wait_prog, (uintptr_t)p), atomic_store(&g_wait_since, t0);  // (stall_watch)
         while ((s = atomic_load(state)) == 0 && plat_now_ns() - t0 < 10000000000ull) SDL_DelayNS(200000);
+        atomic_store(&g_wait_since, 0);
+        if (plat_now_ns() - t0 >= 1000000000ull) wait_report(p, (plat_now_ns() - t0) / 1e6, s);
         if (shader_time_ms() >= 0 && (plat_now_ns() - t0) / 1e6 >= shader_time_ms())
             LOG("[shtime] draw waited %.1f ms for its build (%s)\n", (plat_now_ns() - t0) / 1e6,
                 g_draw_must_wait && !sync_shaders() ? "full-screen pass" : "scene warm-up");
@@ -3239,6 +3246,7 @@ struct Prog {
     uint64_t code_sum[2];   // (ahead) the start of both shaders then: different when translated = the memory was reused
     uint64_t tkey;          // its translation's key (tcache): 0 = not saved
     bool from_tcache;       // translated in an earlier run: its SPIR-V keys and bindings come from there (no GLSL)
+    bool fs_discard, fs_discard_known;  // its fragment shader can discard (gpl_lto; looked up from its SPIR-V once)
     _Atomic int state;  // 0 building, 1 ready, 2 failed
 };
 // translation, then SPIR-V + modules (compile), then (g_vk.gpl) the libraries; programs set up ahead stop before
@@ -3287,14 +3295,40 @@ static bool prog_modules(Prog *p) {
     if ((!p->vs || !p->fs) && p->spv_key[0] && p->spv_key[1]) {
         size_t nv = 0, nf = 0;
         uint32_t *sv = vk_spirv_by_key(p->spv_key[0], &nv), *sf = sv ? vk_spirv_by_key(p->spv_key[1], &nf) : NULL;
+        // A saved SPIR-V that can't be read back (a damaged record in cache/shaders.pack - a crash or power loss while
+        // it was written; the index trusts the record's header): made again from the game's shader code, still where
+        // the program found it, and stored again (the newer record wins at the next start). Taken only when it comes
+        // out the same (the same keys: the same GLSL) - shader memory used for something else since gives other keys.
+        // Before, the program went on with no modules, and the Steam Deck's driver crashed on the pipeline (#180).
+        bool remade = false;
+        if ((!sv || !sf) && p->code[0] && p->code[1] && p->cmax[0] && p->cmax[1]) {
+            free(sv), free(sf);
+            sv = sf = NULL;
+            ShaderKey fk = p->fkey;
+            ShaderInfo *vi = maxwell_translate((const uint8_t *)(uintptr_t)p->code[0], p->cmax[0], STAGE_VERTEX, &p->vkey), *fi = NULL;
+            if (vi && vi->msl) {
+                fk.vs_out_mask = vi->out_mask;
+                fi = maxwell_translate((const uint8_t *)(uintptr_t)p->code[1], p->cmax[1], STAGE_FRAGMENT, &fk);
+            }
+            if (vi && vi->msl && fi && fi->msl) {
+                uint32_t *a = vk_glsl_to_spirv(vi->msl, STAGE_VERTEX, "vs", &nv);
+                uint64_t ka = vk_spirv_last_key;
+                uint32_t *b = a ? vk_glsl_to_spirv(fi->msl, STAGE_FRAGMENT, "fs", &nf) : NULL;
+                uint64_t kb = vk_spirv_last_key;
+                if (a && b && ka == p->spv_key[0] && kb == p->spv_key[1]) sv = a, sf = b, remade = true;
+                else free(a), free(b);
+            }
+            if (vi) maxwell_free(vi);
+            if (fi) maxwell_free(fi);
+        }
         if (sv && sf) {
             if (!p->vs) p->vs = vk_module(sv, nv);
             if (!p->fs) p->fs = vk_module(sf, nf);
-        } else {
-            static int n;
-            if (n++ < 10) LOG("[shader] SPIR-V of vs=%llx fs=%llx not in the cache any more: program unavailable\n",
-                              (unsigned long long)p->code[0], (unsigned long long)p->code[1]);
         }
+        static int n;
+        if (n < 20 && (remade || !sv || !sf))
+            n++, LOG("[shader] SPIR-V of vs=%llx fs=%llx not readable in the cache: %s\n", (unsigned long long)p->code[0],
+                     (unsigned long long)p->code[1], remade ? "made again from the game's shader code" : "program unavailable");
         free(sv);
         free(sf);
     }
@@ -3660,6 +3694,57 @@ static bool preload_room(void) {
             (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20));
     if (!over) atomic_store(&full, false);
     return !over;
+}
+
+// A draw that waited a second or more for its program (always logged: players' logs then say what a long black
+// screen waited for), and the stall watch: a thread that writes what the game is doing whenever no frame has been
+// shown for 5 s, then 10, 20, 40 .. s - a draw waiting for a build, shader jobs queued, the start-up warm-up, the CPU
+// the process used meanwhile (cores busy with no waits: the game's own code, loading or computing).
+extern const char *odyssey_stage_name(void);
+static void wait_report(Prog *p, double ms, int state) {
+    static _Atomic int n;
+    if (atomic_fetch_add(&n, 1) >= 200) return;
+    LOG("[wait] frame %llu (%s): a draw waited %.0f ms for its shaders%s - program vs %llx fs %llx, step %d, %d shader jobs queued or running\n",
+        (unsigned long long)renderer_present_count(), odyssey_stage_name(), ms, state == 0 ? " and gave up" : state == 2 ? " (they failed)" : "",
+        p ? (unsigned long long)p->code[0] : 0ull, p ? (unsigned long long)p->code[1] : 0ull, p ? atomic_load(&p->step) : -1,
+        atomic_load(&g_shader_jobs));
+}
+static _Atomic bool g_stall_bg;  // (the background warm-up running: set where g_warm_bg is)
+static void *stall_watch(void *a) {
+    (void)a;
+    uint64_t last = renderer_present_count(), since = plat_now_ns(), next = 5000000000ull, cpu0 = plat_process_cpu_ns(), t_cpu = since;
+    bool told = false;
+    for (;;) {
+        SDL_Delay(500);
+        uint64_t n = renderer_present_count(), now = plat_now_ns();
+        if (n != last) {
+            if (told) LOG("[stall] frames again after %.1f s (frame %llu)\n", (now - since) / 1e9, (unsigned long long)n);
+            last = n, since = now, next = 5000000000ull, told = false;
+            cpu0 = plat_process_cpu_ns(), t_cpu = now;
+            continue;
+        }
+        if (now - since < next) continue;
+        next *= 2;
+        told = true;
+        uint64_t cpu = plat_process_cpu_ns(), ws = atomic_load(&g_wait_since);
+        Prog *p = (Prog *)atomic_load(&g_wait_prog);
+        char wait[160] = "no draw waiting for shaders";
+        if (ws) snprintf(wait, sizeof wait, "a draw waiting %.1f s for program fs %llx (step %d)", (now - ws) / 1e9,
+                         p ? (unsigned long long)p->code[1] : 0ull, p ? atomic_load(&p->step) : -1);
+        extern bool odyssey_scene_warming(void);
+        LOG("[stall] no frame for %.0f s (frame %llu, %s%s): %s; %d shader jobs queued or running; start-up warm-up %s; CPU used meanwhile: %.1f cores\n",
+            (now - since) / 1e9, (unsigned long long)n, odyssey_stage_name(), game_is_odyssey() && odyssey_scene_warming() ? ", a scene loading" : "",
+            wait, atomic_load(&g_shader_jobs), atomic_load(&g_stall_bg) ? "running in the background" : "not running",
+            now > t_cpu ? (double)(cpu - cpu0) / (double)(now - t_cpu) : 0.0);
+        cpu0 = cpu, t_cpu = now;
+    }
+    return NULL;
+}
+void vk_stall_watch_start(void) {  // (the first frame the game shows: device.c)
+    static _Atomic bool started;
+    if (atomic_exchange(&started, true) || getenv("ODYSSEY_NO_STALL_WATCH")) return;
+    pthread_t t;
+    if (pthread_create(&t, NULL, stall_watch, NULL) == 0) pthread_detach(t);
 }
 
 // The libraries of a program set up ahead, for its first draw (a job, or the draw itself while builds block)
@@ -4404,7 +4489,12 @@ static VkPrimitiveTopology topo_class_base(uint8_t c) {
 static void build_pipeline(void *arg) {
     Pipe *pp = arg;
     PipeKey *k = &pp->k;
-    prog_modules(k->prog);  // (made here when its set-up didn't: a null module fails this pipeline as any error does)
+    // (made here when its set-up didn't. None: this pipeline fails - not created with a null module, which the Steam
+    // Deck's driver crashes on, #180)
+    if (!prog_modules(k->prog)) {
+        atomic_store(&pp->state, 2);
+        return;
+    }
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = k->prog->vs, .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = k->prog->fs, .pName = "main"}};
@@ -4494,6 +4584,37 @@ static const VkDynamicState DYN_FO[] = {VK_DYNAMIC_STATE_BLEND_CONSTANTS};
 
 static __thread VkResult t_lib_result;  // (the last create_lib_in's on this thread)
 static __thread bool t_lib_hit;  // (the last library this thread made came from the game's pipeline cache)
+// Link-time-optimized links (#103, #174, #26, #66). AMD's Windows driver gets a depth-only pipeline whose fragment shader
+// discards (alpha-tested shadow casters: the sun shadow map's foliage, fences, Mario's dust) wrong when it is fast-linked
+// from libraries: the discard is lost and every quad is written whole - the dust under Mario on sand cast dark squares,
+// other alpha-tested casters blocky shadows (reproduced on a Radeon 780M, Adrenalin; NVIDIA and the Deck's driver fine).
+// Found by linking halves of the 395 programs a Sand Kingdom run draws with link-time optimization: the dust's
+// instanced shadow-map draw. So on AMD's Windows driver such pipelines are linked with link-time optimization (a real
+// compile, of a small depth-only shader: the warm-up or the first draw); every library keeps what such a link needs.
+// ODYSSEY_GPL_LTO=0: never, 1: every pipeline, 2: depth-only pipelines that discard - on any GPU.
+static int gpl_lto(void) {
+    static int mode = -1;
+    if (mode < 0) {
+        const char *e = getenv("ODYSSEY_GPL_LTO");
+#ifdef _WIN32
+        mode = e && *e ? atoi(e) : g_vk.props.vendorID == 0x1002 ? 2 : 0;
+#else
+        mode = e && *e ? atoi(e) : 0;
+#endif
+        if (mode) LOG("[vk] link-time-optimized links: %s\n", mode == 1 ? "every pipeline" : "depth-only pipelines whose fragment shader discards");
+    }
+    return mode;
+}
+// Whether SPIR-V can discard a fragment (OpKill, OpTerminateInvocation, OpDemoteToHelperInvocation)
+static bool spirv_discards(const uint32_t *w, size_t n) {
+    for (size_t i = 5; w && i < n;) {
+        uint32_t wc = w[i] >> 16, op = w[i] & 0xffff;
+        if (!wc || i + wc > n) break;
+        if (op == 252 || op == 4416 || op == 5380) return true;
+        i += wc;
+    }
+    return false;
+}
 static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryFlagsEXT part) {
     const void *next = pi->pNext;
     VkPipelineCreateFlags flags = pi->flags;
@@ -4504,6 +4625,7 @@ static VkPipeline create_lib_in(VkPipelineCache cache, VkGraphicsPipelineCreateI
     li.pNext = &fb_ci;
     pi->pNext = &li;
     pi->flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    if (gpl_lto()) pi->flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
     VkPipeline lib = VK_NULL_HANDLE;
     VkResult r = vkCreateGraphicsPipelines(g_vk.dev, cache, 1, pi, NULL, &lib);
     t_lib_result = r;
@@ -4652,6 +4774,7 @@ static bool lib_key(VkGraphicsPipelineCreateInfo *pi, VkGraphicsPipelineLibraryF
                                                  .pNext = (void *)pi->pNext, .flags = part};
     pi->pNext = &li;
     pi->flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    if (gpl_lto()) pi->flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;  // (as create_lib_in makes it)
     VkPipelineCreateInfoKHR pc = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_INFO_KHR, .pNext = pi};
     *out = (VkPipelineBinaryKeyKHR){.sType = VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR};
     bool ok = pf_pipeline_key(g_vk.dev, &pc, out) == VK_SUCCESS && out->keySize <= VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR;
@@ -4880,7 +5003,8 @@ static VkPipeline shader_lib_make(Prog *p, bool frag, int fill, bool cached_only
     // its saved data (pipeline binaries), with the flags as flags2: the capture bit has no 32-bit form
     bool pbin = g_vk.pbin && p->spv_key[0] && p->spv_key[1] && pbin_init();
     VkPipelineCreateFlags2CreateInfoKHR f2 = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
-                                              .pNext = pi.pNext, .flags = base | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR};
+                                              .pNext = pi.pNext, .flags = base | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+                                                       (gpl_lto() ? VK_PIPELINE_CREATE_2_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT : 0)};
     // (not on the render thread at a first draw - a file read and the driver's work, 1-50 ms: hundreds at a stage's start
     // stalled it; a worker does it while the draw waits a frame - except for a full-screen pass, whose wait holds the
     // whole picture)
@@ -5731,6 +5855,15 @@ static bool link_pipeline(Pipe *pp) {
     PCACHE_FEEDBACK(fb);
     fb_ci.pNext = &lci;
     VkGraphicsPipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &fb_ci, .layout = p->layout};
+    if (gpl_lto() == 2 && k->ncolor == 0 && !p->fs_discard_known && p->spv_key[1]) {
+        size_t nf = 0;
+        uint32_t *sf = vk_spirv_by_key(p->spv_key[1], &nf);
+        p->fs_discard = spirv_discards(sf, nf);
+        free(sf);
+        p->fs_discard_known = true;
+    }
+    if (gpl_lto() == 1 || (gpl_lto() == 2 && k->ncolor == 0 && p->fs_discard))
+        pi.flags |= VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
     uint64_t t0 = plat_now_ns();
     VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &pp->pipe);
     shader_time_log("link", p->code[1], t0);
@@ -6147,7 +6280,7 @@ typedef struct {
 static void warm_bg_done(WarmJob *j) {
     LOG("[vk] background warm-up done: %u graphics pipelines prewarmed (%u attempted of %u, %u the game had built first) in %.2f s\n",
         atomic_load(&j->warmed), atomic_load(&j->attempted), j->count, atomic_load(&g_warm_dups), (plat_now_ns() - j->t0) / 1e9);
-    atomic_store(&g_warm_bg, false);
+    atomic_store(&g_warm_bg, false), atomic_store(&g_stall_bg, false);
     free(j->own_recipes);
     free(j->own_order);
     free(j);
@@ -6407,7 +6540,7 @@ void vk_pipeline_prewarm(bool build) {
                 LOG("[vk] warm-up: %.0f KB a pipeline so far, up to %u in all within the %llu MB budget\n", each / 1024.0,
                     atomic_load(&job->max_warmed), (unsigned long long)(memory_budget >> 20));
             }
-            atomic_store(&g_warm_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
+            atomic_store(&g_warm_bg, true), atomic_store(&g_stall_bg, true);  // (before the game's first draw: draw_ takes warm_lock to add pipelines)
             atomic_store(&job->bg, true);
             for (int i = 0; i < started; i++) SDL_DetachThread(th[i]);
             if (atomic_load(&job->running) == 0 && !atomic_exchange(&job->cleaned, true))  // (all ended just now)
@@ -7129,6 +7262,17 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     uint64_t src = r.addr;
     const void *pose = stage == 0 ? odyssey_pose_render_palette(src, size) : NULL;
     if (pose) return ubo_span(vk_transient_copy(pose, size, 256), size);
+    {   // (a draw between two ticks, runtime/hle/odyssey_pose.c: a rigidly drawn model's block starts with its bone's
+        // matrix at the tick - bound with the matrix of the draw's own time in its place)
+        extern const float *odyssey_pose_render_rigid(const void *block, uint64_t size);
+        const float *m = stage == 0 && size <= 0x1000 ? odyssey_pose_render_rigid((const void *)(uintptr_t)src, size) : NULL;
+        if (m) {
+            uint8_t block[0x1000];
+            memcpy(block, (const void *)(uintptr_t)src, size);
+            memcpy(block, m, 48);
+            return ubo_span(vk_transient_copy(block, size, 256), size);
+        }
+    }
     if (g_interp_log && stage < 2) src = (uint64_t)(uintptr_t)interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, si->cbuf_size[k]);
     // snapshot: later CPU writes must not leak in. Shared by the draws of one submission binding the same range:
     // within a command list nothing writes guest memory (no inline UpdateUniformBuffer: that writes through below

@@ -67,6 +67,7 @@ bool plat_remove_tree(const char *dir);      // rm -rf
 // Name of the host function containing pc (guest functions are f_<addr>), NULL if unknown.
 const char *plat_symbol(uint64_t pc, uint64_t *offset);
 void plat_print_backtrace(void);
+uint64_t plat_process_cpu_ns(void);  // CPU time this process has used, all threads (0 where unknown)
 uint64_t plat_private_bytes(void);  // memory committed by this process (the status line; 0 where unknown)
 uint64_t plat_resident_bytes(void);  // this process's memory in RAM (Task Manager's "memory", RSS; 0 where unknown)
 uint64_t plat_total_ram(void);       // the machine's RAM (0 where unknown)

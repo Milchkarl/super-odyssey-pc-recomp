@@ -1074,8 +1074,11 @@ static void mem_note_ram(void) {
     VulkanOverlayStats s = vk_overlay_stats();
     if (!s.game_ram_mib || !s.ram_total_mib) return;
     char b[160];
-    snprintf(b, sizeof b, "%s %.1f GB %s %.1f GB.", tr("The game uses"), s.game_ram_mib / 1024.0, tr("of this PC's"),
-             s.ram_total_mib / 1024.0);
+    static const char *const k = "The game uses %.1f GB of this PC's %.1f GB.";
+    const char *f = tr_fmt(k);  // (a language without the whole sentence yet: its two fragments, as before)
+    if (f != k) snprintf(b, sizeof b, f, s.game_ram_mib / 1024.0, s.ram_total_mib / 1024.0);
+    else snprintf(b, sizeof b, "%s %.1f GB %s %.1f GB.", tr("The game uses"), s.game_ram_mib / 1024.0, tr("of this PC's"),
+                  s.ram_total_mib / 1024.0);
     opt_next_note(b);
 }
 #else
@@ -1151,10 +1154,10 @@ static void tab_display(void) {
             for (int i = 0; i < n; i++) if (g_settings.gpu[0] && !strcmp(g_settings.gpu, gp[i])) sel = i;
             bool pending = strcmp(g_settings.gpu[0] ? g_settings.gpu : in_use, in_use) != 0;
             char d[600];
-            snprintf(d, sizeof d, "Which graphics card draws the game. Until you pick one, a dedicated card is used over "
-                                  "integrated graphics. Choose another for a laptop that starts on the wrong one, or to compare. "
-                                  "In use: %s.%s", in_use,
-                     pending ? "\n\nApplies when the game starts again." : "");
+            snprintf(d, sizeof d, tr_fmt("Which graphics card draws the game. Until you pick one, a dedicated card is used over "
+                                         "integrated graphics. Choose another for a laptop that starts on the wrong one, or to "
+                                         "compare. In use: %s.%s"), in_use,
+                     pending ? tr("\n\nApplies when the game starts again.") : "");
             opt_next_dropdown();
             if (n && opt_choice("Graphics card", &sel, gp, n, def, d, false))
                 snprintf(g_settings.gpu, sizeof g_settings.gpu, "%s", gp[sel]);
@@ -1176,7 +1179,7 @@ static void tab_display(void) {
         static char labels[66][48];
         const char *lp[66];
         int n = 0, sel = 0;
-        snprintf(labels[n], sizeof labels[n], desk.w ? "Desktop (%d x %d)" : "Desktop", desk.w, desk.h);
+        snprintf(labels[n], sizeof labels[n], desk.w ? tr_fmt("Desktop (%d x %d)") : tr("Desktop"), desk.w, desk.h);
         lp[n] = labels[n], n++;
         for (const ModeSize &m : sizes) {
             if (n >= 66) break;
@@ -2490,7 +2493,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
     ImGui::Begin("##kbd", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                     ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::PushFont(g_font_big);
-    ImGui::TextUnformatted("Enter your name");
+    ImGui::TextUnformatted(tr("Enter your name"));
     ImGui::PopFont();
     static bool was_open, was_pad;
     bool pad = g_last_pad.load(), appearing = !was_open || pad != was_pad;  // (switching device: focus the new one)
@@ -2504,7 +2507,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
                          [](ImGuiInputTextCallbackData *d) -> int { return d->EventChar < 0x20 ? 1 : 0; });
         ImGui::PopFont();
         if ((int)strlen(g_kbd_text) > g_kbd_max) g_kbd_text[g_kbd_max] = 0;
-        ImGui::TextDisabled("Enter  confirm      Esc  cancel      (%d / %d)", (int)strlen(g_kbd_text), g_kbd_max);
+        ImGui::TextDisabled(tr_fmt("Enter  confirm      Esc  cancel      (%d / %d)"), (int)strlen(g_kbd_text), g_kbd_max);
     } else {  // controller: on-screen keyboard (osk.mm, shared with our menus' text fields)
         int r = osk_keys(g_kbd_text, sizeof g_kbd_text, g_kbd_max, appearing, scale, g_font_big);
         if (r) g_kbd = r > 0 ? 2 : 3;  // (Start / + confirms in menu_handle_event too)
@@ -3082,7 +3085,7 @@ static void draw_performance(void) {
             up = name, aa = "Temporal";
         }
 #endif
-        ImGui::TextColored(dim, "Upscaler: %s | Anti-aliasing: %s", up, aa);
+        ImGui::TextColored(dim, tr_fmt("Upscaler: %s | Anti-aliasing: %s"), up, aa);
         if (s.render_w && s.out_w) ImGui::TextColored(dim, "%u x %u -> %u x %u", s.render_w, s.render_h, s.out_w, s.out_h);
     }
     ImGui::PopTextWrapPos();
@@ -3196,9 +3199,9 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
             ImGui::Begin("##update_note", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
             ImGui::PushFont(g_menu_font);
-            ImGui::Text("Update %s available", us.latest);
+            ImGui::Text(tr_fmt("Update %s available"), us.latest);
             ImGui::PushStyleColor(ImGuiCol_Text, kTextDimV);
-            ImGui::TextUnformatted("F1 > Updates to install it");
+            ImGui::TextUnformatted(tr("F1 > Updates to install it"));
             ImGui::PopStyleColor();
             ImGui::PopFont();
             ImGui::End();

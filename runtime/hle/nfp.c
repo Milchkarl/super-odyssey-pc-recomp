@@ -10,7 +10,9 @@
 // reads GetTagInfo and GetModelInfo, and waits for the tag to leave (the deactivate event, TagRemoved) before it
 // searches again. The game searches only while its "touch an amiibo" prompt is up (D-pad Right held in play, or an
 // amiibo question from Uncle amiibo): the chosen figure is "touched" 0.7 s into each search, stays a moment after it
-// was read, and is lifted. ODYSSEY_AMIIBO=<1..> overrides the setting (tests).
+// was read, and is lifted. ODYSSEY_AMIIBO=<1..> overrides the setting, ODYSSEY_AMIIBO_ID=<16 hex digits> the figure's id (tests).
+// (Waluigi's character id was 0x0018 until 2026-11-27: the game took him for an unknown figure, #164; 0x0014 gives the
+// same reaction as the other Mario figures - tested in the Moon Kingdom.)
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -38,7 +40,7 @@ static const Figure k_figures[] = {
     {"Bowser", {0x00, 0x05, 0x00, 0x00, 0x00, 0x39, 0x01, 0x02}},
     {"Yoshi", {0x00, 0x03, 0x00, 0x00, 0x00, 0x37, 0x01, 0x02}},
     {"Wario", {0x00, 0x07, 0x00, 0x00, 0x00, 0x3c, 0x01, 0x02}},
-    {"Waluigi", {0x00, 0x18, 0x00, 0x00, 0x00, 0xf8, 0x01, 0x02}},
+    {"Waluigi", {0x00, 0x14, 0x00, 0x00, 0x00, 0xf8, 0x01, 0x02}},
     {"Diddy Kong", {0x00, 0x09, 0x00, 0x00, 0x00, 0x15, 0x00, 0x02}},
     {"Dr. Mario", {0x00, 0x00, 0x01, 0x00, 0x00, 0x16, 0x00, 0x02}},
     {"Link (another series: a hint)", {0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x02}},
@@ -160,6 +162,12 @@ HLE_FUNC("_ZN2nn3nfp12GetModelInfoEPNS0_9ModelInfoERKNS0_12DeviceHandleE", nfp_g
     if (ok) {
         uint8_t *m = (uint8_t *)(uintptr_t)c->x[0];
         const uint8_t *id = k_figures[touched].id;
+        uint8_t over[8];  // (ODYSSEY_AMIIBO_ID=<16 hex digits>, tests: that id instead of the table's)
+        const char *oe = getenv("ODYSSEY_AMIIBO_ID");
+        if (oe && strlen(oe) == 16) {
+            for (int i = 0; i < 8; i++) { char b[3] = {oe[2 * i], oe[2 * i + 1], 0}; over[i] = (uint8_t)strtoul(b, NULL, 16); }
+            id = over;
+        }
         memset(m, 0, 0x40);
         m[0] = id[0], m[1] = id[1], m[2] = id[2], m[3] = id[3];
         m[4] = id[5], m[5] = id[4];  // (the model number as a number: little endian here)

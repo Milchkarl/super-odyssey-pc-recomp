@@ -107,6 +107,7 @@ typedef struct {
     int audio_output;    // AUDIO_OUT_*: what the game is told the TV has (services/audio.c audio_channels, #35)
     bool movie_audio;
     bool show_fps, performance_overlay;
+    bool adaptive_fps;   // (adaptive_frame_rate) above 60: a lower frame rate while frames miss theirs (vulkan/device.c rate_control)
     // The performance overlay (runtime/ui/menu.mm draw_performance): where, how big, how see-through, and its parts
     int overlay_corner;   // OVERLAY_*
     int overlay_size;     // 0 small, 1 medium, 2 large

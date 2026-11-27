@@ -16,3 +16,6 @@ void odyssey_pose_draw(Cpu *c, float lead);  // this draw shows the models `lead
 
 void odyssey_pose_render_frame(OdysseyPoseFrame *frame);
 const void *odyssey_pose_render_palette(uint64_t address, uint64_t size);
+// (the renderer) a vertex-stage uniform block that starts with a bone's matrix at the last tick (a model drawn rigidly:
+// its shape block): that bone's matrix for this draw's time (12 floats, in the block's layout), or NULL
+const float *odyssey_pose_render_rigid(const void *block, uint64_t size);

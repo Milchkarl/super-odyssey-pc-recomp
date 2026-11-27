@@ -312,7 +312,10 @@ static void attr_load(Ctx *c, int dst, uint32_t addr, const char *idx) {
                 } else sprintf(e, "as_type<uint>(in.v%d[%d])", a, comp);
             }
         } else if (addr == 0x3FC) { c->uses_front_facing = true; strcpy(e, "(front_facing ? 0xFFFFFFFFu : 0u)"); }
-        else if (addr == 0x2E0 || addr == 0x2E4) { c->uses_point_coord = true; sprintf(e, "as_type<uint>(in.point_coord[%d])", (addr >> 2) & 1); }
+        else if (addr == 0x2E0 || addr == 0x2E4) {  // (GLSL: point_coord becomes gl_PointCoord; MSL: the input struct's field)
+            c->uses_point_coord = true;
+            sprintf(e, c->glsl ? "as_type<uint>(point_coord[%d])" : "as_type<uint>(in.point_coord[%d])", (addr >> 2) & 1);
+        }
         else { sprintf(e, "0u /* attr %#x */", addr); }
     } else {
         sprintf(e, "0u /* attr %#x */", addr);

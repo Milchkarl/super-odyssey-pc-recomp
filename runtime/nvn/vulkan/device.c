@@ -38,6 +38,7 @@
 #include "../output_scale.h"
 #include "../../ui/performance.h"
 #include "../renderer.h"
+static bool chosen_gpu_is_nvidia(void);  // (below: Streamline only for NVIDIA's cards)
 
 VkG g_vk;
 static _Atomic bool g_no_present;  // (quitting: no present to a window going away - ui_run)
@@ -104,7 +105,13 @@ static void create_instance(void) {
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
     PFN_vkCreateInstance create = vkCreateInstance;
 #ifdef _WIN32
-    if (!g_vk.headless && vk_sl_init()) {  // (NVIDIA Streamline: its proxy sets up what DLSS-G / Reflex need)
+    // (only when the card that will draw is NVIDIA's: Streamline's vkCreateDevice asks any card for NVIDIA's own
+    // extensions - another card chosen in Graphics card, on a PC that also has an NVIDIA one, stopped the game at start:
+    // "Required device extension VK_NV_optical_flow unsupported", create_dev failed -7)
+    // (asked only when Streamline would be set up: sl_glue.cpp vk_sl_init's own condition - DLSS frame generation or Reflex)
+    const char *sl_env = getenv("ODYSSEY_SL");
+    bool sl_wanted = sl_env && *sl_env ? atoi(sl_env) != 0 : g_settings.frame_gen == FG_DLSS || g_settings.low_latency != 0;
+    if (!g_vk.headless && sl_wanted && chosen_gpu_is_nvidia() && vk_sl_init()) {  // (NVIDIA Streamline: its proxy sets up what DLSS-G / Reflex need)
         PFN_vkCreateInstance p = (PFN_vkCreateInstance)vk_sl_instance_proc(VK_NULL_HANDLE, "vkCreateInstance");
         if (p) create = p;
         bool have = false;  // (its plugins name their objects: VK_EXT_debug_utils, else a null call in sl.common)
@@ -151,6 +158,30 @@ static int gpu_score(uint32_t i, const VkPhysicalDeviceProperties *p) {
     if (env && *env) { if (atoi(env) == (int)i) return 100; }
     else if (g_settings.gpu[0] && !strcmp(g_settings.gpu, p->deviceName)) return 100;
     return p->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+}
+
+// Whether the card gpu_score picks is NVIDIA's (before the instance: a short-lived one of our own, without Streamline)
+static bool chosen_gpu_is_nvidia(void) {
+    VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .apiVersion = VK_API_VERSION_1_3};
+    VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &ai};
+    VkInstance inst;
+    if (vkCreateInstance(&ci, NULL, &inst) != VK_SUCCESS) return true;  // (as before: Streamline decides)
+    uint32_t n = 0;
+    vkEnumeratePhysicalDevices(inst, &n, NULL);
+    VkPhysicalDevice pd[16];
+    if (n > 16) n = 16;
+    vkEnumeratePhysicalDevices(inst, &n, pd);
+    int best = -1;
+    uint32_t vendor = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(pd[i], &p);
+        int sc = gpu_score(i, &p);
+        if (sc > best) best = sc, vendor = p.vendorID;
+    }
+    vkDestroyInstance(inst, NULL);
+    if (vendor && vendor != 0x10de) LOG("[streamline] not used: the card that draws isn't NVIDIA's\n");
+    return !vendor || vendor == 0x10de;
 }
 // (the menu's Graphics card list: the Vulkan 1.3 cards found at start, by name)
 static char g_gpu_names[8][VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
@@ -708,7 +739,21 @@ static bool cache_start_interrupted(void) {
     return pending;
 }
 
+// A damaged record found in the SPIR-V pack last time (shaders.c pack_load): the pack set aside and the shaders
+// prepared again (the preparation is then due: prepare_due, which calls this before it decides) - garbage that still
+// looks like SPIR-V crashed the drivers (#180)
+static void damaged_pack_aside(void) {
+    struct stat st;
+    if (stat("cache/shaders.pack.damaged", &st) != 0) return;
+    LOG("[shader] cache/shaders.pack had damaged records: set aside (cache/shaders.pack.bad), shaders prepared again\n");
+    remove("cache/shaders.pack.bad");
+    rename("cache/shaders.pack", "cache/shaders.pack.bad");
+    remove("cache/shaders.pack.damaged");
+    remove(PREPARED_MARK);
+}
+
 void vk_cache_crash_guard(void) {
+    damaged_pack_aside();
     if (cache_start_interrupted()) {
         recovering_pipeline_cache = true;
         LOG("[vk] the last start ended early: the driver's pipeline caches are set aside (once)\n");
@@ -860,7 +905,16 @@ int vk_hdr_state(void) { return g_vk.sc_hdr ? 2 : g_hdr10_offered ? 1 : 0; }
 
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
+    // (failing: the window's surface gone for a moment - exclusive full screen while the display sleeps or another
+    // program takes it, during the minutes of a game-code build: AMD's driver answers VK_ERROR_UNKNOWN, #184. As when
+    // minimised: no swapchain now, tried again at the next frame - it was a fatal error)
+    VkResult cr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps);
+    if (cr != VK_SUCCESS) {
+        static int n;
+        if (n++ < 5) LOG("[vk] the window's surface can't be read (%d): no picture until it can\n", cr);
+        SDL_Delay(50);
+        return;
+    }
     int w, h;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     VkExtent2D ext = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : (VkExtent2D){(uint32_t)w, (uint32_t)h};
@@ -1976,6 +2030,86 @@ static void native_brake(uint64_t now) {
     }
 }
 
+// Adaptive frame rate (settings.ini adaptive_frame_rate = 1, or ODYSSEY_RATE_CONTROL=1; off by default): above 60, when
+// frames miss their time the game draws at the next lower step instead of unevenly - 240 -> 120 -> 60 on a 240 Hz
+// display - and goes back up when there is room again. The steps: the rates below the chosen one that the display's
+// refresh is a whole multiple of (each frame on screen equally long), and 60; ODYSSEY_RATE_TIERS=all: every rate
+// (a variable refresh display). Gameplay stays at 60 throughout (odyssey_120.c: a rate change starts a new cadence).
+//   down: the frame time's average (2% a frame, a frame counted as 3 periods at most) over 1.15 of the step's period
+//         - under 104 FPS of 120; at 1.08 it left 120 for 60 at an average of 110 FPS -, at most every 2 s
+//   up:   the game loop's own work (odyssey_120.c, without its waits) under 0.85 of the faster step's period, after 5 s
+//         at the step - 10, 20 .. 60 s when the last climb fell back within 10 s (the work measure doesn't see a busy
+//         GPU: this keeps it from going up and down), 5 s again after a minute without falling
+// Frames over 100 ms (loads, the window in the background) and frames the game draws at 60 for its own reasons
+// (loading, scenes without extra draws) aren't counted.
+_Atomic uint64_t g_native_work_ns;
+static _Atomic int rate_limit_hz;
+int vk_rate_limit(void) { return atomic_load_explicit(&rate_limit_hz, memory_order_relaxed); }
+static int rate_step(int from, int set, bool up) {
+    static const int all[] = {240, 180, 165, 144, 120, 100, 90, 72, 60};
+    static int any = -1;
+    if (any < 0) { const char *e = getenv("ODYSSEY_RATE_TIERS"); any = e && !strcmp(e, "all"); }
+    int disp = g_display_hz, best = from;
+    for (int i = 0; i < 9; i++) {
+        int r = all[i];
+        if (r > set || !(r == 60 || r == set || any || !disp || disp % r == 0)) continue;
+        if (up ? r > from && (best == from || r < best) : r < from && (best == from || r > best)) best = r;
+    }
+    return best;
+}
+static void rate_control(uint64_t now) {
+    static int env = -1;
+    if (env < 0) { const char *e = getenv("ODYSSEY_RATE_CONTROL"); env = e && *e ? atoi(e) != 0 : 2; }
+    static uint64_t last, dwell_until, last_up_ns, last_down_ns, up_dwell = 5000000000ull;
+    static double avg_ms;
+    static int tier, set_seen, nlog;
+    uint64_t prev = last;
+    last = now;
+    int set = settings_game_hz();
+    if (!(env == 2 ? g_settings.adaptive_fps : env) || set <= 60) {
+        atomic_store(&rate_limit_hz, 0);
+        tier = set_seen = 0;
+        return;
+    }
+    if (set != set_seen) tier = set_seen = set, avg_ms = 0, dwell_until = now + 2000000000ull, atomic_store(&rate_limit_hz, 0);
+    extern int odyssey_native_hz(void);
+    if (!prev || now <= prev || now - prev > 100000000ull) return;
+    if (odyssey_native_hz() != tier) {  // (the game at its own 60 meanwhile: the average starts again after it)
+        avg_ms = 0;
+        if (dwell_until < now + 1000000000ull) dwell_until = now + 1000000000ull;
+        return;
+    }
+    // (a step above the display's refresh can't be shown faster than the display: judged by the display's period)
+    int disp = g_display_hz, shown = disp > 0 && tier > disp ? disp : tier;
+    double d = (double)(now - prev) / 1e6, period = 1000.0 / shown;
+    if (d > period * 3) d = period * 3;  // (one long frame - a hitch - isn't a rate the game can't hold)
+    avg_ms = avg_ms > 0 ? avg_ms + (d - avg_ms) * 0.02 : d;
+    if (now < dwell_until) return;
+    int to = tier;
+    double work_ms = (double)atomic_load(&g_native_work_ns) / 1e6;
+    if (avg_ms > period * 1.15) {
+        to = rate_step(tier, set, false);
+        if (to != tier) {
+            if (last_up_ns && now - last_up_ns < 10000000000ull) up_dwell = up_dwell * 2 > 60000000000ull ? 60000000000ull : up_dwell * 2;
+            last_down_ns = now;
+            dwell_until = now + 2000000000ull;
+        }
+    } else if (tier < set && now > last_down_ns + up_dwell) {
+        int up = rate_step(tier, set, true);
+        // (not to a step the display can't show any faster than this one)
+        if (up != tier && !(disp > 0 && tier >= disp) && work_ms > 0 && work_ms < 1000.0 / up * 0.85)
+            to = up, last_up_ns = now, dwell_until = now + 2000000000ull;
+    }
+    if (last_down_ns && now > last_down_ns + 60000000000ull) up_dwell = 5000000000ull;
+    if (to == tier) return;
+    if (nlog++ < 200)
+        LOG("[frame-rate] adaptive: %d -> %d FPS (frames %.1f ms on average, the game loop's work %.1f ms; chosen %d)\n", tier, to,
+            avg_ms, work_ms, set);
+    tier = to;
+    avg_ms = 0;
+    atomic_store(&rate_limit_hz, to < set ? to : 0);
+}
+
 static void backend_present_locked(NvnTexture *t, bool handed);
 void backend_present(NvnTexture *t) {
     plat_heap_check("present");
@@ -2003,6 +2137,8 @@ static void backend_present_locked(NvnTexture *t, bool handed) {
     b->presented = true;
     present_brake(present_ns, fd.game_w != NULL);
     native_brake(present_ns);
+    { extern void vk_stall_watch_start(void); vk_stall_watch_start(); }
+    rate_control(present_ns);
     static const float black[4] = {0, 0, 0, 1};
     uint64_t t0 = SDL_GetTicksNS();
     pcache_autosave();
@@ -2480,6 +2616,7 @@ static void prep_mark_write(const char *key) {
 }
 static bool prepare_due(bool log, char key[64]) {
     key[0] = 0;
+    damaged_pack_aside();
     // (each way of not preparing says so when asked to log: a Recomp Launcher player's 0.5.1 log, 2026-11-20, had it
     // due at the start page and never run, with no line saying why - ~1,000 shader builds while playing)
     if (g_prepare_skipped) { if (log) LOG("[prep] not this start: put off (Later)\n"); return false; }

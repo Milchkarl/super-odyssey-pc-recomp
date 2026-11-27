@@ -212,6 +212,11 @@ static void log_to_file_without_console(void) {
         }
         fclose(probe);
     }
+    if (!append) {  // (the last session's log kept: a player who restarts after a freeze still has the log of the freeze)
+        char prev[MAX_PATH + 16];
+        snprintf(prev, sizeof prev, "%sSuperOdysseyRecomp.previous.log", exe);
+        MoveFileExA(g_log_path, prev, MOVEFILE_REPLACE_EXISTING);
+    }
     if (!freopen(g_log_path, append ? "ab" : "wb", stderr)) { g_log_path[0] = 0; return; }
     setvbuf(stderr, NULL, _IONBF, 0);
     fflush(stdout);
@@ -248,6 +253,13 @@ static void require_cpu(void) {
 // after the write that did it: ODYSSEY_HEAPCHECK=1 validates the heap at these checks and stops at the first
 // that finds it broken (slow).
 void rt_fatal_trace(void) __attribute__((noreturn));  // runtime/dispatch.c
+uint64_t plat_process_cpu_ns(void) {
+    FILETIME c, e, k, u;
+    if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return 0;
+    uint64_t kt = ((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime, ut = ((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime;
+    return (kt + ut) * 100;
+}
+
 uint64_t plat_private_bytes(void) {
     PROCESS_MEMORY_COUNTERS_EX m = {.cb = sizeof m};
     return K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&m, sizeof m) ? m.PrivateUsage : 0;

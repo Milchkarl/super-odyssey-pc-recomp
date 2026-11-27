@@ -70,6 +70,24 @@ static void init(void) {
     if (want && strcmp(want, "en") && strncmp(want, "en-", 3) && load(want)) g_lang = want;
 }
 
+static void fmt_convs(const char *s, char *out, size_t n) {  // (the conversions of a printf format, e.g. "sdf")
+    size_t k = 0;
+    for (; *s; s++) {
+        if (*s != '%') continue;
+        if (*++s == '%') continue;
+        while (*s && !strchr("diouxXeEfFgGaAcsp", *s)) s++;
+        if (!*s) break;
+        if (k + 1 < n) out[k++] = *s;
+    }
+    out[k] = 0;
+}
+extern "C" const char *tr_fmt(const char *en) {
+    const char *t = tr(en);
+    if (t == en) return en;
+    char a[32], b[32];
+    fmt_convs(en, a, sizeof a), fmt_convs(t, b, sizeof b);
+    return strcmp(a, b) ? en : t;
+}
 extern "C" const char *tr(const char *en) {
     if (!en || !*en) return en;
     std::call_once(g_once, init);
