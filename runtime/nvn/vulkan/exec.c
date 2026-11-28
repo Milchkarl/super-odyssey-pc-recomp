@@ -1362,7 +1362,11 @@ static bool dq_enabled(void) {
         // (on by default on every GPU since 2026-11-16, owner; Performance > Multithreaded rendering turns it off)
         // (Auto: on with an NVIDIA GPU only - the Steam Deck's GPU reset once with it on, and the same kind of thread
         // hung AMD GPUs in the TOTK port: the most stable default, owner 2026-11-17)
-        on = e && *e ? atoi(e) != 0 : g_settings.record_thread > 0 || (g_settings.record_thread < 0 && g_vk.props.vendorID == 0x10de);
+        // (Auto - what settings files from before 2026-11-20 hold - is Off now, as the default: #181, Linux + RTX 4080
+        // SUPER, crashed in NVIDIA's driver twice in New Donk City's sewer while the paint map was read back, after
+        // "recorded while draws were queued" warnings - another thread syncing while the recording thread still filled
+        // the command buffer. On stays for whoever picks it: an experimental setting.)
+        on = e && *e ? atoi(e) != 0 : g_settings.record_thread > 0;
         if (on) {
             dq_ring = malloc(DQ_RING);
             VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -3736,6 +3740,14 @@ static void *stall_watch(void *a) {
             (now - since) / 1e9, (unsigned long long)n, odyssey_stage_name(), game_is_odyssey() && odyssey_scene_warming() ? ", a scene loading" : "",
             wait, atomic_load(&g_shader_jobs), atomic_load(&g_stall_bg) ? "running in the background" : "not running",
             now > t_cpu ? (double)(cpu - cpu0) / (double)(now - t_cpu) : 0.0);
+        // (once a session, 20 s in: what each game thread waits on and where - #188's hang at the 82nd picture said
+        // only that one core stayed busy; a player's log then shows where it is stuck)
+        static bool dumped;
+        if (!dumped && now - since >= 20000000000ull) {
+            dumped = true;
+            LOG("[stall] the game's threads:\n");
+            kernel_dump_threads();
+        }
         cpu0 = cpu, t_cpu = now;
     }
     return NULL;

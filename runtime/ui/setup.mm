@@ -417,7 +417,9 @@ static void *work(void *) {
         if (!ok) return NULL;
     }
     set_step("Recompiling the game code...");
-    int cores = SDL_GetNumLogicalCPUCores(), ram_gb = SDL_GetSystemRAM() / 1024;
+    // (one thread left free, #186: with every one compiling, the PC froze until it was done; the shader preparation
+    // keeps one free too - nvn/vulkan/exec.c vk_prepare_main)
+    int cores = SDL_GetNumLogicalCPUCores() > 2 ? SDL_GetNumLogicalCPUCores() - 1 : 1, ram_gb = SDL_GetSystemRAM() / 1024;
     GameBuildOpts o = {code_progress, cores < ram_gb - 2 ? cores : ram_gb - 2 > 1 ? ram_gb - 2 : 1};
     char why[512] = "";
     if (!gamebuild_run(root.c_str(), &o, why, sizeof why)) {
@@ -952,6 +954,47 @@ static void home_view(float scale, ImFont *big, ImVec2 c0, float cardw, float ca
     ImGui::EndGroup();
 }
 
+// The configuration program (--configure: Super Odyssey Configuration.exe): this page's Settings view alone, no game
+static bool g_configure;
+// Restore defaults (#173): a confirmation, then settings.c settings_restore_switch (the old file kept as a backup)
+static int g_restore_dialog;     // 0 none, 1 asking
+static bool g_restore_auto;      // (tests: Restore pressed)
+static char g_restore_note[640];  // the line after a reset, under the buttons
+static void restore_dialog(float scale) {
+    if (!g_restore_dialog) return;
+    const char *title = "Restore defaults?###restore-defaults";
+    if (!ImGui::IsPopupOpen(title)) ImGui::OpenPopup(title);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(fminf(ImGui::GetIO().DisplaySize.x * 0.9f, 900 * scale), 0), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal(title, NULL, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextWrapped("%s", tr("Every setting goes back to the default: the game looks and runs as on the Switch, fullscreen at "
+                                "your display's resolution."));
+    ImGui::Spacing();
+    ImGui::TextWrapped("%s", tr("Kept: your controls, languages, graphics card and volume. Your current settings are saved "
+                                "as a backup file next to settings.ini."));
+    ImGui::Spacing();
+    static bool focused;
+    if (!focused) { ImGui::SetKeyboardFocusHere(); ImGui::SetNavCursorVisible(true); focused = true; }
+    if (ImGui::Button(tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
+        g_restore_dialog = 0, focused = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(tr("Restore defaults")) || g_restore_auto) {
+        g_restore_auto = false;
+        char backup[600];
+        bool ok = settings_restore_switch(backup, sizeof backup);
+        const char *base = backup + strlen(backup);
+        while (base > backup && base[-1] != '/' && base[-1] != 92) base--;  // (92: a backslash)
+        if (!ok) snprintf(g_restore_note, sizeof g_restore_note, "%s", tr("The backup couldn't be written: nothing was changed."));
+        else if (*base) snprintf(g_restore_note, sizeof g_restore_note, tr_fmt("Defaults restored. Your old settings: %s"), base);
+        else snprintf(g_restore_note, sizeof g_restore_note, "%s", tr("Defaults restored."));
+        g_restore_dialog = 0, focused = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 static void config_page(float scale, ImFont *font, ImFont *big) {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -975,7 +1018,7 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         theme_logo(ImGui::GetWindowDrawList(), ImVec2(lp.x, lp.y + lh * 0.5f - sz * 0.55f), sz, IM_COL32(59, 196, 90, 255), 0);
         ImGui::Dummy(ImVec2(sz, lh));
         ImGui::SameLine(0, lh * 0.4f);
-        ImGui::TextUnformatted(g_cfg_settings ? tr("Settings") : "Super Odyssey PC Recomp");
+        ImGui::TextUnformatted(g_configure ? "Super Odyssey Configuration" : g_cfg_settings ? tr("Settings") : "Super Odyssey PC Recomp");
     }
     ImGui::PopFont();
     ImGui::SameLine(0, 14 * scale);
@@ -1013,7 +1056,8 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
     if (!g_cfg_settings) {
         home_view(scale, big, c0, cardw, cardh, pad);
     } else {
-        float footer = ImGui::GetFontSize() + 2 * 14 * scale + menu_hint_bar_height(scale) + 30 * scale;
+        float footer = ImGui::GetFontSize() + 2 * 14 * scale + menu_hint_bar_height(scale) + 30 * scale +
+                       (g_restore_note[0] ? ImGui::GetFontSize() + 8 * scale : 0);
         float top = ImGui::GetCursorPosY() + 10 * scale;
         ImGui::SetCursorPos(ImVec2(c0.x + pad, top));
         ImGui::BeginChild("##cfgtabs", ImVec2(cardw - 2 * pad, c0.y + cardh - top - footer), ImGuiChildFlags_None,
@@ -1022,9 +1066,20 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         ImGui::EndChild();
         // the footer: Play and Back, then the hint bar
         ImGui::SetCursorPos(ImVec2(c0.x + pad, c0.y + cardh - footer + 8 * scale));
-        if (accent_button("Play", scale)) g_config_result = 1;
+        if (g_configure) {  // (the configuration program: saved and closed; no game, no Home)
+            if (accent_button("Save and close", scale)) g_config_result = 2;
+        } else {
+            if (accent_button("Play", scale)) g_config_result = 1;
+            ImGui::SameLine(0, 14 * scale);
+            if (plain_button("Back", scale)) { g_cfg_settings = false; g_cfg_focus = 2; }
+        }
         ImGui::SameLine(0, 14 * scale);
-        if (plain_button("Back", scale)) { g_cfg_settings = false; g_cfg_focus = 2; }
+        if (plain_button("Restore defaults", scale)) g_restore_dialog = 1, g_restore_note[0] = 0;
+        restore_dialog(scale);
+        if (g_restore_note[0]) {
+            ImGui::SetCursorPosX(c0.x + pad);
+            ImGui::TextColored(kTextDimV, "%s", g_restore_note);
+        }
         ImGui::SetCursorPosX(c0.x + pad);
         ImGui::BeginGroup();
         menu_hint_bar(scale, 1);
@@ -1032,10 +1087,10 @@ static void config_page(float scale, ImFont *font, ImFont *big) {
         // B / Esc: in a page, back to the sidebar; on the sidebar, back to Home
         if (!any_popup && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
             if (!menu_sidebar_focused() && ImGui::GetCurrentContext()->NavCursorVisible) menu_focus_sidebar();
-            else { g_cfg_settings = false; g_cfg_focus = 2; }
+            else if (!g_configure) { g_cfg_settings = false; g_cfg_focus = 2; }
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) g_config_result = 1;
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false) && !g_configure) g_config_result = 1;
     ImGui::PopFont();
     ImGui::End();
 }
@@ -1537,4 +1592,74 @@ bool setup_run(const char *root) {
     }
     menu_setup_mode(false);
     return true;
+}
+
+// --configure (runtime/main.c): the configuration program - Super Odyssey Configuration.exe on Windows, the AppImage's
+// and the Mac app's "Configure" action. The start page's Settings view alone in a 1280 x 800 window of its own: the
+// same settings and settings.ini, no game (no live picture behind it), saved when closed. Tests:
+// ODYSSEY_CONFIGURE_SHOT=<frame> build/configure.png, then closed; ODYSSEY_CONFIGURE_RESET_TEST=<frame> the Restore
+// defaults question at that frame (build/configure_reset.png 30 frames on), answered Restore 10 later, the page after it
+// (build/configure_after.png 30 on), then closed.
+extern int g_tab_request_ext;  // (menu.mm: tests open a tab)
+extern void menu_tabs_focus(bool first_tab);
+extern "C" void configure_run(void) {
+    g_configure = true;
+    settings_load();
+    LOG("[configure] the configuration program (%s)\n", settings_current_file());
+    ui_window_init();
+    SDL_Window *w = ui_window();
+    SDL_SetWindowTitle(w, "Super Odyssey Configuration");
+    g_config_result = 0;
+    g_config = true;
+    g_cfg_settings = true, g_cfg_focus = 0;
+    menu_setup_mode(true);
+    if (getenv("ODYSSEY_MENU_TAB")) g_tab_request_ext = atoi(getenv("ODYSSEY_MENU_TAB"));
+    {   // controllers, as config_run
+        SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+        int n = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n);
+        for (int i = 0; ids && i < n; i++) SDL_OpenGamepad(ids[i]);
+        SDL_free(ids);
+    }
+    menu_tabs_focus(false);
+    const char *shot_env = getenv("ODYSSEY_CONFIGURE_SHOT"), *reset_env = getenv("ODYSSEY_CONFIGURE_RESET_TEST");
+    long shot = shot_env ? atol(shot_env) : -1, reset = reset_env ? atol(reset_env) : -1, frame = 0;
+    int result = 0;
+    while (!result) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) result = 2;
+            else {
+                if (e.type == SDL_EVENT_GAMEPAD_ADDED && !SDL_GetGamepadFromID(e.gdevice.which)) SDL_OpenGamepad(e.gdevice.which);
+                if (!input_motion_only_event(&e)) menu_handle_event(&e);
+            }
+        }
+        {   // the display's refresh for Frame rate: Match display
+            SDL_DisplayID d = SDL_GetDisplayForWindow(w);
+            const SDL_DisplayMode *m = d ? SDL_GetCurrentDisplayMode(d) : NULL;
+            if (m && m->refresh_rate > 0) g_display_hz = (int)(m->refresh_rate + 0.5f);
+        }
+        {   // (60 a second, sleeping between: a page)
+            static uint64_t next;
+            uint64_t now = SDL_GetTicksNS();
+            if (next > now && next - now < 100000000ull) SDL_DelayNS(next - now);
+            next = (next > now && next - now < 100000000ull ? next : now) + 16666667ull;
+        }
+        frame++;
+        const char *pic = NULL;
+        if (frame == shot) pic = "build/configure.png", result = 2;
+        if (reset >= 0) {
+            if (frame == reset) g_restore_dialog = 1;
+            if (frame == reset + 30) pic = "build/configure_reset.png";
+            if (frame == reset + 40) g_restore_auto = true;
+            if (frame == reset + 70) pic = "build/configure_after.png", result = 2;
+        }
+        page_frame(w, pic);
+        if (!result) result = g_config_result.exchange(0);
+    }
+    g_config = false;
+    menu_setup_mode(false);
+    settings_save();
+    LOG("[configure] saved and closed\n");
+    SDL_HideWindow(w);
 }

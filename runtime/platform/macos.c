@@ -38,7 +38,7 @@ static void log_to_file_without_terminal(void) {
     for (char *c = dir + 1; *c; c++)
         if (*c == '/') { *c = 0; mkdir(dir, 0755); *c = '/'; }
     mkdir(dir, 0755);
-    snprintf(path, sizeof path, "%s/SuperOdysseyRecomp.log", dir);
+    snprintf(path, sizeof path, "%s/%s.log", dir, plat_log_name());
     bool append = getenv("ODYSSEY_LOG_APPEND") != NULL;
     if (!freopen(path, append ? "a" : "w", stderr)) return;
     snprintf(g_log_path, sizeof g_log_path, "%s", path);

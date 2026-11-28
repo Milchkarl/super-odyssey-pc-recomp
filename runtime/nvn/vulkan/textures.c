@@ -191,7 +191,21 @@ static bool tex_scalable(const NvnTexture *t) {
     // resolution - keeps the chain at the game's size, as before)
     bool bloom_full = (bloom_env >= 0 ? bloom_env != 0 : g_settings.bloom_quality == 1) && g_rs_x > 1.01f && g_rs_y > 1.01f;
     if (!bloom_full && t->format == 0x3f && t->width <= 400 && t->height <= 228) return false;
-    return output_scale_texture(t);
+    bool r = output_scale_texture(t);
+    {   // ODYSSEY_SCALE_SKIP=<w>x<h>:<format>:<flags> (tests): that kind of target kept at the game's size
+        static int sw = -1, sh, sf, sfl;
+        if (sw < 0) { const char *e = getenv("ODYSSEY_SCALE_SKIP"); sw = 0; if (e) sscanf(e, "%dx%d:%x:%x", &sw, &sh, &sf, &sfl); }
+        if (r && sw && (int)t->width == sw && (int)t->height == sh && (int)t->format == sf && (int)t->flags == sfl) r = false;
+    }
+    {   // ODYSSEY_LOG_SCALED=<frame>: the screen-sized targets made from that frame on (which ones get the picture's shape)
+        static long from = -2;
+        static int n;
+        if (from == -2) from = getenv("ODYSSEY_LOG_SCALED") ? atol(getenv("ODYSSEY_LOG_SCALED")) : -1;
+        if (from >= 0 && r && (long)renderer_present_count() >= from && n++ < 200)
+            LOG("[tex] scaled target %ux%u fmt %#x flags %#x target %u (texture %llu, frame %llu)\n", t->width, t->height,
+                t->format, t->flags, t->target, (unsigned long long)t->debug_id, (unsigned long long)renderer_present_count());
+    }
+    return r;
 }
 
 // Shadow quality (settings shadow_quality; ODYSSEY_SHADOW_SCALE=<1..4> for tests): the game's shadow maps - square

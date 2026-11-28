@@ -11,6 +11,8 @@
 #      change to the game code's sources rebuilds that code first, as players' setups do) and take a screenshot.
 #      3b/3c. The zip's setup shader passes on a fresh cache: the pipeline seed must still build, and a new player's
 #      play from that cache must translate (almost) no shaders itself.
+#   3d. Regression checks against the last release (tools/regression.py): no failed shaders, the kingdoms' pictures,
+#      a ride on 8 threads, Continue on a set of saves, the AMD dust - before anything is published.
 #   4. Linux: if the Steam Deck (DECK) answers, start the AppImage there with no Vulkan driver and normally - each must
 #      show a window - and play it for 2 minutes from the installed save. Skipped with a warning when it doesn't.
 #   5. The AppImage catalog's own test (the private probe repository) on the downloaded AppImage, before publishing.
@@ -55,10 +57,10 @@ probe() {  # url -> runs the catalog probe on it, fails unless both of its check
 }
 
 say "1/7  version $VERSION"
-git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' || { echo "commit or stash your changes first"; exit 1; }
+git diff --quiet HEAD -- . ':!runtime/version.h' ':!runtime/platform/windows.rc' ':!runtime/platform/configure.rc' || { echo "commit or stash your changes first"; exit 1; }
 sed -i "s/#define APP_VERSION \".*\"/#define APP_VERSION \"$VERSION\"/" runtime/version.h
 sed -i "s/VALUE \"FileVersion\", \".*\"/VALUE \"FileVersion\", \"$VERSION\"/;
-        s/VALUE \"ProductVersion\", \".*\"/VALUE \"ProductVersion\", \"$VERSION\"/" runtime/platform/windows.rc
+        s/VALUE \"ProductVersion\", \".*\"/VALUE \"ProductVersion\", \"$VERSION\"/" runtime/platform/windows.rc runtime/platform/configure.rc
 # (recomplauncher.json has no version of its own: RecompLauncher ignores prepare.version - "every new release of your
 # game builds again by itself", its Developer tab - so nothing there is bumped)
 git diff --quiet || git commit -qam "Super Odyssey PC Recomp $VERSION"  # (a rerun: already bumped)
@@ -135,6 +137,17 @@ TN=$(echo "$CENSUS" | sed -E 's/.*not prepared ([0-9]+).*/\1/')
 [ "$TN" -le 50 ] || { echo "the game translated $TN shaders a setup should have - not releasing ($WORK/play.log)"; exit 1; }
 echo ok
 
+say "3d/7  regression checks against the last release (tools/regression.py)"
+# Shaders that fail (1.0.3 shipped 20 its own logs showed), every kingdom's picture against the last release's, a 90 s
+# ride on 8 threads (#177's stutter), Continue on a set of saves, the AMD dust (#103). Test copies only: GATE_* in
+# tools/release.local.sh. The results become the next release's baseline after publishing (step 6).
+if [ -n "${GATE_141:-}" ]; then
+    python tools/regression.py check --exe "$WORK/win/Super Odyssey PC Recomp/SuperOdysseyRecomp.exe" --out "$WORK/regression"         --log "$WORK/windows.log" --log "$WORK/seed-all.log" --log "$WORK/seed-recorded.log" --log "$WORK/play.log" ||
+        { echo "regression checks failed - not releasing ($WORK/regression: results.json, tour-*/report.html)"; exit 1; }
+else
+    echo "WARNING: no GATE_141 in tools/release.local.sh - regression checks skipped"
+fi
+
 say "4/7  Linux on the Steam Deck"
 if [ -n "$DECK" ] && timeout 15 $SSH "$DECK" true 2>/dev/null; then
     # (one fixed name the Deck's scripts use: ~/sopr/ai-case.sh, ~/sopr/deck-boot-ov.sh - its test data folder, never
@@ -168,6 +181,8 @@ say "6/7  publishing v$VERSION"
 git push -q origin "$SHA:refs/heads/main"
 gh release create "v$VERSION" "$ZIP" "$APP" --repo "$REPO" --target "$SHA" \
     --title "$VERSION" --notes-file "$NOTES"
+
+[ -n "${GATE_141:-}" ] && python tools/regression.py accept --out "$WORK/regression"  # (the next release's baseline)
 
 say "7/7  the catalog's test on the published file"
 if probe "https://github.com/$REPO/releases/download/v$VERSION/$(basename "$APP" | tr ' ' '.')"; then

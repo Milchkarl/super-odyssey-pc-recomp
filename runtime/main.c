@@ -209,6 +209,16 @@ static int test_crash(void *arg) {
 }
 
 int main(int argc, char **argv) {
+    // --configure: the configuration program (Super Odyssey Configuration.exe starts the game's program so) - the
+    // settings page alone, no game; set before plat_init, which names the log after it (platform.h plat_log_name)
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--configure")) {
+#ifdef _WIN32
+            _putenv_s("ODYSSEY_CONFIGURE", "1");
+#else
+            setenv("ODYSSEY_CONFIGURE", "1", 1);
+#endif
+        }
     plat_init();
     diagnostics_init();
     {   // how it was started, when not plainly: arguments, and the switches that change the start (a launcher may pass
@@ -252,6 +262,7 @@ int main(int argc, char **argv) {
 #endif
             continue;
         }
+        else if (!strcmp(argv[i], "--configure")) continue;  // (above)
         else if (!strcmp(argv[i], "--build-romfs")) build_romfs = true;
         else if (!strcmp(argv[i], "--unpack-seed") && i + 1 < argc) unpack_seed = argv[++i];  // (tools/release.sh)
         else if (!strcmp(argv[i], "--prepare-shaders") && i + 1 < argc) prepare = argv[++i];
@@ -294,6 +305,11 @@ int main(int argc, char **argv) {
 #else
     (void)prepare;
 #endif
+    if (plat_configure_mode()) {  // (settings only: no setup, no update clean-up, no game - runtime/ui/setup.mm)
+        extern void configure_run(void);
+        configure_run();
+        return 0;
+    }
     updater_startup();  // (after an update: the old process gone, its old files removed)
     if (build_romfs) {  // --build-romfs: <root>/romfs.bin from <root>/romfs, as the start screen's setup does
         char dir[1100], out[1100], why[256];

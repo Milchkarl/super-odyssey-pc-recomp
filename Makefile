@@ -242,6 +242,15 @@ $(B)/rt/platform/windows_rc.o: runtime/platform/windows.rc runtime/platform/app.
 	@mkdir -p $(dir $@)
 	$(WINDRES) -I docs/icon -O coff $< -o $@
 
+# Windows: Super Odyssey Configuration.exe - the settings without the game (runtime/platform/configure_launcher.c starts
+# the exe with --configure). Built as SuperOdysseyConfiguration.exe (make and spaces), shipped under its real name.
+$(B)/rt/platform/configure_rc.o: runtime/platform/configure.rc runtime/platform/app.manifest docs/icon/icon.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I docs/icon -O coff $< -o $@
+$(B)/SuperOdysseyConfiguration.exe: runtime/platform/configure_launcher.c $(B)/rt/platform/configure_rc.o
+	$(CC) -O2 -municode -mwindows -fuse-ld=lld -o $@ $^
+configure-exe: $(B)/SuperOdysseyConfiguration.exe
+
 # Windows: the DLLs the exe loads (MSYS2 UCRT64's SDL3, FFmpeg, shaderc and what they pull in) copied next to it, so
 # SuperOdysseyRecomp.exe starts from Explorer or a shortcut without MSYS2 on the PATH. vulkan-1.dll is the system's.
 dlls: $(EXE)
@@ -318,7 +327,9 @@ dist:
 	! nm $(WIN_B)/SuperOdysseyRecomp.exe | grep ' f_70' >/dev/null  # (no game code inside)
 	$(GEN_VPY) tools/check_cpu_baseline.py $(WIN_B)/SuperOdysseyRecomp.exe --dispatched "$$($(CC) -print-file-name=libzstd.a)"  # (runs on AVX without AVX2: docs/CPU-BASELINE.md)
 	rm -rf build/dist && mkdir -p "$(DIST)/gamelib-src"
+	$(MAKE) B=$(WIN_B) $(WIN_B)/SuperOdysseyConfiguration.exe
 	cp $(WIN_B)/SuperOdysseyRecomp.exe $(WIN_B)/SuperOdysseyRecomp.dll.a "$(DIST)/"
+	cp $(WIN_B)/SuperOdysseyConfiguration.exe "$(DIST)/Super Odyssey Configuration.exe"
 	strip --strip-debug "$(DIST)/SuperOdysseyRecomp.exe"  # (its debug info names the build folder; exports stay)
 	tools/zig_slim.sh $(strip $(filter-out -Iruntime,$(GENFLAGS)))  # (zig with its runtime built ahead of time)
 	cp -R build/helper/odysseygen "$(DIST)/"
@@ -337,7 +348,7 @@ dist:
 	cd build/dist && /c/Windows/System32/tar.exe -a -cf "Super Odyssey PC Recomp-$(VERSION)-windows.zip" "Super Odyssey PC Recomp"
 	@echo "build/dist/Super Odyssey PC Recomp-$(VERSION)-windows.zip"
 
-.PHONY: all gen gen-objs runtime-objs dlls deps-windows gen-helper dist deps app dmg appimage
+.PHONY: all gen gen-objs runtime-objs dlls configure-exe deps-windows gen-helper dist deps app dmg appimage
 
 build/test_shaders: tools/test_shaders.m runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
 	clang -O1 -fobjc-arc -framework Metal -framework Foundation -o $@ tools/test_shaders.m runtime/nvn/maxwell/translate.c

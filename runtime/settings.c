@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <SDL3/SDL.h>
 
@@ -710,3 +711,66 @@ int settings_fps_hz(int frame_rate) {
     return frame_rate >= 0 && frame_rate < FPS_AUTO ? hz[frame_rate] : 60;
 }
 int settings_game_hz(void) { return settings_fps_hz(g_settings.frame_rate); }
+
+// "Restore defaults" (#173; the configuration program and the start page): every setting back to the first-start one,
+// with the picture and the timing as the Switch's - only the window stays fullscreen at the display's resolution (the
+// first-start window already is). The three first-start extras the Switch doesn't have go off here: smooth gradients
+// (deband), the skipped Joy-Con tips screen (skip_intro) and the early frame hand-off (early_fences). The shader warm-up
+// stays: it only prepares shaders before play, which the Switch's precompiled ones never need. Kept, as the player's own
+// and not the picture's: the controls (and the bindings, a file section of their own), the languages, the chosen
+// graphics card and display, the volume, the start page, update checks and Discord. The old file is kept beside it as
+// settings.backup-<date>.ini (the reset undone by renaming it back).
+static Settings g_first_start;
+__attribute__((constructor)) static void keep_first_start(void) { g_first_start = g_settings; }
+
+bool settings_restore_switch(char *backup, size_t backup_size) {
+    if (backup && backup_size) backup[0] = 0;
+    const char *file = SETTINGS_FILE;
+    FILE *in = fopen(file, "rb");
+    if (in) {  // (the copy first: no reset without its backup)
+        char name[600];
+        const char *slash = strrchr(file, '/'), *bs = strrchr(file, 92);  // (92: a backslash)
+        if (bs && (!slash || bs > slash)) slash = bs;
+        time_t now = time(NULL);
+        struct tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &now);
+#else
+        localtime_r(&now, &tm);
+#endif
+        snprintf(name, sizeof name, "%.*ssettings.backup-%04d%02d%02d-%02d%02d%02d.ini", slash ? (int)(slash - file + 1) : 0, file,
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        FILE *out = fopen(name, "wb");
+        bool ok = out != NULL;
+        char buf[8192];
+        size_t n;
+        while (ok && (n = fread(buf, 1, sizeof buf, in)) > 0) ok = fwrite(buf, 1, n, out) == n;
+        fclose(in);
+        if (out && fclose(out) != 0) ok = false;
+        if (!ok) { LOG("[settings] restore defaults: the backup %s could not be written; nothing changed\n", name); return false; }
+        if (backup && backup_size) snprintf(backup, backup_size, "%s", name);
+    }
+    Settings keep = g_settings;
+    g_settings = g_first_start;
+    if (plat_is_steam_deck()) settings_steam_deck();
+    g_settings.deband = false;
+    g_settings.skip_intro = false;
+    g_settings.early_fences = 0;
+    // the player's own
+#define KEEP(f) g_settings.f = keep.f
+    KEEP(motion); KEEP(motion_shake_pad); KEEP(motion_invert_x); KEEP(motion_invert_y); KEEP(motion_shake_key);
+    memcpy(g_settings.motion_gyro_bias, keep.motion_gyro_bias, sizeof keep.motion_gyro_bias);
+    KEEP(spin_pad); KEEP(spin_key); KEEP(shot_pad); KEEP(shot_key); KEEP(amiibo); KEEP(first_person_mario);
+    KEEP(mouse_no_recenter); KEEP(mouse_smoothing); KEEP(rumble); KEEP(rumble_strength); KEEP(switch2);
+    KEEP(stick_deadzone_l); KEEP(stick_deadzone_r); KEEP(stick_range_l); KEEP(stick_range_r); KEEP(motion_gyro_sens);
+    KEEP(shake_homing); KEEP(motion_shake_threshold); KEEP(mouse_camera); KEEP(mouse_menus); KEEP(mouse_sensitivity);
+    KEEP(mouse_sensitivity_y); KEEP(mouse_invert_x); KEEP(mouse_invert_y); KEEP(stick_camera_x); KEEP(stick_camera_y);
+    KEEP(stick_camera_invert_x); KEEP(stick_camera_invert_y); KEEP(prompts); KEEP(language); KEEP(menu_language);
+    KEEP(monitor); KEEP(volume); KEEP(mute_unfocused); KEEP(config_at_start); KEEP(check_updates); KEEP(discord_presence);
+#undef KEEP
+    memcpy(g_settings.gpu, keep.gpu, sizeof keep.gpu);
+    settings_save();
+    LOG("[settings] restored the defaults (as the Switch)%s%s\n", backup && backup[0] ? "; the old settings kept as " : "",
+        backup && backup[0] ? backup : "");
+    return true;
+}

@@ -81,6 +81,15 @@ void plat_fatal_notice(void);  // a fatal error is about to end the process: tel
 void plat_error_box(const char *text);  // an error message box that never waits on a hung zenity
 #endif
 const char *plat_log_path(void); // current file log, or "" when output goes to a terminal/pipe
+// --configure (the configuration program: settings only, no game - runtime/main.c sets ODYSSEY_CONFIGURE before
+// plat_init). Its log is SuperOdysseyConfiguration.log, so opening it never replaces the game's last log (a freeze's).
+#include <stdlib.h>
+#include <string.h>
+static inline bool plat_configure_mode(void) {
+    const char *e = getenv("ODYSSEY_CONFIGURE");
+    return e && *e && strcmp(e, "0") != 0;
+}
+static inline const char *plat_log_name(void) { return plat_configure_mode() ? "SuperOdysseyConfiguration" : "SuperOdysseyRecomp"; }
 // A line for the program that started this one, on the stdout it gave (a launcher reading RecompLauncher's "progress"
 // lines), also when stdout was moved into the log file; and in the log.
 void plat_parent_line(const char *line);
